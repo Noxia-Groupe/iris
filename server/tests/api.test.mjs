@@ -8416,9 +8416,10 @@ if (!TEST_DATABASE_URL) {
     });
 
     // Lot pilote 3b (décision de Nelson du 17-10-2026) : le technicien saisit aussi ses heures sur une
-    // intervention hors contrat. Le matériel reste réservé aux contrats ; l'administration voit le coût
-    // de main-d'œuvre (décision du 19-10-2026), le conducteur les heures sans taux ni coût.
-    test('le technicien affecté saisit et corrige ses heures sur une intervention hors contrat, sans matériel', async () => {
+    // intervention hors contrat. Le technicien n'y saisit pas de matériel, réservé à l'encadrement (lot
+    // « matériel d'une intervention curative », bloc plus bas) ; l'administration voit le coût de
+    // main-d'œuvre (décision du 19-10-2026), le conducteur les heures sans taux ni coût.
+    test('le technicien affecté saisit et corrige ses heures sur une intervention hors contrat, sans saisir de matériel', async () => {
       const technicien = await compteTechnicienSav('sav.cout.curative@iris.test', 'TEST Technicien heures curative');
       const collegue = await compteTechnicienSav('sav.cout.curative.collegue@iris.test', 'TEST Collègue heures curative');
       const conducteur = await prisma.user.create({ data: { email: 'sav.cout.curative.conducteur@iris.test', name: 'TEST Conducteur heures curative', role: 'CONDUCTEUR_TRAVAUX' } });
@@ -8447,14 +8448,14 @@ if (!TEST_DATABASE_URL) {
       assert.equal(lectureTechnicien.status, 200, JSON.stringify(lectureTechnicien.body));
       assert.deepEqual(lectureTechnicien.body.heures.map((heure) => [heure.nbrHeures, heure.commentaire, heure.tauxHoraireApplique]), [[1.25, 'TEST Dépannage', undefined]]);
 
-      // Refus : date future, encadrement, collègue sur l'heure d'un autre, matériel hors contrat.
+      // Refus : date future, encadrement, collègue sur l'heure d'un autre, matériel saisi par le technicien.
       const future = await heuresDe(technicien.jeton).send({ date: demain, nbrHeures: 1 });
       assert.equal(future.status, 400, JSON.stringify(future.body));
       assert.match(future.body.error, /une fois faites/);
       assert.equal((await heuresDe(session).send({ date: aujourdhui, nbrHeures: 1 })).status, 403, 'l’encadrement ne saisit pas les heures');
       assert.equal((await corriger(collegue.jeton, { nbrHeures: 3, motifCorrection: 'Correction usurpée' })).status, 404, 'un collègue ne corrige pas l’heure d’un autre');
-      const achat = await request(app).post(`/api/interventions/${id}/couts/achats`).set('Authorization', `Bearer ${session}`).send({ date: aujourdhui, fournisseurId: fournisseur.id, description: 'TEST Pièce hors contrat', montantHT: 10 });
-      assert.equal(achat.status, 409, 'le matériel reste réservé aux interventions de contrat');
+      const achat = await request(app).post(`/api/interventions/${id}/couts/achats`).set('Authorization', `Bearer ${technicien.jeton}`).send({ date: aujourdhui, fournisseurId: fournisseur.id, description: 'TEST Pièce hors contrat', montantHT: 10 });
+      assert.equal(achat.status, 403, 'le technicien ne saisit pas le matériel');
       assert.equal(await prisma.coutInterventionAchat.count({ where: { interventionId: id } }), 0);
 
       // Correction par le technicien, avec motif ; une date future est refusée aussi en correction.
@@ -8465,14 +8466,14 @@ if (!TEST_DATABASE_URL) {
       assert.equal(correction.status, 200, JSON.stringify(correction.body));
       assert.equal(correction.body.nbrHeures, 2);
 
-      // L'administration voit le coût de main-d'œuvre (2 h × 42 €), sans total matériel ; le conducteur,
-      // les heures sans taux ni coût.
+      // L'administration voit le coût de main-d'œuvre (2 h × 42 €), avec un matériel nul ; le conducteur,
+      // les heures sans taux ni coût, et le matériel.
       const lectureAdmin = await request(app).get(`/api/interventions/${id}/couts`).set('Authorization', `Bearer ${session}`);
       assert.equal(lectureAdmin.status, 200, JSON.stringify(lectureAdmin.body));
-      assert.deepEqual([lectureAdmin.body.heures.length, lectureAdmin.body.heures[0].tauxHoraireApplique, lectureAdmin.body.totalMainOeuvreHT, lectureAdmin.body.totalMaterielHT, lectureAdmin.body.totalCoutsHT, lectureAdmin.body.achats], [1, 42, 84, null, 84, []]);
+      assert.deepEqual([lectureAdmin.body.heures.length, lectureAdmin.body.heures[0].tauxHoraireApplique, lectureAdmin.body.totalMainOeuvreHT, lectureAdmin.body.totalMaterielHT, lectureAdmin.body.totalCoutsHT, lectureAdmin.body.achats], [1, 42, 84, 0, 84, []]);
       const lectureConducteur = await request(app).get(`/api/interventions/${id}/couts`).set('Authorization', `Bearer ${jetonConducteur}`);
       assert.equal(lectureConducteur.status, 200, JSON.stringify(lectureConducteur.body));
-      assert.deepEqual([lectureConducteur.body.heures[0].nbrHeures, 'tauxHoraireApplique' in lectureConducteur.body.heures[0], lectureConducteur.body.totalMainOeuvreHT, lectureConducteur.body.totalMaterielHT, lectureConducteur.body.totalCoutsHT], [2, false, null, null, null]);
+      assert.deepEqual([lectureConducteur.body.heures[0].nbrHeures, 'tauxHoraireApplique' in lectureConducteur.body.heures[0], lectureConducteur.body.totalMainOeuvreHT, lectureConducteur.body.totalMaterielHT, lectureConducteur.body.totalCoutsHT], [2, false, null, 0, null]);
 
       // Archivage et restauration par l'encadrement, puis plus aucune saisie une fois le dossier annulé.
       assert.equal((await request(app).post(`/api/interventions/${id}/couts/heures/${saisie.body.id}/archiver`).set('Authorization', `Bearer ${session}`).send({ motif: 'Saisie à revoir' })).status, 200);
@@ -8667,7 +8668,7 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await request(app).get(`/api/interventions/${intervention.id}/couts`).set('Authorization', `Bearer ${jetonCommercial}`)).status, 403, 'un rôle affecté non autorisé ne lit pas les coûts');
       const lectureSansContrat = await request(app).get(`/api/interventions/${sansContrat.id}/couts`).set('Authorization', `Bearer ${session}`);
       assert.equal(lectureSansContrat.status, 200, 'sans contrat, l’encadrement lit les heures (lot 3b)');
-      assert.deepEqual([lectureSansContrat.body.heures, lectureSansContrat.body.achats, lectureSansContrat.body.totalMaterielHT], [[], [], null], 'sans contrat, ni matériel ni total matériel');
+      assert.deepEqual([lectureSansContrat.body.heures, lectureSansContrat.body.achats, lectureSansContrat.body.totalMaterielHT], [[], [], 0], 'sans contrat, aucun matériel saisi : total matériel nul');
       assert.equal((await request(app).post(`/api/interventions/${intervention.id}/couts/heures`).set('Authorization', `Bearer ${session}`).send({ date: '06-09-2026', nbrHeures: 1 })).status, 403, 'l’encadrement ne saisit pas les heures');
       assert.equal((await request(app).post(`/api/interventions/${intervention.id}/couts/heures`).set('Authorization', `Bearer ${technicien.jeton}`).send({ date: '06-09-2026', nbrHeures: 0 })).status, 400, 'zéro heure exige un motif');
       assert.equal((await request(app).post(`/api/interventions/${intervention.id}/couts/achats`).set('Authorization', `Bearer ${technicien.jeton}`).send({ date: '06-09-2026', fournisseurId: fournisseur.id, description: 'TEST', montantHT: 1 })).status, 403, 'un technicien ne saisit pas un achat');
@@ -8684,7 +8685,7 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await request(app).post(`/api/interventions/${intervention.id}/couts/achats/${achat.id}/archiver`).set('Authorization', `Bearer ${session}`).send({})).status, 400, 'un archivage exige un motif');
       assert.equal((await request(app).post(`/api/interventions/${intervention.id}/couts/achats/${achat.id}/archiver`).set('Authorization', `Bearer ${session}`).send({ motif: 'Archivage justifié' })).status, 200);
       assert.equal((await request(app).post(`/api/interventions/${intervention.id}/couts/achats/${achat.id}/archiver`).set('Authorization', `Bearer ${session}`).send({ motif: 'Double archivage' })).status, 409);
-      assert.equal((await request(app).post(`/api/interventions/${sansContrat.id}/couts/achats/${achat.id}/archiver`).set('Authorization', `Bearer ${session}`).send({ motif: 'Hors contrat' })).status, 409, 'hors contrat, aucun matériel à archiver');
+      assert.equal((await request(app).post(`/api/interventions/${sansContrat.id}/couts/achats/${achat.id}/archiver`).set('Authorization', `Bearer ${session}`).send({ motif: 'Achat d’un autre dossier' })).status, 404, 'un achat se rattache à son propre dossier');
       assert.equal((await request(app).post(`/api/interventions/${sansContrat.id}/couts/heures/${heure.id}/archiver`).set('Authorization', `Bearer ${session}`).send({ motif: 'Heure d’un autre dossier' })).status, 404, 'une heure se rattache à son propre dossier');
       assert.equal((await request(app).get(`/api/interventions/${intervention.id}/journal-saisies`).set('Authorization', `Bearer ${technicien.jeton}`)).status, 403, 'le journal financier reste fermé au technicien');
       assert.equal((await request(app).post('/api/interventions').set('Authorization', `Bearer ${technicien.jeton}`).send({ clientId, titre: 'TEST Création technicien refusée' })).status, 403, 'la création est réservée à l’encadrement');
@@ -21426,7 +21427,7 @@ if (!TEST_DATABASE_URL) {
       assert.equal(lecture.body.margeDevis, null);
       // Ventes : 5,01 + 5,01 + 75 + 91 + 60 = 236,02 ; coûts : 3,30 + 3,30 + 43,75 + 15 + 60 + 35 + 45 = 205,35.
       assert.deepEqual(lecture.body.margeSav, {
-        ventesHT: 236.02, coutsHT: 205.35, margeHT: 30.67, nombreSuites: 3,
+        ventesHT: 236.02, coutsHT: 205.35, materielHT: 0, margeHT: 30.67, nombreSuites: 3,
         heuresNonValorisees: 0.5, intervenantsNonValorises: [sansPrix.nom], heuresSuitesAnnulees: 1.5,
       });
       // La main-d'œuvre cumulée de l'intervention reste la sienne seule.
@@ -21435,7 +21436,7 @@ if (!TEST_DATABASE_URL) {
       for (const id of [suite.id, suiteDeSuite.id]) assert.equal((await couts(id)).body.margeSav, null);
       // Sans heure, la marge vaut zéro, sans signalement.
       assert.deepEqual((await couts((await curative('sans heure')).id)).body.margeSav, {
-        ventesHT: 0, coutsHT: 0, margeHT: 0, nombreSuites: 0, heuresNonValorisees: 0, intervenantsNonValorises: [], heuresSuitesAnnulees: 0,
+        ventesHT: 0, coutsHT: 0, materielHT: 0, margeHT: 0, nombreSuites: 0, heuresNonValorisees: 0, intervenantsNonValorises: [], heuresSuitesAnnulees: 0,
       });
     });
 
@@ -21466,7 +21467,7 @@ if (!TEST_DATABASE_URL) {
       assert.equal(lecture.status, 200, JSON.stringify(lecture.body));
       // Ventes 13,20 ; coût 0,29 h à 30 € = 8,70 ; marge 4,50.
       assert.deepEqual(lecture.body.margeSav, {
-        ventesHT: 13.2, coutsHT: 8.7, margeHT: 4.5, nombreSuites: 0, heuresNonValorisees: 0, intervenantsNonValorises: [], heuresSuitesAnnulees: 0,
+        ventesHT: 13.2, coutsHT: 8.7, materielHT: 0, margeHT: 4.5, nombreSuites: 0, heuresNonValorisees: 0, intervenantsNonValorises: [], heuresSuitesAnnulees: 0,
       });
     });
 
@@ -21612,6 +21613,170 @@ if (!TEST_DATABASE_URL) {
       const pendantPose = await course(pose, surPose.id, mainOeuvre.id, (tx) => tx.$queryRaw`SELECT "id" FROM "CataloguePrestation" WHERE "id" = ${mainOeuvre.id} FOR UPDATE`);
       await verifier(pendantPose, surPose.id, 45.5);
       assert.equal(await prixEnBase((await saisir(pose, surPose.id, 1)).id), 45.5);
+    });
+  });
+
+  // Lot « matériel d'une intervention curative » : décision de Nelson du 28-10-2026 (« Oui il faut pouvoir saisir
+  // du materiel pour une intervention curative ») et réponses du 29-10-2026 (« Au coût seul (Recommandé) »,
+  // « L'encadrement (Recommandé) »). Le matériel se saisit hors contrat comme sous contrat, par l'encadrement
+  // seul ; son coût HT s'ajoute au coût de l'intervention, sans prix de vente.
+  describe('Matériel d’une intervention curative : saisi par l’encadrement, compté à son coût seul', () => {
+    let admin = {};
+    let adminId = '';
+    let client = null;
+    let fournisseur = null;
+    const suffixe = `${Date.now()}`;
+    const envoyer = (methode, chemin, auth, corps) => request(app)[methode](chemin).set(auth).send(corps);
+    const parJeton = (id) => ({ Authorization: `Bearer ${jwt.sign({ id }, process.env.JWT_SECRET)}` });
+    const couts = (id, auth = admin) => request(app).get(`/api/interventions/${id}/couts`).set(auth);
+    const aujourdhui = async () => {
+      const societe = await prisma.companySettings.findUnique({ where: { id: 'singleton' } });
+      return jourCivilEntreprise(new Date(), societe?.fuseauHoraire || 'Europe/Paris').split('-').reverse().join('-');
+    };
+    const curative = async (titre, auth = admin, extra = {}) => {
+      const res = await envoyer('post', '/api/interventions', auth, { clientId: client.id, titre: `TEST Matériel curative ${titre}`, ...extra });
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      return res.body;
+    };
+    const suiteDe = async (id) => {
+      const res = await envoyer('post', `/api/interventions/${id}/suites`, admin, {});
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      return res.body;
+    };
+    const annuler = async (id) => {
+      const res = await envoyer('patch', `/api/interventions/${id}/statut`, admin, { statut: 'ANNULEE', motif: 'TEST annulation matériel curative' });
+      assert.equal(res.status, 200, JSON.stringify(res.body));
+    };
+    const saisirAchat = async (interventionId, montantHT, auth = admin, statut = 201) => {
+      const res = await envoyer('post', `/api/interventions/${interventionId}/couts/achats`, auth, { date: await aujourdhui(), fournisseurId: fournisseur.id, description: `TEST Pièce ${montantHT}`, montantHT });
+      assert.equal(res.status, statut, JSON.stringify(res.body));
+      return res.body;
+    };
+    const archiver = async (interventionId, achatId, action = 'archiver') => {
+      const res = await envoyer('post', `/api/interventions/${interventionId}/couts/achats/${achatId}/${action}`, admin, { motif: `TEST ${action} du matériel` });
+      assert.equal(res.status, 200, JSON.stringify(res.body));
+    };
+    const technicienRattache = async (cle) => {
+      const mainOeuvre = await envoyer('post', '/api/catalogue/prestations', admin, {
+        estMainOeuvre: true, reference: `TEST-MCUR-${cle}-${suffixe}`, nom: `TEST Main d’œuvre matériel ${cle} ${suffixe}`, tauxTva: '20',
+        prixVenteHt: '45.50', prixJourHorsContratHt: '300', prixHeureSousContratHt: '41', prixJourSousContratHt: '280', heuresParJour: '7',
+      });
+      assert.equal(mainOeuvre.status, 201, JSON.stringify(mainOeuvre.body));
+      const compte = await prisma.user.create({ data: { email: `materiel-curative.${cle}.${suffixe}@iris.test`, name: `TEST Matériel curative ${cle}`, role: 'TECHNICIEN' } });
+      const fiche = await prisma.intervenant.create({ data: { nom: `TEST Matériel curative ${cle} ${suffixe}`, role: 'Technicien', tauxHoraireCharge: 30, userId: compte.id } });
+      assert.equal((await envoyer('put', `/api/intervenants/${fiche.id}/main-oeuvre`, admin, { mainOeuvreId: mainOeuvre.body.id })).status, 200);
+      return { compte, fiche, auth: parJeton(compte.id) };
+    };
+    const saisirHeures = async (tech, interventionId, nbrHeures) => {
+      await prisma.interventionAffectation.create({ data: { interventionId, intervenantId: tech.fiche.id } });
+      const res = await envoyer('post', `/api/interventions/${interventionId}/couts/heures`, tech.auth, { date: await aujourdhui(), nbrHeures });
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+    };
+
+    before(async () => {
+      const secours = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
+      assert.equal(secours.status, 200);
+      admin = { Authorization: `Bearer ${secours.body.token}` };
+      adminId = secours.body.user.id;
+      const cree = await envoyer('post', '/api/clients', admin, { raisonSociale: `TEST Client matériel curative ${suffixe}`, siren: await sirenLibre() });
+      assert.equal(cree.status, 201, JSON.stringify(cree.body));
+      client = cree.body;
+      const site = await envoyer('post', `/api/clients/${client.id}/sites`, admin, { nom: 'TEST Facturation matériel curative', adresse: '3 rue du Matériel', codePostal: '14000', ville: 'Caen', estSiteFacturation: true });
+      assert.equal(site.status, 201, JSON.stringify(site.body));
+      fournisseur = await prisma.fournisseur.create({ data: { nom: `TEST Fournisseur matériel curative ${suffixe}` } });
+    });
+
+    test('l’administration et le conducteur saisissent, corrigent, archivent et restaurent le matériel d’une curative ; le technicien ne le saisit pas', async () => {
+      const conducteur = await prisma.user.create({ data: { email: `materiel-curative.conducteur.${suffixe}@iris.test`, name: 'TEST Matériel curative conducteur', role: 'CONDUCTEUR_TRAVAUX' } });
+      const authConducteur = parJeton(conducteur.id);
+      const tech = await technicienRattache('saisie');
+      const intervention = await curative('saisie', authConducteur);
+      await saisirHeures(tech, intervention.id, 1.5); // vendue 68,25 €, coûtant 45,00 €
+
+      const parAdmin = await saisirAchat(intervention.id, 12.34);
+      const parConducteur = await saisirAchat(intervention.id, 7.66, authConducteur);
+      await saisirAchat(intervention.id, 5, tech.auth, 403);
+      assert.equal(await prisma.coutInterventionAchat.count({ where: { interventionId: intervention.id } }), 2, 'le refus du technicien n’écrit rien');
+
+      const lecture = await couts(intervention.id);
+      assert.equal(lecture.status, 200, JSON.stringify(lecture.body));
+      assert.deepEqual([lecture.body.achats.length, lecture.body.totalMainOeuvreHT, lecture.body.totalMaterielHT, lecture.body.totalCoutsHT], [2, 45, 20, 65]);
+      assert.deepEqual([lecture.body.margeSav.ventesHT, lecture.body.margeSav.coutsHT, lecture.body.margeSav.materielHT, lecture.body.margeSav.margeHT], [68.25, 45, 20, 3.25]);
+      // Le conducteur garde le matériel, sans coût de main-d'œuvre, total ni marge ; le technicien, ses heures seules.
+      const vueConducteur = await couts(intervention.id, authConducteur);
+      assert.equal(vueConducteur.status, 200, JSON.stringify(vueConducteur.body));
+      assert.deepEqual([vueConducteur.body.achats.map((achat) => achat.montantHT).sort(), vueConducteur.body.totalMaterielHT, vueConducteur.body.totalMainOeuvreHT, vueConducteur.body.totalCoutsHT, 'margeSav' in vueConducteur.body], [[12.34, 7.66].sort(), 20, null, null, false]);
+      const vueTechnicien = await couts(intervention.id, tech.auth);
+      assert.deepEqual(Object.keys(vueTechnicien.body).sort(), ['heures']);
+      // Chaque saisie est journalisée, lisible par l'encadrement.
+      const journal = await request(app).get(`/api/interventions/${intervention.id}/journal-saisies`).set(authConducteur);
+      assert.equal(journal.status, 200, JSON.stringify(journal.body));
+      assert.equal(journal.body.filter((entree) => entree.cible === 'COUT_INTERVENTION_ACHAT' && entree.action === 'CREATION').length, 2);
+
+      // Correction par le conducteur : la marge suit le montant corrigé.
+      const correction = await envoyer('patch', `/api/interventions/${intervention.id}/couts/achats/${parConducteur.id}`, authConducteur, { montantHT: 8.66, motifCorrection: 'TEST montant de la facture' });
+      assert.equal(correction.status, 200, JSON.stringify(correction.body));
+      assert.deepEqual([(await couts(intervention.id)).body.totalMaterielHT, (await couts(intervention.id)).body.margeSav.margeHT], [21, 2.25]);
+      // Un achat archivé sort du coût et de la marge ; restauré, il y revient.
+      await archiver(intervention.id, parAdmin.id);
+      assert.deepEqual([(await couts(intervention.id)).body.totalMaterielHT, (await couts(intervention.id)).body.margeSav.materielHT, (await couts(intervention.id)).body.margeSav.margeHT], [8.66, 8.66, 14.59]);
+      await archiver(intervention.id, parAdmin.id, 'restaurer');
+      assert.equal((await couts(intervention.id)).body.margeSav.margeHT, 2.25);
+
+      // Une fois l'intervention annulée, plus aucun matériel ne se saisit.
+      await annuler(intervention.id);
+      await saisirAchat(intervention.id, 1, admin, 409);
+    });
+
+    test('marge à l’heure : le matériel de l’intervention et de ses suites, suite annulée comprise, s’ajoute au coût, sans prix de vente ; l’archivé en sort', async () => {
+      const tech = await technicienRattache('marge');
+      const intervention = await curative('marge');
+      await saisirHeures(tech, intervention.id, 2); // vendues 91,00 €, coûtant 60,00 €
+      await saisirAchat(intervention.id, 10.1);
+      const suite = await suiteDe(intervention.id);
+      await saisirAchat(suite.id, 5.25);
+      const suiteDeSuite = await suiteDe(suite.id);
+      await saisirAchat(suiteDeSuite.id, 1.65);
+      const suiteAnnulee = await suiteDe(intervention.id);
+      await saisirAchat(suiteAnnulee.id, 3);
+      await annuler(suiteAnnulee.id); // la dépense faite reste comptée, comme les heures d'une suite annulée
+      const archive = await saisirAchat(suite.id, 50);
+      await archiver(suite.id, archive.id);
+
+      const marge = (await couts(intervention.id)).body.margeSav;
+      assert.deepEqual([marge.ventesHT, marge.coutsHT, marge.materielHT, marge.margeHT, marge.nombreSuites], [91, 60, 20, 11, 3]);
+      assert.equal((await couts(suite.id)).body.margeSav, null, 'une suite n’a pas de marge propre');
+      await archiver(suite.id, archive.id, 'restaurer');
+      assert.deepEqual([(await couts(intervention.id)).body.margeSav.materielHT, (await couts(intervention.id)).body.margeSav.margeHT], [70, -39]);
+    });
+
+    test('le matériel saisi sur une curative issue d’un devis entre dans la marge de son devis, et celui d’une suite d’affaire dans la marge du chantier', async () => {
+      // Intervention issue d'un devis, sans chantier : total HT du devis moins ses coûts et ceux de ses suites (#339).
+      const devis = await envoyer('post', '/api/devis', admin, { clientId: client.id, objet: `TEST Devis matériel curative ${suffixe}`, lignes: [
+        { designation: 'TEST Pose', nature: 'MAIN_OEUVRE', quantite: 2, prixUnitaireHt: 150, tauxTva: 20 },
+        { designation: 'TEST Fourniture', nature: 'FOURNITURE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 },
+      ] });
+      assert.equal(devis.status, 201, JSON.stringify(devis.body));
+      assert.equal((await envoyer('post', `/api/devis/${devis.body.id}/signature`, admin, { signataire: 'TEST Signataire matériel', confirme: true })).status, 201);
+      const conversion = await envoyer('post', `/api/devis/${devis.body.id}/convertir`, admin, { cible: 'INTERVENTION' });
+      assert.equal(conversion.status, 201, JSON.stringify(conversion.body));
+      await saisirAchat(conversion.body.id, 30);
+      await saisirAchat((await suiteDe(conversion.body.id)).id, 12.5);
+      const lecture = (await couts(conversion.body.id)).body;
+      assert.deepEqual([lecture.margeDevis.coutsInterventionHT, lecture.margeDevis.coutsSuitesHT, lecture.margeDevis.margeHT, lecture.margeSav], [30, 12.5, 357.5, null]);
+
+      // Suite d'une intervention rattachée à un chantier : son matériel entre dans la marge du chantier ; celui de
+      // l'intervention initiale, qui n'est pas une suite, n'y entre pas.
+      const chantier = await prisma.chantier.create({ data: {
+        nom: `TEST Matériel curative chantier ${suffixe}`, client: client.raisonSociale, clientId: client.id, dateDebut: new Date('2026-10-01T00:00:00Z'),
+        budgetGlobalVendu: 1000, budgetMaterielVendu: 300, budgetMainOeuvreVendu: 700, heuresVendues: 20, responsableId: adminId,
+      } });
+      const initiale = await curative('affaire', admin, { chantierId: chantier.id });
+      await saisirAchat(initiale.id, 70);
+      await saisirAchat((await suiteDe(initiale.id)).id, 25.5);
+      const fiche = await request(app).get(`/api/chantiers/${chantier.id}`).set(admin);
+      assert.equal(fiche.status, 200, JSON.stringify(fiche.body));
+      assert.deepEqual([fiche.body.metrics.materielReel, fiche.body.metrics.coutsSuites.materiel], [25.5, 25.5]);
     });
   });
 

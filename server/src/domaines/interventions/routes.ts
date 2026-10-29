@@ -14,7 +14,7 @@ import { requirePlanningActif, PLANNING_EVENT_INCLUDE, validatePlanningEvent } f
 import { verrouillerContratMaintenance } from '../contrats/metier';
 import {
   CHANTIER_INTERVENTION_SELECT, chantierDuJournalReduit, journaliserIntervention, exposerIntervention, estEncadrementCoutIntervention,
-  chargerInterventionCout, interventionCoutEligible, interventionHeuresEligible, dateHeuresIntervention, estConflitTransactionCout, verrouillerContexteCout, heureOperationnelleTechnicien,
+  chargerInterventionCout, interventionCoutEligible, dateHeuresIntervention, estConflitTransactionCout, verrouillerContexteCout, heureOperationnelleTechnicien,
   journaliserCoutIntervention, totalHeuresInterventionAuCentime, getInterventionFilterForUser, synchroniserAffectationsIntervention,
   lireDetailsIntervention, creerInterventionNumerotee, SaisieInterventionInvalide, PRIORITES_INTERVENTION, INSTANTANE_CRENEAU, retirerCreneauIntervention,
 } from './metier';
@@ -81,14 +81,15 @@ export function enregistrerRoutesInterventions(app: Express): void {
 
   // Coûts SAV : leurs lignes ne sont jamais exposées dans les flux Travaux ou /api/v1 ; seuls les totaux
   // des suites rattachées à une affaire entrent dans la marge du chantier (cf. coutsSuites). Hors
-  // contrat, une intervention ne porte que les heures du technicien (lot pilote 3b), sans matériel.
+  // contrat, une intervention porte les heures du technicien (lot pilote 3b) et le matériel saisi par
+  // l'encadrement (lot « matériel d'une intervention curative »), comme une intervention de contrat.
   app.get('/api/interventions/:id/couts', requireAuth, blockCommercial, async (req: AuthRequest, res) => {
     try {
       const intervention = await chargerInterventionCout(req);
       if (!intervention) return res.status(404).json({ error: 'Intervention introuvable.' });
       const encadrement = estEncadrementCoutIntervention(req.user!.role);
       if (!encadrement && req.user!.role !== ROLE_TECHNICIEN) return res.status(403).json({ error: 'Accès non autorisé.' });
-      if (!encadrement && !interventionHeuresEligible(intervention)) return res.status(409).json({ error: 'Cette intervention ne peut pas recevoir de coûts.' });
+      if (!encadrement && !interventionCoutEligible(intervention)) return res.status(409).json({ error: 'Cette intervention ne peut pas recevoir de coûts.' });
 
       if (!encadrement) {
         const heures = await prisma.coutInterventionHeure.findMany({
@@ -106,15 +107,13 @@ export function enregistrerRoutesInterventions(app: Express): void {
         prisma.coutInterventionAchat.findMany({ where: { interventionId: intervention.id }, include: { fournisseur: true }, orderBy: { date: 'desc' } }),
       ]);
       const totalMainOeuvreHT = totalHeuresInterventionAuCentime(heures.filter((heure) => !heure.archivedAt));
-      // Hors contrat, aucun matériel ne se saisit : pas de total matériel, et le coût réel se limite à
-      // la main-d'œuvre (décision de Nelson du 19-10-2026 : l'administration le voit).
-      const totalMaterielHT = intervention.contratMaintenanceId
-        ? achats.filter((achat) => !achat.archivedAt).reduce((total, achat) => total.plus(achat.montantHT), new Prisma.Decimal(0)).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP)
-        : null;
+      // Le coût réel est la main-d'œuvre et le matériel, hors contrat comme sous contrat (décision de Nelson
+      // du 19-10-2026 : l'administration le voit).
+      const totalMaterielHT = achats.filter((achat) => !achat.archivedAt).reduce((total, achat) => total.plus(achat.montantHT), new Prisma.Decimal(0)).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
       // Un conducteur garde les heures et le matériel, mais ni taux ni coût de main-d'œuvre, ni le
       // total qui l'inclut (cf. voitCoutMainOeuvre).
       if (!voitCoutMainOeuvre(req)) return res.json(decimalToNumber({ heures: heures.map(sansTauxHoraire), achats, totalMainOeuvreHT: null, totalMaterielHT, totalCoutsHT: null }));
-      const totalCoutsHT = totalMaterielHT === null ? totalMainOeuvreHT : totalMainOeuvreHT.plus(totalMaterielHT).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+      const totalCoutsHT = totalMainOeuvreHT.plus(totalMaterielHT).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
       // Intervention issue d'un devis, sans chantier : sa marge, suites comprises, pour l'administration
       // seule (décision de Nelson de la nuit du 26 au 27-10-2026, cf. margeDevisIntervention).
       const margeDevis = await margeDevisIntervention(intervention);
@@ -130,7 +129,7 @@ export function enregistrerRoutesInterventions(app: Express): void {
       const intervention = await chargerInterventionCout(req);
       if (!intervention) return res.status(404).json({ error: 'Intervention introuvable.' });
       if (req.user!.role !== ROLE_TECHNICIEN) return res.status(403).json({ error: 'Saisie d’heures réservée au technicien affecté.' });
-      if (!interventionHeuresEligible(intervention)) return res.status(409).json({ error: 'Cette intervention ne peut pas recevoir de coûts.' });
+      if (!interventionCoutEligible(intervention)) return res.status(409).json({ error: 'Cette intervention ne peut pas recevoir de coûts.' });
       await verifierAffaireDeLaSuite(prisma, intervention, req.user!.role, false);
       const dateSaisie = dateIsoStricte(req.body?.date); const nbrHeures = nombreDecimalNonNegatif(req.body?.nbrHeures, 8, true);
       const motif = motifCorrectionValide(req.body?.motif);
@@ -142,7 +141,7 @@ export function enregistrerRoutesInterventions(app: Express): void {
       if (!intervenant) return res.status(404).json({ error: 'Intervention introuvable.' });
       const cree = await transactionVerifiee(async (tx) => {
         const interventionActuelle = await verrouillerContexteCout(tx, intervention.id, intervenant.id, req.user!.id);
-        if (!interventionActuelle || !interventionHeuresEligible(interventionActuelle)) return null;
+        if (!interventionActuelle || !interventionCoutEligible(interventionActuelle)) return null;
         await verifierAffaireDeLaSuite(tx, interventionActuelle, req.user!.role, true);
         const intervenantActuel = await tx.intervenant.findFirst({ where: { id: intervenant.id, userId: req.user!.id, affectationsIntervention: { some: { interventionId: intervention.id } } } });
         if (!intervenantActuel) return null;
@@ -206,8 +205,7 @@ export function enregistrerRoutesInterventions(app: Express): void {
       if (heures && 'commentaire' in body) data.commentaire = body.commentaire ? String(body.commentaire).trim() : null;
       if (achats && 'description' in body) { const description = String(body.description || '').trim(); if (!description) return res.status(400).json({ error: 'Description obligatoire.' }); data.description = description; }
       if (Object.keys(data).length === 0) return res.status(400).json({ error: 'Aucun champ à corriger.' });
-      const eligible = heures ? interventionHeuresEligible : interventionCoutEligible;
-      if (!eligible(intervention)) return res.status(409).json({ error: 'Cette intervention ne peut pas recevoir de coûts.' });
+      if (!interventionCoutEligible(intervention)) return res.status(409).json({ error: 'Cette intervention ne peut pas recevoir de coûts.' });
       await verifierAffaireDeLaSuite(prisma, intervention, req.user!.role, false);
       const model: any = heures ? prisma.coutInterventionHeure : prisma.coutInterventionAchat;
       const cout = await model.findFirst({ where: { id: String(req.params.coutId), interventionId: intervention.id } });
@@ -216,7 +214,7 @@ export function enregistrerRoutesInterventions(app: Express): void {
       if (cout.archivedAt) return res.status(409).json({ error: 'Un coût archivé ne peut pas être corrigé.' });
       const resultat = await transactionVerifiee(async (tx) => {
         const interventionActuelle = await verrouillerContexteCout(tx, intervention.id, heures ? cout.intervenantId : undefined, heures ? req.user!.id : undefined);
-        if (!interventionActuelle || !eligible(interventionActuelle)) return null;
+        if (!interventionActuelle || !interventionCoutEligible(interventionActuelle)) return null;
         await verifierAffaireDeLaSuite(tx, interventionActuelle, req.user!.role, true);
         const delegate: any = heures ? tx.coutInterventionHeure : tx.coutInterventionAchat;
         const coutActuel = await delegate.findFirst({ where: { id: cout.id, interventionId: interventionActuelle.id, archivedAt: null } });
@@ -244,11 +242,10 @@ export function enregistrerRoutesInterventions(app: Express): void {
       const intervention = await chargerInterventionCout(req); const type = String(req.params.type); const action = String(req.params.action);
       if (!intervention) return res.status(404).json({ error: 'Intervention introuvable.' });
       // L'archivage et la restauration sont des actes de conservation : l'encadrement peut
-      // les accomplir après la clôture, sans jamais réautoriser une création ou correction. Hors
-      // contrat, seules des heures existent : aucun matériel à archiver ni à restaurer. Ceux d'une
-      // suite changent la marge de son chantier : ils suivent la règle de son affaire (affaireSuite.ts).
+      // les accomplir après la clôture, sans jamais réautoriser une création ou correction, sur les
+      // heures comme sur le matériel, hors contrat comme sous contrat. Ceux d'une suite changent la
+      // marge de son chantier : ils suivent la règle de son affaire (affaireSuite.ts).
       const heures = type === 'heures'; const achats = type === 'achats';
-      if (achats && !intervention.contratMaintenanceId) return res.status(409).json({ error: 'Cette intervention ne peut pas recevoir de coûts.' });
       if ((!heures && !achats) || !['archiver', 'restaurer'].includes(action) || !estEncadrementCoutIntervention(req.user!.role)) return res.status(403).json({ error: 'Accès non autorisé.' });
       await verifierAffaireDeLaSuite(prisma, intervention, req.user!.role, false);
       const model: any = heures ? prisma.coutInterventionHeure : prisma.coutInterventionAchat; const cout = await model.findFirst({ where: { id: String(req.params.coutId), interventionId: intervention.id } });

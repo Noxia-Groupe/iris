@@ -2,13 +2,18 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { resumeCoutsIntervention, libelleDevisMarge, detailMargeSav, alerteMargeSav } from '../src/lib/coutsIntervention.ts';
 
-test('coûts SAV : coût réel pour l’administration, main-d’œuvre seule hors contrat, matériel seul pour un conducteur, rien sans total', () => {
+test('coûts SAV : coût réel pour l’administration, main-d’œuvre seule hors contrat sans matériel, matériel seul pour un conducteur, rien sans total', () => {
   assert.deepEqual(resumeCoutsIntervention({ totalCoutsHT: 96.5, totalMaterielHT: 12.5 }), { libelle: 'Coût réel cumulé', montant: 96.5 });
   // Hors contrat, l'administration ne reçoit pas de total matériel (null) : le total n'est que la main-d'œuvre.
   assert.deepEqual(resumeCoutsIntervention({ totalCoutsHT: 60, totalMaterielHT: null }), { libelle: 'Main-d’œuvre cumulée', montant: 60 });
   assert.deepEqual(resumeCoutsIntervention({ totalCoutsHT: 0, totalMaterielHT: null }), { libelle: 'Main-d’œuvre cumulée', montant: 0 });
   // Avec un contrat, un total matériel nul reste un coût réel : il pourrait en recevoir.
   assert.deepEqual(resumeCoutsIntervention({ totalCoutsHT: 84, totalMaterielHT: 0 }), { libelle: 'Coût réel cumulé', montant: 84 });
+  // Hors contrat (lot « matériel d'une intervention curative ») : sans matériel, le total reste la main-d'œuvre et
+  // garde son nom ; avec du matériel, il devient le coût réel.
+  assert.deepEqual(resumeCoutsIntervention({ totalCoutsHT: 84, totalMaterielHT: 0 }, true), { libelle: 'Main-d’œuvre cumulée', montant: 84 });
+  assert.deepEqual(resumeCoutsIntervention({ totalCoutsHT: 96.5, totalMaterielHT: 12.5 }, true), { libelle: 'Coût réel cumulé', montant: 96.5 });
+  assert.deepEqual(resumeCoutsIntervention({ totalCoutsHT: null, totalMaterielHT: 0 }, true), { libelle: 'Matériel cumulé', montant: 0 });
   // Un conducteur ne reçoit pas le total main-d'œuvre comprise (null) : jamais « 0 € ».
   assert.deepEqual(resumeCoutsIntervention({ totalCoutsHT: null, totalMaterielHT: 12.5 }), { libelle: 'Matériel cumulé', montant: 12.5 });
   assert.deepEqual(resumeCoutsIntervention({ totalCoutsHT: null, totalMaterielHT: 0 }), { libelle: 'Matériel cumulé', montant: 0 });
@@ -24,7 +29,7 @@ test('marge d’une intervention issue d’un devis : numéro du devis, version 
 
 test('marge d’un SAV hors contrat : détail des ventes et du coût, suites, heures des suites annulées, signalement des heures sans prix', () => {
   const euros = (valeur: number) => `${valeur.toFixed(2)} €`;
-  const marge = { ventesHT: 136.5, coutsHT: 84, margeHT: 52.5, nombreSuites: 0, heuresNonValorisees: 0, intervenantsNonValorises: [], heuresSuitesAnnulees: 0 };
+  const marge = { ventesHT: 136.5, coutsHT: 84, materielHT: 0, margeHT: 52.5, nombreSuites: 0, heuresNonValorisees: 0, intervenantsNonValorises: [], heuresSuitesAnnulees: 0 };
   assert.equal(detailMargeSav(marge, euros), 'Heures de l’intervention vendues 136.50 € HT au prix des mains d’œuvre, moins leur coût de 84.00 € HT.');
   assert.equal(alerteMargeSav(marge), null, 'aucun signalement quand toutes les heures ont un prix');
   assert.equal(detailMargeSav({ ...marge, nombreSuites: 1 }, euros), 'Heures de l’intervention et de sa suite vendues 136.50 € HT au prix des mains d’œuvre, moins leur coût de 84.00 € HT.');
@@ -35,6 +40,11 @@ test('marge d’un SAV hors contrat : détail des ventes et du coût, suites, he
   assert.equal(
     alerteMargeSav({ ...marge, heuresNonValorisees: 2.25, intervenantsNonValorises: ['TEST Dupont', 'TEST Émile'] }),
     'Marge incomplète : 2,25 h sans prix de vente (TEST Dupont, TEST Émile). Un intervenant sans main d’œuvre le jour de la saisie ne valorise pas ses heures ; leur coût reste compté.',
+  );
+  // Le matériel, compté à son coût seul (décision de Nelson du 29-10-2026, « Au coût seul »), est nommé dans le détail.
+  assert.equal(
+    detailMargeSav({ ...marge, materielHT: 20, margeHT: 32.5 }, euros),
+    'Heures de l’intervention vendues 136.50 € HT au prix des mains d’œuvre, moins leur coût de 84.00 € HT et le matériel, à son coût de 20.00 € HT.',
   );
   // Une heure à zéro sans prix suffit à signaler la marge incomplète.
   assert.match(alerteMargeSav({ ...marge, heuresNonValorisees: 0, intervenantsNonValorises: ['TEST Dupont'] }) || '', /^Marge incomplète : 0 h sans prix de vente \(TEST Dupont\)/);

@@ -26,8 +26,9 @@ async function pageDe(browser: Browser, compte: Compte) {
 
 // Lot pilote 3b (décision de Nelson du 17-10-2026) : le technicien saisit ses heures sur une
 // intervention SAV hors contrat. L'administration en voit le coût de main-d'œuvre (décision du
-// 19-10-2026) ; aucun matériel ne se saisit hors contrat.
-test('le technicien saisit ses heures sur une curative hors contrat ; l’administration en voit le coût, sans saisie de matériel', async ({ allerSurPageAdmin, session, request, creerClient, browser }) => {
+// 19-10-2026) ; le matériel s'y saisit par l'encadrement seul (lot « matériel d'une intervention
+// curative », décisions de Nelson des 28 et 29-10-2026).
+test('le technicien saisit ses heures sur une curative hors contrat ; l’administration en voit le coût, et seul l’encadrement peut y saisir du matériel', async ({ allerSurPageAdmin, session, request, creerClient, browser }) => {
   const headers = { Authorization: `Bearer ${session.token}` };
   const envoyer = async (methode: 'post' | 'put', path: string, data: object) => {
     const response = await request[methode](`${api}${path}`, { headers, data });
@@ -64,14 +65,14 @@ test('le technicien saisit ses heures sur une curative hors contrat ; l’admini
   }
 
   // 2. L'administration voit le coût de main-d'œuvre (1,5 h × 40 €), sous ce nom puisque le total
-  // ne contient pas de matériel (décision du 20-10-2026), et sans formulaire de matériel.
+  // ne contient pas de matériel (décision du 20-10-2026), et le formulaire de matériel.
   const admin = await allerSurPageAdmin('/interventions');
   const carteAdmin = admin.locator('article', { hasText: titre });
   await expect(carteAdmin.getByText(/Main-d’œuvre cumulée : 60,00\s€ HT/)).toBeVisible();
   await expect(carteAdmin.getByText(/Coût réel cumulé/)).toHaveCount(0);
-  await expect(carteAdmin.getByRole('button', { name: 'Enregistrer l’achat matériel' })).toHaveCount(0);
+  await expect(carteAdmin.getByRole('button', { name: 'Enregistrer l’achat matériel' })).toHaveCount(1);
 
-  // 3. Un conducteur ne reçoit aucun total hors contrat : pas de cadre de coûts vide sur sa curative.
+  // 3. Un conducteur reçoit le matériel de sa curative, nul ici, sans coût de main-d'œuvre, et peut en saisir.
   const conducteur: Compte = await envoyer('post', '/users', { email: `heures.curative.conducteur.${suffixe}@iris.test`, name: `Conducteur heures ${suffixe}`, role: 'CONDUCTEUR_TRAVAUX' });
   const titreConducteur = `Dépannage du conducteur ${suffixe}`;
   const creation = await request.post(`${api}/interventions`, { headers: { Authorization: `Bearer ${jetonPour(conducteur.id)}` }, data: { clientId: client.id, titre: titreConducteur } });
@@ -81,7 +82,9 @@ test('le technicien saisit ses heures sur une curative hors contrat ; l’admini
     await vueConducteur.goto('/interventions', { waitUntil: 'networkidle' });
     const carteConducteur = vueConducteur.locator('article', { hasText: titreConducteur });
     await expect(carteConducteur).toBeVisible();
-    await expect(carteConducteur.locator('div.border-slate-200')).toHaveCount(0);
+    await expect(carteConducteur.getByText(/Matériel cumulé : 0,00\s€ HT/)).toBeVisible();
+    await expect(carteConducteur.getByText(/Main-d’œuvre cumulée|Coût réel cumulé/)).toHaveCount(0);
+    await expect(carteConducteur.getByRole('button', { name: 'Enregistrer l’achat matériel' })).toHaveCount(1);
   } finally {
     await vueConducteur.context().close();
   }

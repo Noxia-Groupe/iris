@@ -3,13 +3,15 @@ export type TotauxCoutsIntervention = { totalCoutsHT?: number | null; totalMater
 
 /**
  * Total affiché à l'encadrement sur une intervention SAV. L'administration reçoit le coût réel,
- * main-d'œuvre comprise ; un conducteur ne reçoit ni le coût de main-d'œuvre ni ce total
+ * main-d'œuvre et matériel compris ; un conducteur ne reçoit ni le coût de main-d'œuvre ni ce total
  * (lot (d)), et garde le matériel. Rien n'est affiché sans total transmis.
- * Hors contrat, aucun matériel ne se saisit (total matériel null) : le total ne contient que la
- * main-d'œuvre et porte ce nom (décision de Nelson du 20-10-2026, #257).
+ * Hors contrat, le total sans matériel ne contient que la main-d'œuvre et porte ce nom (décision de
+ * Nelson du 20-10-2026, #257) ; avec du matériel, saisi depuis le lot « matériel d'une intervention
+ * curative », il devient le coût réel, comme avec un contrat (choix par défaut, à confirmer).
  */
-export function resumeCoutsIntervention(couts: TotauxCoutsIntervention): { libelle: string; montant: number } | null {
-  if (couts.totalCoutsHT != null) return { libelle: couts.totalMaterielHT == null ? 'Main-d’œuvre cumulée' : 'Coût réel cumulé', montant: couts.totalCoutsHT };
+export function resumeCoutsIntervention(couts: TotauxCoutsIntervention, horsContrat = false): { libelle: string; montant: number } | null {
+  const mainOeuvreSeule = couts.totalMaterielHT == null || (horsContrat && couts.totalMaterielHT === 0);
+  if (couts.totalCoutsHT != null) return { libelle: mainOeuvreSeule ? 'Main-d’œuvre cumulée' : 'Coût réel cumulé', montant: couts.totalCoutsHT };
   if (couts.totalMaterielHT != null) return { libelle: 'Matériel cumulé', montant: couts.totalMaterielHT };
   return null;
 }
@@ -33,7 +35,7 @@ export const libelleDevisMarge = (marge: MargeDevisIntervention) => marge.devis.
  * intervenant figé à la saisie, moins leur coût. Le serveur ne l'envoie qu'à l'administration.
  */
 export type MargeSavHorsContrat = {
-  ventesHT: number; coutsHT: number; margeHT: number; nombreSuites: number;
+  ventesHT: number; coutsHT: number; materielHT: number; margeHT: number; nombreSuites: number;
   heuresNonValorisees: number; intervenantsNonValorises: string[]; heuresSuitesAnnulees: number;
 };
 
@@ -43,7 +45,8 @@ const heuresFr = (heures: number) => `${heures.toLocaleString('fr-FR', { maximum
 export function detailMargeSav(marge: MargeSavHorsContrat, montant: (valeur: number) => string): string {
   const portee = marge.nombreSuites === 0 ? 'de l’intervention' : `de l’intervention et de ${marge.nombreSuites > 1 ? `ses ${marge.nombreSuites} suites` : 'sa suite'}`;
   const annulees = marge.heuresSuitesAnnulees > 0 ? ` Les heures des suites annulées (${heuresFr(marge.heuresSuitesAnnulees)}) comptent dans le coût, sans être vendues.` : '';
-  return `Heures ${portee} vendues ${montant(marge.ventesHT)} HT au prix des mains d’œuvre, moins leur coût de ${montant(marge.coutsHT)} HT.${annulees}`;
+  const materiel = marge.materielHT > 0 ? ` et le matériel, à son coût de ${montant(marge.materielHT)} HT` : '';
+  return `Heures ${portee} vendues ${montant(marge.ventesHT)} HT au prix des mains d’œuvre, moins leur coût de ${montant(marge.coutsHT)} HT${materiel}.${annulees}`;
 }
 
 /** Signalement d'une marge incomplète : des heures sans prix de vente figé, dont le coût reste compté. */

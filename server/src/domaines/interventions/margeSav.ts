@@ -17,12 +17,14 @@ import { totalHeuresInterventionAuCentime } from './metier';
 //   jour de la saisie, ou heure saisie avant le lot) garde son coût et rend la marge incomplète ;
 // - les heures d'une suite annulée gardent leur coût sans être vendues (« pas d’intervention […] donc pas
 //   de facture », décision 14 de la même nuit) ;
-// - aucun matériel : il ne se saisit encore que sur une intervention de contrat ; sa saisie sur une
-//   curative, décidée par Nelson le 28-10-2026, viendra avec le lot « matériel d'une intervention
-//   curative » (passation, section 3).
+// - le matériel de l'intervention et de ses suites, non archivé, compte à son coût HT, sans prix de vente
+//   (décision de Nelson du 29-10-2026, « Au coût seul (Recommandé) », lot « matériel d'une intervention
+//   curative ») ; celui d'une suite annulée aussi, comme ses heures (choix par défaut, à confirmer).
+// coutsHT est le coût des heures ; materielHT celui du matériel ; margeHT, les ventes moins les deux.
 export type MargeSavHorsContrat = {
   ventesHT: Prisma.Decimal;
   coutsHT: Prisma.Decimal;
+  materielHT: Prisma.Decimal;
   margeHT: Prisma.Decimal;
   nombreSuites: number;
   heuresNonValorisees: Prisma.Decimal;
@@ -57,19 +59,25 @@ export async function margeSavHorsContrat(intervention: { id: string; contratMai
     )
     SELECT "id", "statut"::text AS "statut" FROM chaine`);
   const suitesAnnulees = new Set(suites.filter((suite) => suite.statut === 'ANNULEE').map((suite) => suite.id));
-  const heures = await prisma.coutInterventionHeure.findMany({
-    where: { interventionId: { in: [intervention.id, ...suites.map((suite) => suite.id)] }, archivedAt: null },
-    select: { interventionId: true, nbrHeures: true, tauxHoraireApplique: true, prixVenteHoraireApplique: true, intervenant: { select: { nom: true } } },
-  });
+  const deLaChaine = { interventionId: { in: [intervention.id, ...suites.map((suite) => suite.id)] }, archivedAt: null };
+  const [heures, achats] = await Promise.all([
+    prisma.coutInterventionHeure.findMany({
+      where: deLaChaine,
+      select: { interventionId: true, nbrHeures: true, tauxHoraireApplique: true, prixVenteHoraireApplique: true, intervenant: { select: { nom: true } } },
+    }),
+    prisma.coutInterventionAchat.findMany({ where: deLaChaine, select: { montantHT: true } }),
+  ]);
   const vendues = heures.filter((heure) => !suitesAnnulees.has(heure.interventionId));
   const nonValorisees = vendues.filter((heure) => heure.prixVenteHoraireApplique === null);
   const somme = (lignes: typeof heures, montant: (heure: (typeof heures)[number]) => Prisma.Decimal) => lignes.reduce((total, heure) => total.plus(montant(heure)), new Prisma.Decimal(0));
   const ventesHT = auCentime(somme(vendues.filter((heure) => heure.prixVenteHoraireApplique !== null), (heure) => auCentime(heure.nbrHeures.mul(heure.prixVenteHoraireApplique!))));
   const coutsHT = totalHeuresInterventionAuCentime(heures);
+  const materielHT = auCentime(achats.reduce((total, achat) => total.plus(achat.montantHT), new Prisma.Decimal(0)));
   return {
     ventesHT,
     coutsHT,
-    margeHT: auCentime(ventesHT.minus(coutsHT)),
+    materielHT,
+    margeHT: auCentime(ventesHT.minus(coutsHT).minus(materielHT)),
     nombreSuites: suites.length,
     heuresNonValorisees: somme(nonValorisees, (heure) => heure.nbrHeures),
     intervenantsNonValorises: [...new Set(nonValorisees.map((heure) => heure.intervenant.nom))].sort((a, b) => a.localeCompare(b, 'fr')),
