@@ -1008,13 +1008,13 @@ Lecture retenue par Claude Code, à corriger par Nelson si besoin :
 
 ### Lot fusionné
 
-- #351 (lot « facture au temps passé », seconde PR) : facture au temps passé d'une intervention et de ses suites, au prix figé sur le devis, au moins le minimum figé (pour un devis sans minimum figé, les heures de sa ligne), puis toute tranche du pas commencée, appliqués une fois au total des heures (décisions de la nuit du 26 au 27-10-2026, points 3 et 8 à 12, et du 28-10-2026, points 1 et 2) ; une seule facture vivante pour l'intervention et ses suites, garantie aussi en base ; facture saisie ligne par ligne refusée pour elles ; quatre audits internes : le premier a relevé un interblocage avec l'annulation du devis et le rattachement au chantier (R1), deux erreurs (C1, C2) et des tests manquants, dont quatre sur les montants, le deuxième une documentation inexacte d'un montant (C1) et des tests manquants, dont un sur les montants, le troisième un test manquant sur les montants, tous corrigés ou ajoutés à la PR avant fusion ; le quatrième, vérification de clôture, l'a dite fusionnable sur `72eddb3`.
+- #351 (lot « facture au temps passé », seconde PR) : facture au temps passé d'une intervention et de ses suites, au prix figé sur le devis, au moins le minimum figé (pour un devis sans minimum figé, les heures de sa ligne), puis toute tranche du pas commencée, appliqués une fois au total des heures (décisions de la nuit du 26 au 27-10-2026, points 3 et 8 à 12, et du 28-10-2026, points 1 et 2) ; une seule facture vivante pour l'intervention et ses suites, la facture au temps passé étant unique aussi en base ; facture saisie ligne par ligne refusée pour elles ; quatre audits internes : le premier a relevé un interblocage avec l'annulation du devis et le rattachement au chantier (R1), deux erreurs (C1, C2) et des tests manquants, dont quatre sur les montants, le deuxième une documentation inexacte d'un montant (C1) et des tests manquants, dont un sur les montants, le troisième un test manquant sur les montants, tous corrigés ou ajoutés à la PR avant fusion ; le quatrième, vérification de clôture, l'a dite fusionnable sur `72eddb3`.
 
 **Mentions antérieures.** Décisions du 28-10-2026 sur la facture au temps passé, points 1 (« **À appliquer** par la seconde PR du lot, prévue ; rien n'en est codé ») et 2 (« **À appliquer** par la seconde PR du lot ») : appliqués par #351, non validée pour mise en service.
 
 ### Suivi ouvert pendant ce lot
 
-Étiquette `suivi-audit` : #352 (audits de #351 : questions pour Nelson sur la conversion en chantier d'un devis dont l'intervention porte déjà une facture et sur le brouillon au temps passé que la numérotation chronologique empêche d'émettre ; suite d'une intervention au temps passé non signalée à l'écran Factures ; refus d'annulation d'une facture réglée ; saisie ligne par ligne d'une intervention au temps passé annulée, à reprendre avec le lot du point 14 ; périmètre de la « dernière facture émise », à garder par le futur lot « abandon d'un brouillon »).
+Étiquette `suivi-audit` : #352 (audits de #351 : questions pour Nelson sur la conversion en chantier d'un devis dont l'intervention porte déjà une facture et sur le brouillon au temps passé que la numérotation chronologique empêche d'émettre ; suite d'une intervention au temps passé non signalée à l'écran Factures ; refus d'annulation d'une facture réglée ; saisie ligne par ligne d'une intervention au temps passé annulée, à reprendre avec le lot du point 14 ; périmètre de la « dernière facture émise », à garder par le futur lot « abandon d'un brouillon »). La note destinée à la documentation (N1 de l'audit n° 4, question du brouillon en section 3 de la passation) est versée par la PR qui consigne cette section.
 
 ## Décision du 28-10-2026 sur le matériel des interventions curatives
 
@@ -1024,7 +1024,7 @@ Réponse de Nelson (21:34 UTC), citée mot pour mot :
 
 « Oui il faut pouvoir saisir du materiel pour une intervention curative »
 
-Lecture retenue par Claude Code, à corriger par Nelson si besoin : la saisie du matériel, réservée jusqu'ici aux interventions d'un contrat actif, s'ouvre aux interventions curatives (hors contrat). **À appliquer** par un lot à part, « matériel d'une intervention curative », placé juste après le lot « marge d'un SAV hors contrat », qui reste limité aux heures ; rien n'en est codé. Ce que la décision ne disait pas, qui saisit le matériel d'une curative et comment il compte dans la marge à l'heure d'un SAV hors contrat, est tranché le 29-10-2026 (ci-dessous).
+Lecture retenue par Claude Code, à corriger par Nelson si besoin : la saisie du matériel, réservée jusqu'ici aux interventions d'un contrat actif, s'ouvre aux interventions curatives (hors contrat). **À appliquer** par un lot à part, « matériel d'une intervention curative », que Claude Code propose de placer juste après le lot « marge d'un SAV hors contrat » (place à confirmer par Nelson), ce dernier restant limité aux heures ; rien n'en est codé. Ce que la décision ne disait pas, qui saisit le matériel d'une curative et comment il compte dans la marge à l'heure d'un SAV hors contrat, est tranché le 29-10-2026 (ci-dessous).
 
 **Mentions antérieures.** Les sections précédentes gardent leur rédaction d'origine ; la mention suivante y est levée par la présente section :
 
@@ -1044,3 +1044,48 @@ Réponse enregistrée par l'outil de questions, citée mot pour mot :
 « Your questions have been answered: "Matériel d'une intervention curative (lot suivant) : comment compte-t-il dans la marge à l'heure d'un SAV hors contrat ? Aujourd'hui, sur un contrat, on saisit le matériel à son coût HT (fournisseur, description, montant HT), sans prix de vente."="Au coût seul (Recommandé)", "Qui saisit le matériel d'une intervention curative ?"="L'encadrement (Recommandé)". You can now continue with these answers in mind. »
 
 Lecture retenue par Claude Code, à corriger par Nelson si besoin : le matériel d'une intervention curative se saisit comme celui d'une intervention de contrat, à son coût HT, par l'encadrement (administration et conducteur de travaux), jamais par le technicien ; dans la marge à l'heure d'un SAV hors contrat, son coût s'ajoute au coût de l'intervention, sans prix de vente. **À appliquer** par le lot « matériel d'une intervention curative » ; rien n'en est codé.
+
+## Validation comptable du 28-10-2026
+
+*Rédigé le 29-10-2026.* Après le compte rendu de Claude Code sur la PR #354 (28-10-2026, 22:13 UTC, heure du journal de la session), Nelson a écrit (22:16 UTC), cité mot pour mot :
+
+« Je valide comptableme t »
+
+Claude Code a demandé aussitôt la portée de cette validation, par une question à choix (22:16 UTC). Question, option choisie et sa description, options écartées et leur description, citées mot pour mot :
+
+- Question : « Votre validation comptable couvre quelles PR ? Elle ne vaut pas mise en service, et je la cite mot pour mot dans l'historique. En attente : #339 (coûts des suites dans la marge du chantier), #341 (suites d'une affaire close ou annulée), #343 (heures des suites hors des heures réalisées), #344 (intervention d'un devis converti aussi en chantier), #348 (temps minimum facturé, pas par 15 min), #351 (facture au temps passé) et #354 (marge d'un SAV hors contrat). #354 est encore en audit et peut changer. » (en-tête « Périmètre »). Option choisie : « Toutes, #354 comprise », décrite ainsi : « Les sept PR : #339, #341, #343, #344, #348, #351 et #354. Pour #354, sur le calcul tel que décrit ; si l'audit change un montant, je vous le signalerai avant de la dire validée. ». Options écartées : « Toutes sauf #354 » (« Les six PR déjà fusionnées : #339, #341, #343, #344, #348 et #351. #354 attend la fin de son audit. ») et « #354 seulement » (« La marge d'un SAV hors contrat, que je viens de vous présenter. Les six autres restent en attente. »).
+
+Réponse enregistrée par l'outil de questions (22:17 UTC), citée mot pour mot :
+
+« Your questions have been answered: "Votre validation comptable couvre quelles PR ? Elle ne vaut pas mise en service, et je la cite mot pour mot dans l'historique. En attente : #339 (coûts des suites dans la marge du chantier), #341 (suites d'une affaire close ou annulée), #343 (heures des suites hors des heures réalisées), #344 (intervention d'un devis converti aussi en chantier), #348 (temps minimum facturé, pas par 15 min), #351 (facture au temps passé) et #354 (marge d'un SAV hors contrat). #354 est encore en audit et peut changer."="Toutes, #354 comprise". You can now continue with these answers in mind. »
+
+Lecture retenue par Claude Code, à corriger par Nelson si besoin :
+
+1. **Portée.** Les montants des sept PR sont validés comptablement par Nelson : #339 (intervention de suivi liée, seconde PR), #341 (suites d'une affaire close ou annulée), #343 (heures des suites hors des heures réalisées), #344 (intervention d'un devis converti aussi en chantier), #348 et #351 (facture au temps passé, première et seconde PR) et #354 (marge d'un SAV hors contrat).
+2. **Pas de mise en service.** Comme le disait la question, la validation ne vaut pas mise en service : ces lots restent **non validés pour mise en service**, que Nelson seul décide (passation, section 5).
+3. **Réserve de #354.** Elle portait sur le calcul tel que décrit à `d775731`. Les trois audits internes de #354 n'ont changé aucun calcul. Le correctif C4 de l'audit n° 1 change seulement l'issue d'une saisie ou d'une correction d'heure concurrente d'un rattachement de main d'œuvre (pose, changement ou retrait) : refus 409, à relancer, au lieu, pour une saisie, de figer le prix d'avant ce rattachement ; une correction ne touche jamais le prix. Claude Code l'a signalé à Nelson (29-10-2026, 07:18 UTC) ; #354 est donc validée comptablement, fusionnée en `8967600` (section suivante).
+4. **Choix par défaut.** La validation porte sur les montants tels que ces lots les calculent. Leurs choix par défaut restent déclarés « à confirmer » (passation, section 4), et la question de la convention d'arrondi du coût de main-d'œuvre, au produit exact ou ligne à ligne (« Main-d’œuvre cumulée » de la fiche), reste posée (passation, section 3 ; #345, note N4).
+
+**Mentions antérieures.** Les sections précédentes gardent leur rédaction d'origine ; les mentions suivantes y sont levées :
+
+- décisions du 27-10-2026 sur la marge des suites et l'intervention d'un devis, introduction : « ils touchent aux montants du chantier, et la validation comptable de Nelson est attendue » (#341, #343 et #344) ;
+- lots du 27 au 28-10-2026 : « #339, #341, #343 et #344 touchent aux montants du chantier, et attendent la validation comptable de Nelson » ;
+- décisions du 28-10-2026 sur la facture au temps passé, point 3 : « #348 reste non validée pour mise en service, la validation comptable de Nelson étant attendue » ;
+- lot du 28-10-2026 : « il n'est pas validé pour mise en service, la validation comptable de Nelson étant attendue » (#348) ;
+- lot du 28-10-2026 (soir) : « il n'est pas validé pour mise en service, la validation comptable de Nelson étant attendue » (#351).
+
+Ces lots restent non validés pour mise en service ; seule l'attente de la validation comptable est levée.
+
+## Lot du 29-10-2026
+
+*Rédigé le 29-10-2026.* Fusion faite par Claude Code selon la décision de Nelson du 20-10-2026, avec une CI verte et un audit interne fusionnable sur la même SHA. Le lot touche aux montants : il est validé comptablement par Nelson (section précédente), et non validé pour mise en service.
+
+### Lot fusionné
+
+- #354 (lot « marge d'un SAV hors contrat ») : prix de vente à l'heure hors contrat de la main d'œuvre de l'intervenant, figé sur chaque heure saisie hors contrat ; marge à l'heure d'une intervention hors contrat, sans devis ni chantier, suites comprises, réservée à l'administration ; heures sans prix signalées (décisions de la nuit du 26 au 27-10-2026, points 4 à 7, et du 27-10-2026 à 10:27 UTC) ; décision du 28-10-2026 et réponses du 29-10-2026 sur le matériel d'une curative consignées (sections plus haut). Trois audits internes : le premier a relevé cinq erreurs (C1 à C5, dont un rattachement concurrent qui laissait figer l'ancien prix) et trois tests manquants, dont deux sur les montants ; le deuxième une erreur du corps de la PR (C6) et un test manquant sur les montants, tous corrigés ou ajoutés à la PR avant fusion ; le troisième l'a dite fusionnable sur `061fddf`.
+
+**Mentions antérieures.** Décisions du 27-10-2026, 10:27 UTC, lecture retenue, point 1 (« La marge d'un SAV hors contrat, lot prévu, n'attend plus cette réponse […] Rien n'en est codé. ») : appliquée par #354 pour le prix hors contrat ; la valorisation sous contrat des visites et de leurs suites reste un lot à part, prévu (passation, section 2).
+
+### Suivi ouvert pendant ce lot
+
+Étiquette `suivi-audit` : #355 (audits de #354 : changement de tarif concurrent d'une saisie, question pour Nelson ; homonymes et heures antérieures au lot dans le signalement ; tests de concurrence qui admettent une issue 201 inaccessible ; heures de visites sans prix figé jusqu'au lot de la valorisation sous contrat). Les notes destinées à la documentation (N1, N16, N17 et N19) sont versées par #354 elle-même ou par la PR qui consigne cette section.
