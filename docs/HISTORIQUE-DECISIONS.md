@@ -1116,3 +1116,39 @@ Ces lots restent non validés pour mise en service ; seule l'attente de la valid
 ### Suivi ouvert pendant ce lot
 
 Étiquette `suivi-audit` : #359 (audit complet a posteriori de #357, T9 : libellé « Coût réel cumulé » d'une visite de contrat sans matériel, non éprouvé à l'écran). Les tests manquants relevés par les audits n° 1 à 4 sont versés dans #357. Les notes destinées à la documentation sont versées par #357 elle-même (N1 et N3 de l'audit n° 1, N10 et N11 de l'audit n° 2), sauf N6 de l'audit n° 1 (limite de l'écran), versée par la PR qui consigne cette section (passation, section 4), comme C4, N29 et N30 de l'audit complet a posteriori (réserve de la validation comptable dans le modèle des droits et l'inventaire ; matériel compté dans aucune marge, passation, section 4). Cette PR précise aussi, dans le README, que la validation comptable du 28-10-2026 ne couvre pas le matériel de #357, comme le correctif C1 de l'audit n° 1 l'avait fait pour la passation.
+
+## Décision du 29-10-2026 sur le refus de facturer une intervention d'une affaire annulée
+
+*Rédigé le 29-10-2026.* Dans son point d'étape sur [#361](https://github.com/Noxia-Groupe/iris/pull/361) (lot « refus de facturer un contrat ou une intervention annulés », tête `42782d2`), Claude Code a écrit à Nelson (17:32 UTC, heure du journal de la session), cité mot pour mot :
+
+« **Choix par défaut, à confirmer par toi** : le refus pour une intervention d'une affaire annulée, et le refus à l'émission. Les deux lectures de ta décision restent aussi à confirmer : toute intervention annulée, et les visites réalisées d'un contrat annulé. »
+
+Réponse de Nelson (17:44 UTC), citée mot pour mot :
+
+« Choix par défaut, à confirmer par toi : le refus pour une intervention d'une affaire annulée : oui je valide ton choix par defaut »
+
+Lecture retenue par Claude Code, à corriger par Nelson si besoin : la réponse reprend le seul premier choix par défaut ; elle valide le refus de facturer une intervention rattachée à une affaire annulée, que l'annulation du devis n'annule pas quand elle n'en est pas issue, appliqué par #361. Restent à confirmer le refus à l'émission d'un brouillon dont l'origine a été annulée depuis sa création, et les deux lectures de la décision de la nuit du 26 au 27-10-2026, point 14 (toute intervention annulée ; visites réalisées d'un contrat annulé, question en section 3 de la passation). La validation comptable du lot et sa mise en service restent attendues.
+
+## Décisions du 29-10-2026 au soir sur le refus de facturer une origine annulée
+
+*Rédigé le 29-10-2026.* Après les correctifs de l'audit n° 1 de [#361](https://github.com/Noxia-Groupe/iris/pull/361) (lot « refus de facturer un contrat ou une intervention annulés », tête `03452a3`), Claude Code a écrit à Nelson (18:54 UTC, heure du journal de la session), cité mot pour mot :
+
+> Restent à ta décision :
+> - le refus d'émettre un brouillon dont l'origine a été annulée depuis sa création ;
+> - les deux lectures de ta décision du point 14 : toute intervention annulée, et les visites réalisées d'un contrat annulé ;
+> - la validation comptable du lot.
+
+Réponse de Nelson (19:05 UTC), citée mot pour mot :
+
+> Oui je valide aussi le refus d’emetre un brouillon
+> Validation comptable ok
+
+Claude Code a reposé les deux lectures (19:05 UTC), cité mot pour mot :
+
+> Ta réponse ne tranche pas deux lectures de ta décision du point 14, qui restent à confirmer. Le refus vaut-il :
+> - pour toute intervention annulée, même depuis sa fiche et non avec son devis ?
+> - pour les visites d'un contrat annulé, réalisées avant l'annulation ?
+
+Réponse de Nelson (19:11 UTC), citée mot pour mot : « Oui pour les deux lectures ».
+
+Lecture retenue par Claude Code, à corriger par Nelson si besoin : sont validés le refus d'émettre un brouillon dont l'origine a été annulée depuis sa création, et les deux lectures du point 14 (le refus vaut pour toute intervention annulée, depuis sa fiche comme avec son devis, et pour les visites d'un contrat annulé réalisées avant l'annulation, qui restent terminées). Avec la décision de 17:44 UTC (section précédente), tous les choix du lot sont confirmés. « Validation comptable ok » valide comptablement le lot de #361 tel qu'il est dans `03452a3` ; les correctifs de son audit n° 2 (documentation et un test) n'en changent ni montant ni règle. Ce n'est pas une mise en service, qui reste au feu vert de Nelson. Restent ouverts, sans rien de tranché, les deux constats du lot 4 suite (facture déjà créée sur le contrat ; saisies antérieures au début d'une intervention) et l'abandon d'un brouillon (passation, section 3, #352).

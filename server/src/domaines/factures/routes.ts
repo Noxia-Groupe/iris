@@ -17,7 +17,7 @@ import { getCompanySettings } from '../administration/metier';
 import { CLES_COMPTABLES, verrouillerParametrageComptable, ImputationIncompletError, ecrituresPourPiece } from '../comptabilite/metier';
 import {
   factureInclude, formaterAdresseFacturation, FactureRattachementRefuse, ventilationTvaDerivee, ventilationFacture,
-  lignesAvoirPartiel, AvoirPlafondError, derniereDateFactureNumerotee, refusDocumentFacture,
+  lignesAvoirPartiel, AvoirPlafondError, derniereDateFactureNumerotee, refusDocumentFacture, refuserOrigineAnnulee,
 } from './metier';
 import { rendreDocumentFacturePdf } from './pdf';
 import { tempsPasseDeLaChaine } from './tempsPasse';
@@ -191,13 +191,6 @@ export function enregistrerRoutesFactures(app: Express): void {
       // Une origine étrangère ou inexistante répond 404 afin de ne pas divulguer son existence.
       // L'affaire (origine CHANTIER) se contrôle dans la transaction de création, plus bas.
       if (origine === 'INTERVENTION' && !await prisma.intervention.findFirst({ where: { id: interventionId!, clientId }, select: { id: true } })) return res.status(404).json({ error: 'Intervention facturable introuvable.' });
-      // Une intervention au temps passé, comme ses suites, se facture par sa facture au temps passé, qui
-      // reprend les heures saisies (lot « facture au temps passé », domaines/factures/tempsPasse.ts), ou,
-      // quand elle se facture avec le chantier de son affaire, par la facture de ce chantier.
-      const tempsPasse = origine === 'INTERVENTION' ? await tempsPasseDeLaChaine(prisma, interventionId!) : null;
-      if (tempsPasse) return res.status(409).json({ error: tempsPasse.avecLeChantier
-        ? `L’intervention ${tempsPasse.reference} est au temps passé et se facture avec le chantier de son affaire, comme ses suites : créez la facture du chantier.`
-        : `L’intervention ${tempsPasse.reference} est au temps passé : sa facture, et celle de ses suites, reprend les heures saisies. Créez-la par « Facture au temps passé ».` });
       if (origine === 'CONTRAT' && !await prisma.contratMaintenance.findFirst({ where: { id: contratMaintenanceId!, clientId }, select: { id: true } })) return res.status(404).json({ error: 'Contrat facturable introuvable.' });
       const lignesBrutes = Array.isArray(req.body?.lignes) ? req.body.lignes : [];
       if (!lignesBrutes.length) return res.status(400).json({ error: 'Une facture doit contenir au moins une ligne.' });
@@ -223,11 +216,22 @@ export function enregistrerRoutesFactures(app: Express): void {
         // Sous verrou partagé : un changement de client de l'affaire en cours (cf. PATCH
         // /api/chantiers/:id) attend la fin de cette création et voit alors la facture, ou s'enregistre
         // d'abord, et l'affaire n'est plus celle de ce client. Une annulation en cours est attendue de
-        // même, puis refusée ci-dessous.
+        // même, puis refusée ci-dessous ; pour une intervention ou un contrat, par refuserOrigineAnnulee.
         if (origine === 'CHANTIER') {
           const [chantier] = await tx.$queryRaw<Array<{ statut: string }>>(Prisma.sql`SELECT "statut" FROM "Chantier" WHERE "id" = ${chantierId} AND "clientId" = ${clientId} FOR SHARE`);
           if (!chantier) throw new FactureRattachementRefuse(404, 'Affaire facturable introuvable.');
           if (chantier.statut === 'ANNULE') throw new FactureRattachementRefuse(409, 'Une affaire annulée ne peut pas être facturée.');
+        } else {
+          await refuserOrigineAnnulee(tx, { origine, chantierId, interventionId, contratMaintenanceId });
+          // Une intervention au temps passé, comme ses suites, se facture par sa facture au temps passé, qui
+          // reprend les heures saisies (lot « facture au temps passé », domaines/factures/tempsPasse.ts), ou,
+          // quand elle se facture avec le chantier de son affaire, par la facture de ce chantier. Ce refus suit
+          // celui d'une origine annulée : une intervention annulée n'est pas renvoyée à une autre facture,
+          // refusée à son tour (#352, audit n° 2 de #351, N2 ; audit n° 1 de #361, C1).
+          const tempsPasse = origine === 'INTERVENTION' ? await tempsPasseDeLaChaine(tx, interventionId!) : null;
+          if (tempsPasse) throw new FactureRattachementRefuse(409, tempsPasse.avecLeChantier
+            ? `L’intervention ${tempsPasse.reference} est au temps passé et se facture avec le chantier de son affaire, comme ses suites : créez la facture du chantier.`
+            : `L’intervention ${tempsPasse.reference} est au temps passé : sa facture, et celle de ses suites, reprend les heures saisies. Créez-la par « Facture au temps passé ».`);
         }
         const creee = await tx.facture.create({ data: { clientId, clientRaisonSociale: client.raisonSociale, origine, chantierId, interventionId, contratMaintenanceId, motifHorsAffaire, dateEmission, dateEcheance, totalHt, totalTva, totalTtc, createdById: req.user!.id, lignes: { create: lignes }, ventilationTva: { create: ventilationTva } }, include: factureInclude });
         await tx.journalFacture.create({ data: { factureId: creee.id, acteurId: req.user!.id, action: 'CREATION_BROUILLON', detail: `Origine ${origine}` } });
@@ -345,6 +349,9 @@ export function enregistrerRoutesEmissionFactures(app: Express): void {
         const facture = await tx.facture.findUnique({ where: { id: paramId(req) }, include: { lignes: true, ventilationTva: true } });
         if (!facture) return { erreur: 'NOT_FOUND' as const };
         if (facture.statut !== 'BROUILLON') return { erreur: 'NOT_DRAFT' as const };
+        // Un brouillon dont l'origine a été annulée depuis sa création ne s'émet pas (choix par défaut validé
+        // par Nelson le 29-10-2026) ; faute de route qui l'abandonne, il reste brouillon.
+        await refuserOrigineAnnulee(tx, facture);
         const annee = facture.dateEmission.getUTCFullYear();
         const derniereEmise = await derniereDateFactureNumerotee(tx);
         if (derniereEmise && facture.dateEmission < derniereEmise.dateEmission) return { erreur: 'CHRONOLOGY' as const, limite: derniereEmise.dateEmission };
@@ -377,6 +384,7 @@ export function enregistrerRoutesEmissionFactures(app: Express): void {
       res.json(decimalToNumber(resultat.facture));
     } catch (error) {
       if (error instanceof ImputationIncompletError || error instanceof IdentiteEmetteurIncompleteError || error instanceof IdentiteClientIncompleteError) return res.status(409).json({ error: error.message });
+      if (error instanceof FactureRattachementRefuse) return res.status(error.statut).json({ error: error.message });
       if ((error as { code?: string }).code === 'P2002') return res.status(409).json({ error: 'Numérotation de facture déjà attribuée, veuillez réessayer.' });
       res.status(500).json({ error: 'Émission de facture impossible.' });
     }

@@ -37,6 +37,38 @@ export class FactureRattachementRefuse extends Error {
   constructor(statut: number, message: string) { super(message); this.statut = statut; }
 }
 
+// Origine annulée : pas de facture (décision de Nelson de la nuit du 26 au 27-10-2026, point 14 : « Devis
+// annulé : il faut refuser zn cas d’annulation car pas d’intervention ou contrat donc pas de facture »).
+// Lectures et choix par défaut confirmés par Nelson le 29-10-2026 : le refus vaut pour toute intervention
+// annulée, depuis sa fiche comme avec son devis, et pour une intervention d'un contrat annulé, visite réalisée
+// avant l'annulation comprise (« Oui pour les deux lectures ») ; pour une intervention rattachée à une affaire
+// annulée (« oui je valide ton choix par defaut ») ; et à l'émission d'un brouillon dont l'origine a été
+// annulée depuis sa création (« Oui je valide aussi le refus d’emetre un brouillon »). Chaque statut est relu
+// sous verrou partagé, dans l'ordre des annulations (intervention, contrat, affaire : devis/annulation.ts) :
+// une annulation en cours est attendue, puis refusée. L'intervention verrouillée garde son contrat et son affaire.
+export async function refuserOrigineAnnulee(tx: Prisma.TransactionClient, piece: { origine: string; chantierId: string | null; interventionId: string | null; contratMaintenanceId: string | null }) {
+  const statutContrat = async (id: string) => (await tx.$queryRaw<Array<{ statut: string }>>(Prisma.sql`SELECT "statut" FROM "ContratMaintenance" WHERE "id" = ${id} FOR SHARE`))[0]?.statut;
+  const statutAffaire = async (id: string) => (await tx.$queryRaw<Array<{ statut: string }>>(Prisma.sql`SELECT "statut" FROM "Chantier" WHERE "id" = ${id} FOR SHARE`))[0]?.statut;
+  if (piece.origine === 'INTERVENTION' && piece.interventionId) {
+    const [intervention] = await tx.$queryRaw<Array<{ statut: string; contratMaintenanceId: string | null; chantierId: string | null }>>(
+      Prisma.sql`SELECT "statut", "contratMaintenanceId", "chantierId" FROM "Intervention" WHERE "id" = ${piece.interventionId} FOR SHARE`);
+    if (!intervention) throw new FactureRattachementRefuse(404, 'Intervention facturable introuvable.');
+    if (intervention.statut === 'ANNULEE') throw new FactureRattachementRefuse(409, 'Une intervention annulée ne peut pas être facturée.');
+    if (intervention.contratMaintenanceId && await statutContrat(intervention.contratMaintenanceId) === 'ANNULE') {
+      throw new FactureRattachementRefuse(409, 'Le contrat de cette intervention est annulé : elle ne peut pas être facturée.');
+    }
+    if (intervention.chantierId && await statutAffaire(intervention.chantierId) === 'ANNULE') {
+      throw new FactureRattachementRefuse(409, 'L’affaire de cette intervention est annulée : elle ne peut pas être facturée.');
+    }
+  }
+  if (piece.origine === 'CONTRAT' && piece.contratMaintenanceId && await statutContrat(piece.contratMaintenanceId) === 'ANNULE') {
+    throw new FactureRattachementRefuse(409, 'Un contrat annulé ne peut pas être facturé.');
+  }
+  if (piece.origine === 'CHANTIER' && piece.chantierId && await statutAffaire(piece.chantierId) === 'ANNULE') {
+    throw new FactureRattachementRefuse(409, 'Une affaire annulée ne peut pas être facturée.');
+  }
+}
+
 type VentilationTva = { tauxTva: number; totalHt: number; totalTva: number; totalTtc: number };
 export const ventilationTvaDerivee = (lignes: LigneTaxable[]): VentilationTva[] => tauxUtilises(lignes).sort((a, b) => a - b).map(tauxTva => {
   const totalHt = baseHtDuTaux(lignes, tauxTva);
