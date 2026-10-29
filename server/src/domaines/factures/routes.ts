@@ -349,8 +349,8 @@ export function enregistrerRoutesEmissionFactures(app: Express): void {
         const facture = await tx.facture.findUnique({ where: { id: paramId(req) }, include: { lignes: true, ventilationTva: true } });
         if (!facture) return { erreur: 'NOT_FOUND' as const };
         if (facture.statut !== 'BROUILLON') return { erreur: 'NOT_DRAFT' as const };
-        // Un brouillon dont l'origine a été annulée depuis sa création ne s'émet pas (choix par défaut, à
-        // confirmer) ; faute de route qui l'abandonne, il reste brouillon.
+        // Un brouillon dont l'origine a été annulée depuis sa création ne s'émet pas (choix par défaut validé
+        // par Nelson le 29-10-2026) ; faute de route qui l'abandonne, il reste brouillon.
         await refuserOrigineAnnulee(tx, facture);
         const annee = facture.dateEmission.getUTCFullYear();
         const derniereEmise = await derniereDateFactureNumerotee(tx);

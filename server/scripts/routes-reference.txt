@@ -55,7 +55,7 @@ GET /api/factures/export-comptable.csv requireAuth#07b983da0ce5 > requireAdmin#7
 POST /api/mentions-legales/:version/publier requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#1b5902ebb285
 POST /api/mentions-legales requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#80030fa61cd1
 GET /api/mentions-legales requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#dcdb04c92920
-POST /api/factures/:id/emettre requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#90e0c1e2f508
+POST /api/factures/:id/emettre requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#94697d81a064
 POST /api/factures/:id/regler requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#7c4c1669baf6
 POST /api/factures/:id/annuler requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#9ae7ad2b98c2
 POST /api/factures/:id/avoirs requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#4527855323e1

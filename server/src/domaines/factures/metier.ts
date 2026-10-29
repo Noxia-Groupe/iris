@@ -39,13 +39,13 @@ export class FactureRattachementRefuse extends Error {
 
 // Origine annulée : pas de facture (décision de Nelson de la nuit du 26 au 27-10-2026, point 14 : « Devis
 // annulé : il faut refuser zn cas d’annulation car pas d’intervention ou contrat donc pas de facture »).
-// Lectures retenues, choix par défaut à confirmer : le refus vaut pour toute intervention annulée, depuis
-// sa fiche comme avec son devis ; pour une intervention d'un contrat annulé, visite réalisée avant
-// l'annulation comprise ; et à l'émission d'un brouillon dont l'origine a été annulée depuis sa création.
-// Il vaut aussi pour une intervention rattachée à une affaire annulée : choix par défaut validé par Nelson
-// le 29-10-2026 (« oui je valide ton choix par defaut »). Chaque statut est relu sous verrou partagé,
-// dans l'ordre des annulations (intervention, contrat, affaire : devis/annulation.ts) : une annulation en
-// cours est attendue, puis refusée. L'intervention verrouillée garde son contrat et son affaire.
+// Lectures et choix par défaut confirmés par Nelson le 29-10-2026 : le refus vaut pour toute intervention
+// annulée, depuis sa fiche comme avec son devis, et pour une intervention d'un contrat annulé, visite réalisée
+// avant l'annulation comprise (« Oui pour les deux lectures ») ; pour une intervention rattachée à une affaire
+// annulée (« oui je valide ton choix par defaut ») ; et à l'émission d'un brouillon dont l'origine a été
+// annulée depuis sa création (« Oui je valide aussi le refus d’emetre un brouillon »). Chaque statut est relu
+// sous verrou partagé, dans l'ordre des annulations (intervention, contrat, affaire : devis/annulation.ts) :
+// une annulation en cours est attendue, puis refusée. L'intervention verrouillée garde son contrat et son affaire.
 export async function refuserOrigineAnnulee(tx: Prisma.TransactionClient, piece: { origine: string; chantierId: string | null; interventionId: string | null; contratMaintenanceId: string | null }) {
   const statutContrat = async (id: string) => (await tx.$queryRaw<Array<{ statut: string }>>(Prisma.sql`SELECT "statut" FROM "ContratMaintenance" WHERE "id" = ${id} FOR SHARE`))[0]?.statut;
   const statutAffaire = async (id: string) => (await tx.$queryRaw<Array<{ statut: string }>>(Prisma.sql`SELECT "statut" FROM "Chantier" WHERE "id" = ${id} FOR SHARE`))[0]?.statut;

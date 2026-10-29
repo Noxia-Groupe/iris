@@ -5,8 +5,8 @@ import { test, expect, choisirClient, dateDuJour } from './fixtures';
 const api = `http://127.0.0.1:${process.env.E2E_API_PORT || '3001'}/api`;
 
 // Origine annulée : pas de facture (décision de Nelson de la nuit du 26 au 27-10-2026, point 14 : « Devis annulé : il
-// faut refuser zn cas d’annulation car pas d’intervention ou contrat donc pas de facture » ; lectures retenues et refus
-// à l'émission : choix par défaut, à confirmer). L'écran Factures ne propose plus le contrat annulé avec son devis, ni sa
+// faut refuser zn cas d’annulation car pas d’intervention ou contrat donc pas de facture » ; lectures et refus à
+// l'émission confirmés par Nelson le 29-10-2026). L'écran Factures ne propose plus le contrat annulé avec son devis, ni sa
 // visite réalisée avant l'annulation, ni l'intervention rattachée à l'affaire annulée ; un brouillon créé avant
 // l'annulation ne s'émet pas, et le refus du serveur s'affiche.
 test('facture : contrat annulé avec son devis, sa visite réalisée et l’intervention de l’affaire annulée ne sont plus proposés ; le brouillon d’avant l’annulation ne s’émet pas', async ({ request, session, creerClient, allerSurPageAdmin }) => {
