@@ -13,6 +13,7 @@ import { routeMixte } from '../../http/routes-mixtes';
 import { FUSEAU_HORAIRE_PAR_DEFAUT, anneeEntreprise, aujourdHuiEntreprise, dateIsoStricte } from '../../commun/dates';
 import { decimalToNumber, centimes } from '../../commun/montants';
 import { nombreDecimalNonNegatif } from '../../commun/validation';
+import { estTauxTvaFrancais } from '../../commun/tva';
 import { getParametres } from '../parametres/metier';
 import { getCompanySettings } from '../administration/metier';
 import { SITE_FACTURATION_ORDRE, formaterAdresseFacturation } from '../factures/metier';
@@ -618,8 +619,10 @@ export function enregistrerRoutesDevis(app: Express): void {
   // relus des réglages du jour, et la duplication est refusée (409), sans consommer de numéro, tant que
   // le pas est vide ou n'est plus admis, ou si la quantité de la ligne copiée ne suit pas ces réglages
   // (choix par défaut, à confirmer : refus plutôt qu'une quantité ajustée en silence).
+  // TVA française (commun/tva.ts) : un duplicata est une saisie nouvelle ; une ligne copiée d'un autre taux,
+  // saisie avant le lot « TVA française », la refuse de même (409), sans consommer de numéro.
   app.post('/api/devis/:id/duplication', requireAuth, requirePermission('devis:write'), async (req, res) => { try {
-    const apercu = await prisma.devis.findUnique({ where: { id: paramId(req) }, select: { id: true, auTempsPasse: true, lignes: { where: { tempsPasse: true }, select: { quantite: true } } } });
+    const apercu = await prisma.devis.findUnique({ where: { id: paramId(req) }, select: { id: true, auTempsPasse: true, lignes: { select: { quantite: true, tempsPasse: true, tauxTva: true } } } });
     if (!apercu) return void res.status(404).json({ error: 'Devis introuvable.' });
     const { tauxAcompteDefaut, pasTempsPasseMinutes, tempsMinimumMinutes } = await getParametres();
     const reglagesDuJour = () => reglagesTempsPasseDeLaSociete({ pasTempsPasseMinutes, tempsMinimumMinutes });
@@ -633,12 +636,17 @@ export function enregistrerRoutesDevis(app: Express): void {
         throw new TempsPasseConflitError(`Duplication impossible : la ligne au temps passé du devis copié (${Number(ligne.quantite).toLocaleString('fr-FR', { maximumFractionDigits: 3 })} h) ne suit pas les réglages du jour, un minimum de ${dureeTempsPasse(reglages.tempsMinimumMinutes!)} puis des tranches de ${reglages.pasTempsPasseMinutes} minutes. Créez un nouveau devis.`);
       }
     };
-    if (apercu.auTempsPasse) exigerLigneCopiee(apercu.lignes[0], reglagesDuJour());
+    const exigerTauxCopies = (lignes: { tauxTva: unknown }[]) => {
+      if (lignes.some((ligne) => !estTauxTvaFrancais(ligne.tauxTva))) throw new DevisConflitError('Duplication impossible : une ligne du devis copié porte un taux de TVA non accepté (0 %, 5,5 %, 10 % ou 20 %). Créez un nouveau devis.');
+    };
+    exigerTauxCopies(apercu.lignes);
+    if (apercu.auTempsPasse) exigerLigneCopiee(apercu.lignes.find((ligne) => ligne.tempsPasse), reglagesDuJour());
     const numero = await nouveauNumeroDevis();
     const duplicata = await transactionVerifiee(async tx => {
       if (!await verrouillerDevis(tx, paramId(req))) return null;
       const source = await tx.devis.findUniqueOrThrow({ where: { id: paramId(req) }, include: devisInclude });
       const reglagesTempsPasse: ReglagesTempsPasseDevis = source.auTempsPasse ? reglagesDuJour() : { pasTempsPasseMinutes: null, tempsMinimumMinutes: null };
+      exigerTauxCopies(source.lignes);
       if (source.auTempsPasse) exigerLigneCopiee(source.lignes.find((ligne) => ligne.tempsPasse), reglagesTempsPasse);
       return tx.devis.create({
         data: {

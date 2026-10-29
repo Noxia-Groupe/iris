@@ -12,6 +12,7 @@ import {
   centimesTtcLigne, centimes,
 } from '../../commun/montants';
 import { nombreDecimalNonNegatif } from '../../commun/validation';
+import { estTauxTvaFrancais, REFUS_TAUX_TVA } from '../../commun/tva';
 import { csvComptable } from '../../commun/csv';
 import { getCompanySettings } from '../administration/metier';
 import { CLES_COMPTABLES, verrouillerParametrageComptable, ImputationIncompletError, ecrituresPourPiece } from '../comptabilite/metier';
@@ -201,6 +202,7 @@ export function enregistrerRoutesFactures(app: Express): void {
         const tauxTva = nombreDecimalNonNegatif(ligne?.tauxTva, 3, true);
         const nature = String(ligne?.nature || 'PRESTATION');
         if (!designation || designation.length > 500 || !['PRESTATION', 'ARTICLE'].includes(nature) || quantite === null || quantite <= 0 || prixUnitaireHt === null || tauxTva === null || tauxTva > 100) throw new FactureInvalideError('Ligne de facture invalide.');
+        if (!estTauxTvaFrancais(tauxTva)) throw new FactureInvalideError(REFUS_TAUX_TVA);
         const totalHt = arrondiCommercialLigneHt(ligne?.quantite, ligne?.prixUnitaireHt);
         const totalTtc = centimesTtcLigne(totalHt, ligne?.tauxTva);
         if (totalTtc > PLAFOND_MONTANT) throw new FactureInvalideError('Montant de ligne hors des limites acceptées.');

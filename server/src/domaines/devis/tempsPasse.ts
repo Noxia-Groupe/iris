@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../../db';
 import { PLAFOND_MONTANT, arrondiCommercialLigneHt, centimesTtcLigne } from '../../commun/montants';
 import { nombreDecimalNonNegatif } from '../../commun/validation';
+import { estTauxTvaFrancais } from '../../commun/tva';
 import { UNITE_MAIN_OEUVRE } from '../catalogue/main-oeuvre';
 import { formatMontantFacture } from '../factures/metier';
 
@@ -52,7 +53,8 @@ export const REFUS_PRIX_ACHAT_TEMPS_PASSE = 'Une ligne au temps passé n’a pas
 export const REFUS_UNITE_TEMPS_PASSE = 'La ligne au temps passé est de la main-d’œuvre, comptée à l’heure.';
 export const REFUS_UNE_LIGNE_TEMPS_PASSE = 'Un devis au temps passé porte exactement une ligne de main d’œuvre au temps passé.';
 export const REFUS_LIGNE_SUR_DEVIS_ORDINAIRE = 'Une ligne au temps passé n’existe que sur un devis au temps passé : cochez « Devis au temps passé ».';
-export const REFUS_TVA_MAIN_OEUVRE = 'TVA de la main d’œuvre invalide pour un devis (un pourcentage de 0 à 100, au centième) : corrigez la fiche du catalogue.';
+export const REFUS_TVA_MAIN_OEUVRE = 'TVA de la main d’œuvre non acceptée pour un devis (0 %, 5,5 %, 10 % ou 20 %) : corrigez la fiche du catalogue.';
+export const REFUS_TVA_LIGNE_TEMPS_PASSE = 'La ligne au temps passé porte une TVA non acceptée (0 %, 5,5 %, 10 % ou 20 %) : retirez-la, puis ajoutez-la de nouveau depuis une main d’œuvre à l’un de ces taux.';
 
 export class TempsPasseSaisieError extends Error {}
 export class TempsPasseConflitError extends Error {}
@@ -199,6 +201,10 @@ export async function resoudreLigneTempsPasse(
     if ((saisie.tarif !== null && saisie.tarif !== existante.tarifTempsPasse) || (catalogue && catalogue.id !== existante.catalogueId)) {
       throw new TempsPasseSaisieError(REFUS_CHANGEMENT_LIGNE_TEMPS_PASSE);
     }
+    // Comme une ligne ordinaire, revalidée à chaque modification du devis (commun/tva.ts) : une ligne
+    // ajoutée avant le lot « TVA française » à un autre taux ne se garde pas ; sa TVA ne se saisit pas,
+    // la ligne se remplace.
+    if (!estTauxTvaFrancais(existante.tauxTva)) throw new TempsPasseSaisieError(REFUS_TVA_LIGNE_TEMPS_PASSE);
     source = { prix: existante.prixUnitaireHt, tva: existante.tauxTva, reference: existante.reference!, catalogueId: existante.catalogueId!, tarif: existante.tarifTempsPasse as TarifTempsPasse };
   } else {
     const fiche = await db.cataloguePrestation.findUnique({
@@ -211,8 +217,9 @@ export async function resoudreLigneTempsPasse(
     // catalogue ») ; celui sous contrat, son prix à l'heure sous contrat.
     const prix = saisie.tarif === 'SOUS_CONTRAT' ? fiche.prixHeureSousContratHt : fiche.prixVenteHt;
     if (prix === null) throw new TempsPasseSaisieError(REFUS_FICHE_TEMPS_PASSE);
-    // Même règle que la TVA d'une ligne saisie : la fiche du catalogue admet aujourd'hui une TVA plus large.
-    if (nombreDecimalNonNegatif(fiche.tauxTva.toString(), 3, true) === null || fiche.tauxTva.greaterThan(100)) throw new TempsPasseSaisieError(REFUS_TVA_MAIN_OEUVRE);
+    // Même règle que la TVA d'une ligne saisie (commun/tva.ts) : une fiche enregistrée avant le lot « TVA
+    // française » peut porter un autre taux.
+    if (!estTauxTvaFrancais(fiche.tauxTva)) throw new TempsPasseSaisieError(REFUS_TVA_MAIN_OEUVRE);
     source = { prix, tva: fiche.tauxTva, reference: fiche.reference, catalogueId: catalogue!.id, tarif: saisie.tarif! };
   }
   if (saisie.prixUnitaireHt !== null && !source.prix.equals(saisie.prixUnitaireHt)) {

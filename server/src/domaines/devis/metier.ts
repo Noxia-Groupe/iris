@@ -5,6 +5,7 @@ import { voitPrixAchatDevis } from '../../droits/visibilite';
 import { FUSEAU_HORAIRE_PAR_DEFAUT, anneeEntreprise } from '../../commun/dates';
 import { PLAFOND_MONTANT, tauxUtilises, tvaDuTaux, arrondiCommercialLigneHt, centimesTtcLigne, centimes } from '../../commun/montants';
 import { nombreDecimalNonNegatif } from '../../commun/validation';
+import { estTauxTvaFrancais, REFUS_TAUX_TVA } from '../../commun/tva';
 import { getParametres } from '../parametres/metier';
 import { getCompanySettings } from '../administration/metier';
 import { type CatalogueFamily, catalogueFamily } from '../catalogue/metier';
@@ -105,6 +106,7 @@ export function devisPayload(body: Record<string, unknown>) {
     const tauxTva = item.tauxTva === undefined || item.tauxTva === null ? 20 : nombreDecimalNonNegatif(item.tauxTva, 3, true);
     const unite = item.unite === undefined || item.unite === null ? null : String(item.unite).trim() || null;
     if (!['MAIN_OEUVRE', 'FOURNITURE'].includes(nature) || !designation || designation.length > 500 || quantite === null || quantite <= 0 || prixUnitaireHt === null || tauxTva === null || tauxTva > 100 || (unite !== null && unite.length > 40)) throw new DevisSaisieError('Ligne de devis invalide.');
+    if (!estTauxTvaFrancais(tauxTva)) throw new DevisSaisieError(REFUS_TAUX_TVA);
     const totalHt = arrondiCommercialLigneHt(quantite, prixUnitaireHt);
     const totalTtc = centimesTtcLigne(totalHt, tauxTva);
     // Même plafond que les factures : au-delà, la colonne Decimal(12, 2) refuserait le montant.

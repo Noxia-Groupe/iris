@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../../db';
 import { PLAFOND_MONTANT, arrondiCommercialLigneHt, centimes, centimesTtcLigne } from '../../commun/montants';
 import { dateEmissionEstFuture, dateIsoStricte } from '../../commun/dates';
+import { estTauxTvaFrancais } from '../../commun/tva';
 import { ventilationTvaDerivee } from './metier';
 
 // --- Facture au temps passé (lot « facture au temps passé », seconde PR) ---
@@ -196,6 +197,11 @@ export async function preparerFactureTempsPasse(db: Db, interventionId: string, 
   const facturees = minutesFacturees(heuresSaisies.times(60), grille);
   const quantiteFacturee = heuresDesMinutes(facturees);
 
+  // Une facture créée depuis le lot « TVA française » ne porte que ses taux (commun/tva.ts) : le devis
+  // d'un autre taux, saisi avant ce lot, ne se facture pas au temps passé.
+  if (devis.lignes.some((ligne) => !estTauxTvaFrancais(ligne.tauxTva))) {
+    throw new RefusFactureTempsPasse(409, `Le devis ${devis.numero} porte un taux de TVA non accepté sur une facture (0 %, 5,5 %, 10 % ou 20 %) : la facture au temps passé ne peut pas reprendre ses lignes.`);
+  }
   const lignes: LigneFactureTempsPasse[] = devis.lignes.map((ligne, ordre) => {
     const quantite = ligne.tempsPasse ? quantiteFacturee : ligne.quantite;
     const totalHt = arrondiCommercialLigneHt(quantite.toString(), ligne.prixUnitaireHt.toString());

@@ -1,6 +1,7 @@
 import express from 'express';
 import { prisma } from '../../db';
 import { voitPrixAchatDevis } from '../../droits/visibilite';
+import { estTauxTvaFrancais, REFUS_TAUX_TVA } from '../../commun/tva';
 
 // --- Catalogue natif Iris ---
 // Trois familles partagent la même forme (référence, nom, prix, TVA, catégorie) et sont
@@ -38,6 +39,17 @@ function cataloguePrixAchat(value: unknown): number | null {
   return value === undefined || value === null || (typeof value === 'string' && value.trim() === '') ? null : catalogueNombre(value, "Prix d'achat");
 }
 
+// TVA d'une fiche : 20 % sans valeur, sinon un des taux français (commun/tva.ts), à la création comme à
+// la modification ; une fiche enregistrée avant le lot « TVA française » garde son taux tant qu'elle
+// n'est pas modifiée. Un champ vide est refusé, comme sur une ligne de devis ou de facture : `Number('')`
+// vaudrait 0, soit une autoliquidation que personne n'a saisie (#324, N1).
+function tauxTvaCatalogue(value: unknown): number {
+  if (typeof value === 'string' && value.trim() === '') throw new Error(REFUS_TAUX_TVA);
+  const taux = catalogueNombre(value, 'TVA', 20);
+  if (!estTauxTvaFrancais(taux)) throw new Error(REFUS_TAUX_TVA);
+  return taux;
+}
+
 // Champs communs aux trois familles et aux mains d'œuvre : référence, nom, description,
 // catégorie, TVA.
 export function champsCommunsCatalogue(body: Record<string, unknown>) {
@@ -51,7 +63,7 @@ export function champsCommunsCatalogue(body: Record<string, unknown>) {
     nom,
     description: body.description ? String(body.description).trim() : null,
     categorieId: body.categorieId ? String(body.categorieId) : null,
-    tauxTva: catalogueNombre(body.tauxTva, 'TVA', 20),
+    tauxTva: tauxTvaCatalogue(body.tauxTva),
   };
 }
 
