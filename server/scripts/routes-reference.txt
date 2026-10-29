@@ -38,7 +38,7 @@ GET /api/factures/:id/envois requireAuth#07b983da0ce5 > requireAdmin#72440b3191a
 POST /api/factures/:id/envois requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#9623ed8b265a
 GET /api/factures/:id/journal requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#90d251d8d096
 GET /api/factures/:id/tracabilite requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#4d3a959b39f5
-POST /api/factures requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#e960a67dfbcc
+POST /api/factures requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#314abe47de50
 GET /api/facturation/prete-a-facturer requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#be63c1fffb33
 GET /api/comptabilite requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#13e90d7b003f
 POST /api/comptabilite/comptes requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#6b69dfe1117a

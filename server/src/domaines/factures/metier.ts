@@ -41,8 +41,9 @@ export class FactureRattachementRefuse extends Error {
 // annulé : il faut refuser zn cas d’annulation car pas d’intervention ou contrat donc pas de facture »).
 // Lectures retenues, choix par défaut à confirmer : le refus vaut pour toute intervention annulée, depuis
 // sa fiche comme avec son devis ; pour une intervention d'un contrat annulé, visite réalisée avant
-// l'annulation comprise ; pour une intervention rattachée à une affaire annulée ; et à l'émission d'un
-// brouillon dont l'origine a été annulée depuis sa création. Chaque statut est relu sous verrou partagé,
+// l'annulation comprise ; et à l'émission d'un brouillon dont l'origine a été annulée depuis sa création.
+// Il vaut aussi pour une intervention rattachée à une affaire annulée : choix par défaut validé par Nelson
+// le 29-10-2026 (« oui je valide ton choix par defaut »). Chaque statut est relu sous verrou partagé,
 // dans l'ordre des annulations (intervention, contrat, affaire : devis/annulation.ts) : une annulation en
 // cours est attendue, puis refusée. L'intervention verrouillée garde son contrat et son affaire.
 export async function refuserOrigineAnnulee(tx: Prisma.TransactionClient, piece: { origine: string; chantierId: string | null; interventionId: string | null; contratMaintenanceId: string | null }) {

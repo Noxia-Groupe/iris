@@ -191,13 +191,6 @@ export function enregistrerRoutesFactures(app: Express): void {
       // Une origine étrangère ou inexistante répond 404 afin de ne pas divulguer son existence.
       // L'affaire (origine CHANTIER) se contrôle dans la transaction de création, plus bas.
       if (origine === 'INTERVENTION' && !await prisma.intervention.findFirst({ where: { id: interventionId!, clientId }, select: { id: true } })) return res.status(404).json({ error: 'Intervention facturable introuvable.' });
-      // Une intervention au temps passé, comme ses suites, se facture par sa facture au temps passé, qui
-      // reprend les heures saisies (lot « facture au temps passé », domaines/factures/tempsPasse.ts), ou,
-      // quand elle se facture avec le chantier de son affaire, par la facture de ce chantier.
-      const tempsPasse = origine === 'INTERVENTION' ? await tempsPasseDeLaChaine(prisma, interventionId!) : null;
-      if (tempsPasse) return res.status(409).json({ error: tempsPasse.avecLeChantier
-        ? `L’intervention ${tempsPasse.reference} est au temps passé et se facture avec le chantier de son affaire, comme ses suites : créez la facture du chantier.`
-        : `L’intervention ${tempsPasse.reference} est au temps passé : sa facture, et celle de ses suites, reprend les heures saisies. Créez-la par « Facture au temps passé ».` });
       if (origine === 'CONTRAT' && !await prisma.contratMaintenance.findFirst({ where: { id: contratMaintenanceId!, clientId }, select: { id: true } })) return res.status(404).json({ error: 'Contrat facturable introuvable.' });
       const lignesBrutes = Array.isArray(req.body?.lignes) ? req.body.lignes : [];
       if (!lignesBrutes.length) return res.status(400).json({ error: 'Une facture doit contenir au moins une ligne.' });
@@ -228,7 +221,18 @@ export function enregistrerRoutesFactures(app: Express): void {
           const [chantier] = await tx.$queryRaw<Array<{ statut: string }>>(Prisma.sql`SELECT "statut" FROM "Chantier" WHERE "id" = ${chantierId} AND "clientId" = ${clientId} FOR SHARE`);
           if (!chantier) throw new FactureRattachementRefuse(404, 'Affaire facturable introuvable.');
           if (chantier.statut === 'ANNULE') throw new FactureRattachementRefuse(409, 'Une affaire annulée ne peut pas être facturée.');
-        } else await refuserOrigineAnnulee(tx, { origine, chantierId, interventionId, contratMaintenanceId });
+        } else {
+          await refuserOrigineAnnulee(tx, { origine, chantierId, interventionId, contratMaintenanceId });
+          // Une intervention au temps passé, comme ses suites, se facture par sa facture au temps passé, qui
+          // reprend les heures saisies (lot « facture au temps passé », domaines/factures/tempsPasse.ts), ou,
+          // quand elle se facture avec le chantier de son affaire, par la facture de ce chantier. Ce refus suit
+          // celui d'une origine annulée : une intervention annulée n'est pas renvoyée à une autre facture,
+          // refusée à son tour (#352, audit n° 2 de #351, N2 ; audit n° 1 de #361, C1).
+          const tempsPasse = origine === 'INTERVENTION' ? await tempsPasseDeLaChaine(tx, interventionId!) : null;
+          if (tempsPasse) throw new FactureRattachementRefuse(409, tempsPasse.avecLeChantier
+            ? `L’intervention ${tempsPasse.reference} est au temps passé et se facture avec le chantier de son affaire, comme ses suites : créez la facture du chantier.`
+            : `L’intervention ${tempsPasse.reference} est au temps passé : sa facture, et celle de ses suites, reprend les heures saisies. Créez-la par « Facture au temps passé ».`);
+        }
         const creee = await tx.facture.create({ data: { clientId, clientRaisonSociale: client.raisonSociale, origine, chantierId, interventionId, contratMaintenanceId, motifHorsAffaire, dateEmission, dateEcheance, totalHt, totalTva, totalTtc, createdById: req.user!.id, lignes: { create: lignes }, ventilationTva: { create: ventilationTva } }, include: factureInclude });
         await tx.journalFacture.create({ data: { factureId: creee.id, acteurId: req.user!.id, action: 'CREATION_BROUILLON', detail: `Origine ${origine}` } });
         return creee;

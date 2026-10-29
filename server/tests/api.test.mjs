@@ -23102,10 +23102,13 @@ if (!TEST_DATABASE_URL) {
       assert.equal(seconde.status, 409);
       assert.match(seconde.body.error, /déjà une facture \(brouillon\) : la facture au temps passé est unique/);
       assert.equal((await apercu(intervention.id)).status, 409);
-      for (const cible of [intervention, suite, suiteDeSuite, suiteAnnulee]) {
+      for (const cible of [intervention, suite, suiteDeSuite]) {
         const libre = await envoyer('post', '/api/factures', admin, { clientId: client.id, origine: 'INTERVENTION', interventionId: cible.id, ...DATES, lignes: [{ designation: 'TEST', quantite: 1, prixUnitaireHt: 1, tauxTva: 20 }] });
         assert.deepEqual([libre.status, libre.body.error], [409, `L’intervention ${intervention.reference} est au temps passé : sa facture, et celle de ses suites, reprend les heures saisies. Créez-la par « Facture au temps passé ».`], cible.reference);
       }
+      // Une suite annulée se refuse pour son annulation (décision 14 de la nuit du 26 au 27-10-2026, #361), sans renvoi.
+      const surSuiteAnnulee = await envoyer('post', '/api/factures', admin, { clientId: client.id, origine: 'INTERVENTION', interventionId: suiteAnnulee.id, ...DATES, lignes: [{ designation: 'TEST', quantite: 1, prixUnitaireHt: 1, tauxTva: 20 }] });
+      assert.deepEqual([surSuiteAnnulee.status, surSuiteAnnulee.body.error], [409, 'Une intervention annulée ne peut pas être facturée.']);
       assert.equal((await prisma.facture.count({ where: { interventionId: { in: [intervention.id, suite.id, suiteDeSuite.id, suiteAnnulee.id] } } })), 1);
       // Une suite ne se facture pas à part, même au temps passé.
       const surSuite = await apercu(suite.id);
@@ -23232,6 +23235,28 @@ if (!TEST_DATABASE_URL) {
       const libre = await envoyer('post', '/api/factures', admin, { clientId: client.id, origine: 'INTERVENTION', interventionId: suite.id, ...DATES, lignes: [{ designation: 'TEST', quantite: 1, prixUnitaireHt: 1, tauxTva: 20 }] });
       assert.deepEqual([libre.status, libre.body.error], [409, message]);
       assert.equal(await prisma.facture.count({ where: { interventionId: { in: [intervention.id, suite.id] } } }), 0);
+    });
+
+    // Audit n° 1 de #361, C1 : une intervention au temps passé annulée, seule ou avec son affaire, n'est pas renvoyée à une
+    // facture qui serait refusée à son tour (suivi #352, audit n° 2 de #351, N2, « à reprendre dans le lot » point 14).
+    test('saisie ligne par ligne d’une intervention au temps passé annulée, seule ou avec son affaire : le refus dit l’annulation', async () => {
+      const ligneLibre = { designation: 'TEST', quantite: 1, prixUnitaireHt: 1, tauxTva: 20 };
+      const { intervention: annulee } = await interventionTempsPasse('annulée, saisie libre', { terminee: false });
+      await prisma.intervention.update({ where: { id: annulee.id }, data: { statut: 'ANNULEE' } });
+      const surAnnulee = await envoyer('post', '/api/factures', admin, { clientId: client.id, origine: 'INTERVENTION', interventionId: annulee.id, ...DATES, lignes: [ligneLibre] });
+      assert.deepEqual([surAnnulee.status, surAnnulee.body.error], [409, 'Une intervention annulée ne peut pas être facturée.']);
+      // Devis converti aussi en chantier, puis annulé : l'affaire et l'intervention, qui lui est rattachée, sont annulées ensemble.
+      const { devis, intervention } = await interventionTempsPasse('affaire annulée, saisie libre', { terminee: false });
+      const ouverture = await envoyer('post', `/api/devis/${devis.id}/convertir`, admin, { cible: 'CHANTIER', responsableId: comptes.conducteur.id });
+      assert.equal(ouverture.status, 201, JSON.stringify(ouverture.body));
+      const annulation = await envoyer('post', `/api/devis/${devis.id}/annulation`, admin, { motif: 'TEST le client renonce' });
+      assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
+      assert.deepEqual([(await prisma.intervention.findUniqueOrThrow({ where: { id: intervention.id } })).statut, (await prisma.chantier.findUniqueOrThrow({ where: { id: ouverture.body.id } })).statut], ['ANNULEE', 'ANNULE']);
+      const surRattachee = await envoyer('post', '/api/factures', admin, { clientId: client.id, origine: 'INTERVENTION', interventionId: intervention.id, ...DATES, lignes: [ligneLibre] });
+      assert.deepEqual([surRattachee.status, surRattachee.body.error], [409, 'Une intervention annulée ne peut pas être facturée.']);
+      const surAffaire = await envoyer('post', '/api/factures', admin, { clientId: client.id, origine: 'CHANTIER', chantierId: ouverture.body.id, ...DATES, lignes: [ligneLibre] });
+      assert.deepEqual([surAffaire.status, surAffaire.body.error], [409, 'Une affaire annulée ne peut pas être facturée.']);
+      assert.equal(await prisma.facture.count({ where: { OR: [{ interventionId: { in: [annulee.id, intervention.id] } }, { chantierId: ouverture.body.id }] } }), 0);
     });
 
     test('droits : l’administration seule lit l’aperçu et crée la facture', async () => {
@@ -23794,13 +23819,14 @@ if (!TEST_DATABASE_URL) {
       assert.deepEqual(await prisma.sequenceFacture.findUnique({ where: { annee } }), sequence, 'aucun numéro consommé');
     };
     // Une transaction de test tient la ligne sous verrou exclusif, puis l'annule et valide : la requête lancée entre-temps
-    // doit attendre ce verrou (sa lecture sous verrou partagé), puis relire le statut annulé.
-    const pendantAnnulation = async (table, id, annuler, lancer, motif) => {
+    // doit attendre ce verrou (sa lecture sous verrou partagé), puis relire le statut annulé. L'affaire se verrouille comme
+    // dans l'annulation du devis, `FOR NO KEY UPDATE`, qu'un verrou `FOR KEY SHARE` n'attendrait pas (audit n° 1 de #361, N3).
+    const pendantAnnulation = async (table, id, annuler, lancer, motif, mode = 'FOR UPDATE') => {
       let liberer, pret;
       const attente = new Promise((resolve) => { liberer = resolve; });
       const verrouPris = new Promise((resolve) => { pret = resolve; });
       const verrou = prisma.$transaction(async (tx) => {
-        await tx.$queryRawUnsafe(`SELECT "id" FROM "${table}" WHERE "id" = $1 FOR UPDATE`, id);
+        await tx.$queryRawUnsafe(`SELECT "id" FROM "${table}" WHERE "id" = $1 ${mode}`, id);
         pret();
         await attente;
         await annuler(tx);
@@ -23961,7 +23987,7 @@ if (!TEST_DATABASE_URL) {
       const rattachee = await curative('Curative d’une affaire annulée pendant la facture', chantier.id);
       const surAffaire = await pendantAnnulation('Chantier', chantier.id,
         (tx) => tx.chantier.update({ where: { id: chantier.id }, data: { statut: 'ANNULE', ...annulation() } }),
-        () => creerFacture('INTERVENTION', { interventionId: rattachee.id }), 'affaire');
+        () => creerFacture('INTERVENTION', { interventionId: rattachee.id }), 'affaire', 'FOR NO KEY UPDATE');
       assert.deepEqual([surAffaire.status, surAffaire.body.error], [409, 'L’affaire de cette intervention est annulée : elle ne peut pas être facturée.']);
       assert.equal(await facturesDe([{ interventionId: { in: [enCours.id, visiteAutre.id, rattachee.id] } }, { contratMaintenanceId: { in: [contrat.body.id, autre.body.id] } }]), 0, 'aucune facture');
 
@@ -23976,6 +24002,57 @@ if (!TEST_DATABASE_URL) {
       assert.deepEqual([emission.status, emission.body.error], [409, 'Un contrat annulé ne peut pas être facturé.']);
       const lue = await prisma.facture.findUniqueOrThrow({ where: { id: surDernier.id } });
       assert.deepEqual([lue.statut, lue.numero], ['BROUILLON', null]);
+    });
+
+    // Audit n° 1 de #361, T1 (montants) : le cycle de correction d'une facture émise n'est pas touché par l'annulation de son
+    // origine, avoir partiel compris (passation, section 4, bloc « Refus de facturer une origine annulée » : « elle se corrige
+    // par avoir »). Tue le mutant qui ferait passer l'avoir partiel par refuserOrigineAnnulee.
+    test('avoir partiel : une facture émise avant l’annulation de son contrat reçoit toujours un avoir partiel', async () => {
+      await assurerFacturation();
+      const { devis, CONTRAT: contrat } = await devisConverti('avoir partiel après annulation', ['CONTRAT']);
+      const facture = await brouillon('CONTRAT', { contratMaintenanceId: contrat.id });
+      const emise = await emettre(facture.id);
+      assert.equal(emise.status, 200, JSON.stringify(emise.body));
+      assert.equal((await annulerDevis(devis.id)).contratAnnule, contrat.id);
+      const avoir = await envoyer('post', `/api/factures/${facture.id}/avoirs`, { lignes: [{ designation: 'TEST Geste commercial', quantite: 1, prixUnitaireHt: 40, tauxTva: 20 }] });
+      assert.equal(avoir.status, 201, JSON.stringify(avoir.body));
+      assert.deepEqual([avoir.body.type, avoir.body.statut, avoir.body.factureOrigineId, avoir.body.contratMaintenanceId, avoir.body.totalHt, avoir.body.totalTtc], ['AVOIR', 'EMISE', facture.id, contrat.id, 40, 48]);
+    });
+
+    // Audit n° 1 de #361, T3 (montants) : témoin à l'émission pour l'affaire (passation, section 4 : « une intervention
+    // d'une affaire clôturée [reste] facturable ») ; le seul témoin d'émission du bloc est un contrat clos. Tue le mutant
+    // qui refuserait l'émission d'une affaire non en cours.
+    test('émission : les brouillons d’une affaire clôturée depuis leur création, et de son intervention, s’émettent', async () => {
+      await assurerFacturation();
+      const { CHANTIER: chantier } = await devisConverti('émission affaire clôturée', ['CHANTIER']);
+      const rattachee = await curative('Curative émise après la clôture de son affaire', chantier.id);
+      await prisma.intervention.update({ where: { id: rattachee.id }, data: { statut: 'TERMINEE' } });
+      const surAffaire = await brouillon('CHANTIER', { chantierId: chantier.id });
+      const surRattachee = await brouillon('INTERVENTION', { interventionId: rattachee.id });
+      const cloture = await envoyer('patch', `/api/chantiers/${chantier.id}/statut`, { statut: 'TERMINE' });
+      assert.equal(cloture.status, 200, JSON.stringify(cloture.body));
+      for (const facture of [surAffaire, surRattachee]) {
+        const emise = await emettre(facture.id);
+        assert.equal(emise.status, 200, `${facture.origine} : ${JSON.stringify(emise.body)}`);
+        assert.deepEqual([emise.body.statut, emise.body.totalHt, emise.body.totalTtc], ['EMISE', 100, 120], facture.origine);
+      }
+    });
+
+    // Audit n° 1 de #361, T2 : ordre des refus à l'émission (passation, section 4 : « après le contrôle du brouillon et avant
+    // la chronologie, les mentions légales et les identités »). Un brouillon de la veille, que la chronologie refuserait
+    // aussi, est refusé pour son origine annulée. Tue le mutant qui placerait le contrôle après la chronologie.
+    test('émission : le refus d’une origine annulée passe avant la chronologie', async () => {
+      await assurerFacturation();
+      const [jour, mois, annee] = (await aujourdhui()).split('-').map(Number);
+      const veille = new Date(Date.UTC(annee, mois - 1, jour) - 86_400_000).toISOString().slice(0, 10).split('-').reverse().join('-');
+      const { devis, CONTRAT: contrat } = await devisConverti('ordre des refus à l’émission', ['CONTRAT']);
+      const deLaVeille = await envoyer('post', '/api/factures', { clientId: client.id, origine: 'CONTRAT', contratMaintenanceId: contrat.id, dateEmission: veille, dateEcheance: veille, lignes: [{ designation: 'TEST Brouillon de la veille', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }] });
+      assert.equal(deLaVeille.status, 201, JSON.stringify(deLaVeille.body));
+      // Une facture du jour émise ensuite : la chronologie refuserait désormais le brouillon de la veille.
+      const duJour = await brouillon('HORS_AFFAIRE', { motifHorsAffaire: 'TEST témoin de la chronologie' });
+      assert.equal((await emettre(duJour.id)).status, 200);
+      await annulerDevis(devis.id);
+      await refusSansEcriture(deLaVeille.body, 'Un contrat annulé ne peut pas être facturé.');
     });
   });
 }
