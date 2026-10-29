@@ -93,7 +93,7 @@ export function AdminReferentiels({ activeTab, isAdmin, users, intervenants, fou
                       )}
                       {isAdmin && (
                         <td style={{padding: '8px'}}>
-                          {/* Main d'œuvre du catalogue qui valorisera ses heures (prix de vente, lot suivant).
+                          {/* Main d'œuvre du catalogue qui valorise ses heures hors contrat (prix de vente figé à la saisie).
                               Proposées : les actives ; la sienne reste affichée si elle a été désactivée
                               depuis (rattachement gardé), sans pouvoir être choisie à nouveau. */}
                           <select aria-label={`Main d’œuvre de ${i.nom}`} className="form-input" value={i.mainOeuvreId || ''}

@@ -8,8 +8,9 @@ import { journaliserAdministration } from '../../commun/journal-administration';
 
 // --- Rattachement d'un intervenant à une main d'œuvre (décision de Nelson du 24-10-2026) ---
 // « Liée à l'intervenant » : chaque technicien (fiche intervenant) est rattaché à une main d'œuvre du
-// catalogue ; ses heures seront valorisées à ce prix de vente pour la marge d'un SAV hors contrat
-// (lot suivant, rien n'est calculé ici). Le rattachement est facultatif et réglé par l'administration
+// catalogue ; sur une intervention hors contrat, ses heures sont valorisées au prix de vente à l'heure
+// hors contrat de cette main d'œuvre, figé sur l'heure à sa saisie, pour la marge d'un SAV hors contrat
+// (margeSav.ts ; rien n'est calculé ici). Le rattachement est facultatif et réglé par l'administration
 // seule, comme le taux horaire. Il exige une main d'œuvre active ; désactiver une main d'œuvre garde
 // les rattachements existants (choix par défaut, à confirmer). Chaque changement est écrit au journal
 // des paramètres et des droits, la fiche intervenant n'ayant pas de journal propre.
@@ -63,6 +64,11 @@ export const rattacherMainOeuvre: express.RequestHandler = async (req, res) => {
       } else {
         await tx.intervenantMainOeuvre.delete({ where: { intervenantId: id } });
       }
+      // Le changement validé, la fiche est réécrite sans rien y changer (lot « marge d'un SAV hors contrat ») :
+      // une saisie d'heures SAV, sérialisable, qui attend son verrou (verrouillerContexteCout) est alors refusée
+      // (conflit, 409), comme après un changement de taux, au lieu de figer le prix de vente de son instantané,
+      // pris avant ce changement.
+      await tx.$executeRaw(Prisma.sql`UPDATE "Intervenant" SET "nom" = "nom" WHERE "id" = ${id}`);
       await journaliserAdministration(tx, req as AuthRequest, {
         domaine: 'REGLAGES', type: 'INTERVENANT', action: 'RATTACHEMENT_MAIN_OEUVRE', cibleId: fiche.id, cibleLibelle: fiche.nom,
         avant: { mainOeuvre: libelleMainOeuvre(actuel?.prestation) }, apres: { mainOeuvre: libelleMainOeuvre(cible) },

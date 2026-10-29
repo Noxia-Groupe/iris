@@ -1015,3 +1015,32 @@ Lecture retenue par Claude Code, à corriger par Nelson si besoin :
 ### Suivi ouvert pendant ce lot
 
 Étiquette `suivi-audit` : #352 (audits de #351 : questions pour Nelson sur la conversion en chantier d'un devis dont l'intervention porte déjà une facture et sur le brouillon au temps passé que la numérotation chronologique empêche d'émettre ; suite d'une intervention au temps passé non signalée à l'écran Factures ; refus d'annulation d'une facture réglée ; saisie ligne par ligne d'une intervention au temps passé annulée, à reprendre avec le lot du point 14 ; périmètre de la « dernière facture émise », à garder par le futur lot « abandon d'un brouillon »).
+
+## Décision du 28-10-2026 sur le matériel des interventions curatives
+
+*Rédigé le 28-10-2026.* Pendant le cadrage du lot « marge d'un SAV hors contrat », Claude Code a rappelé à Nelson la question que la passation gardait ouverte (section 3, « marge d'un SAV hors contrat ») dans le dernier paragraphe de son message de 21:17 UTC (heure du journal de la session), cité mot pour mot : « Reste une question pour vous. Une intervention curative ne reçoit pas de matériel aujourd'hui : sa marge ne compterait donc que ses heures. Faut-il ouvrir la saisie du matériel aux curatives ? Sans réponse de votre part, je garde l'option la plus restrictive : la marge compte les heures seules, et c'est déclaré « choix par défaut, à confirmer ». »
+
+Réponse de Nelson (21:34 UTC), citée mot pour mot :
+
+« Oui il faut pouvoir saisir du materiel pour une intervention curative »
+
+Lecture retenue par Claude Code, à corriger par Nelson si besoin : la saisie du matériel, réservée jusqu'ici aux interventions d'un contrat actif, s'ouvre aux interventions curatives (hors contrat). **À appliquer** par un lot à part, « matériel d'une intervention curative », placé juste après le lot « marge d'un SAV hors contrat », qui reste limité aux heures ; rien n'en est codé. Ce que la décision ne disait pas, qui saisit le matériel d'une curative et comment il compte dans la marge à l'heure d'un SAV hors contrat, est tranché le 29-10-2026 (ci-dessous).
+
+**Mentions antérieures.** Les sections précédentes gardent leur rédaction d'origine ; la mention suivante y est levée par la présente section :
+
+- décisions du 27-10-2026, 10:27 UTC, lecture retenue, point 1 (« restent ses lectures à confirmer et la question du matériel d'une curative (passation, section 3) ») : la question du matériel d'une curative est tranchée.
+
+La passation, section 3, qui la posait (« une curative ne reçoit pas aujourd'hui de matériel (réservé aux interventions d'un contrat actif : visites et suites de visites) : sa marge ne compterait que ses heures. Faut-il ouvrir la saisie du matériel aux curatives ? »), est mise à jour par la même PR.
+
+### Réponses du 29-10-2026 sur le matériel d'une curative
+
+*Rédigé le 29-10-2026.* Claude Code a posé à Nelson deux questions à choix (28-10-2026 à 23:24 UTC) ; Nelson a choisi une option à chacune (29-10-2026 à 06:27 UTC, heure du journal de la session), chaque fois l'option recommandée. Question, option choisie et sa description, options écartées et leur description, citées mot pour mot :
+
+- Question : « Matériel d'une intervention curative (lot suivant) : comment compte-t-il dans la marge à l'heure d'un SAV hors contrat ? Aujourd'hui, sur un contrat, on saisit le matériel à son coût HT (fournisseur, description, montant HT), sans prix de vente. » (en-tête « Montants »). Option choisie : « Au coût seul (Recommandé) », décrite ainsi : « Le coût HT du matériel s'ajoute au coût de l'intervention : la marge baisse d'autant. Aucun prix de vente n'est compté pour lui (option prudente : la marge n'est jamais surestimée). ». Options écartées : « Vendu au prix saisi » (« En plus du coût, l'encadrement saisit le prix de vente HT du matériel : il s'ajoute aux ventes, le coût aux coûts. ») ; « Vendu au prix du catalogue » (« Le matériel est choisi dans le catalogue des articles : son prix de vente du catalogue s'ajoute aux ventes, son coût aux coûts. »).
+- Question : « Qui saisit le matériel d'une intervention curative ? » (en-tête « Droits »). Option choisie : « L'encadrement (Recommandé) », décrite ainsi : « Comme sur une intervention de contrat aujourd'hui : administration et conducteur de travaux ; le technicien ne le saisit pas. ». Option écartée : « Aussi le technicien » (« Le technicien affecté saisit aussi le matériel qu'il a posé, comme ses heures ; l'encadrement le corrige ou l'archive. »).
+
+Réponse enregistrée par l'outil de questions, citée mot pour mot :
+
+« Your questions have been answered: "Matériel d'une intervention curative (lot suivant) : comment compte-t-il dans la marge à l'heure d'un SAV hors contrat ? Aujourd'hui, sur un contrat, on saisit le matériel à son coût HT (fournisseur, description, montant HT), sans prix de vente."="Au coût seul (Recommandé)", "Qui saisit le matériel d'une intervention curative ?"="L'encadrement (Recommandé)". You can now continue with these answers in mind. »
+
+Lecture retenue par Claude Code, à corriger par Nelson si besoin : le matériel d'une intervention curative se saisit comme celui d'une intervention de contrat, à son coût HT, par l'encadrement (administration et conducteur de travaux), jamais par le technicien ; dans la marge à l'heure d'un SAV hors contrat, son coût s'ajoute au coût de l'intervention, sans prix de vente. **À appliquer** par le lot « matériel d'une intervention curative » ; rien n'en est codé.

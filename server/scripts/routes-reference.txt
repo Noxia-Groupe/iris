@@ -77,8 +77,8 @@ POST /api/interventions requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 
 GET /api/interventions requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#3367306260fa
 GET /api/interventions/journee requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#c20552bc49ac
 GET /api/interventions/:id requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#4d7dee0b11a1
-GET /api/interventions/:id/couts requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#51a5ee382bab
-POST /api/interventions/:id/couts/heures requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#9004ae3c9f51
+GET /api/interventions/:id/couts requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#63aab6e1c476
+POST /api/interventions/:id/couts/heures requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#806f834c8761
 POST /api/interventions/:id/couts/achats requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#ecb2f2a84911
 PATCH /api/interventions/:id/couts/:type/:coutId requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#ec57e7455c19
 POST /api/interventions/:id/couts/:type/:coutId/:action requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#a232e1da15a2
@@ -122,7 +122,7 @@ GET /api/intervenants requireAuth#07b983da0ce5 > <anonymous>#5f66470a380c
 POST /api/intervenants requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#c6ba071ecbe1
 PUT /api/intervenants/:id requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#783c0d87a196
 PUT /api/intervenants/:id/compte requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#5e61db3bb78c
-PUT /api/intervenants/:id/main-oeuvre requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > rattacherMainOeuvre#6b47f279f68e
+PUT /api/intervenants/:id/main-oeuvre requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > rattacherMainOeuvre#f080f1a68b8e
 DELETE /api/intervenants/:id requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#c87065a29eb2
 GET /api/planning/chantiers requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > requirePlanningActif#20945635a340 > <anonymous>#35c56b70d597
 GET /api/planning/events requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > requirePlanningActif#20945635a340 > <anonymous>#72fc077cb353

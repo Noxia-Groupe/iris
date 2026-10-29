@@ -25,6 +25,7 @@ import { enregistrerLecturesInterventions } from './lectures';
 import { enregistrerRemiseAPlanifier } from './remiseAPlanifier';
 import { enregistrerSuites } from './suites';
 import { margeDevisIntervention } from './margeDevis';
+import { margeSavHorsContrat, prixVenteHoraireHorsContrat } from './margeSav';
 import { RefusAffaireSuite, verifierAffaireDeLaSuite } from './affaireSuite';
 
 class ChantierInterventionIntrouvable extends Error {}
@@ -117,7 +118,10 @@ export function enregistrerRoutesInterventions(app: Express): void {
       // Intervention issue d'un devis, sans chantier : sa marge, suites comprises, pour l'administration
       // seule (décision de Nelson de la nuit du 26 au 27-10-2026, cf. margeDevisIntervention).
       const margeDevis = await margeDevisIntervention(intervention);
-      res.json(decimalToNumber({ heures, achats, totalMainOeuvreHT, totalMaterielHT, totalCoutsHT, margeDevis }));
+      // Intervention SAV hors contrat, sans devis ni chantier : sa marge à l'heure, au prix de vente figé
+      // de la main d'œuvre de chaque intervenant, suites comprises, pour l'administration seule (cf. margeSav.ts).
+      const margeSav = await margeSavHorsContrat(intervention);
+      res.json(decimalToNumber({ heures, achats, totalMainOeuvreHT, totalMaterielHT, totalCoutsHT, margeDevis, margeSav }));
     } catch (error) { console.error('Erreur lecture coûts intervention', error); res.status(500).json({ error: 'Lecture des coûts impossible.' }); }
   });
 
@@ -142,7 +146,10 @@ export function enregistrerRoutesInterventions(app: Express): void {
         await verifierAffaireDeLaSuite(tx, interventionActuelle, req.user!.role, true);
         const intervenantActuel = await tx.intervenant.findFirst({ where: { id: intervenant.id, userId: req.user!.id, affectationsIntervention: { some: { interventionId: intervention.id } } } });
         if (!intervenantActuel) return null;
-        const cout = await tx.coutInterventionHeure.create({ data: { interventionId: interventionActuelle.id, intervenantId: intervenantActuel.id, date, nbrHeures, tauxHoraireApplique: intervenantActuel.tauxHoraireCharge, commentaire: req.body?.commentaire ? String(req.body.commentaire).trim() : null, createdById: req.user!.id } });
+        // Hors contrat, le prix de vente à l'heure de la main d'œuvre de l'intervenant est figé sur l'heure,
+        // comme le taux chargé (lot « marge d'un SAV hors contrat », cf. margeSav.ts) ; une visite n'en reçoit pas.
+        const prixVenteHoraireApplique = interventionActuelle.contratMaintenanceId ? null : await prixVenteHoraireHorsContrat(tx, intervenantActuel.id);
+        const cout = await tx.coutInterventionHeure.create({ data: { interventionId: interventionActuelle.id, intervenantId: intervenantActuel.id, date, nbrHeures, tauxHoraireApplique: intervenantActuel.tauxHoraireCharge, prixVenteHoraireApplique, commentaire: req.body?.commentaire ? String(req.body.commentaire).trim() : null, createdById: req.user!.id } });
         await journaliserCoutIntervention(tx, req, 'COUT_INTERVENTION_HEURE', 'CREATION', cout.id, interventionActuelle.id, null, cout, nbrHeures === 0 ? motif! : undefined);
         return heureOperationnelleTechnicien(cout);
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
