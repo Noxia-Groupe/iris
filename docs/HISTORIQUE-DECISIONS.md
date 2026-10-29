@@ -1089,3 +1089,27 @@ Ces lots restent non validés pour mise en service ; seule l'attente de la valid
 ### Suivi ouvert pendant ce lot
 
 Étiquette `suivi-audit` : #355 (audits de #354 : changement de tarif concurrent d'une saisie, question pour Nelson ; homonymes et heures antérieures au lot dans le signalement ; tests de concurrence qui admettent une issue 201 inaccessible ; heures de visites sans prix figé jusqu'au lot de la valorisation sous contrat). Les notes destinées à la documentation (N1, N16, N17 et N19) sont versées par #354 elle-même ou par la PR qui consigne cette section.
+
+## Lot du 29-10-2026 (après-midi)
+
+*Rédigé le 29-10-2026.* Fusion faite par Claude Code selon la décision de Nelson du 20-10-2026, avec une CI verte et un audit interne fusionnable sur la même SHA. Le lot touche aux montants : il n'est ni validé comptablement ni validé pour mise en service. La validation comptable du 28-10-2026, donnée avant lui à la marge à l'heure d'un SAV hors contrat (#354), ne couvre pas le matériel qu'il y ajoute.
+
+### Lot fusionné
+
+- #357 (lot « matériel d'une intervention curative ») : la saisie, la correction, l'archivage et la restauration du matériel s'ouvrent aux interventions hors contrat, par l'encadrement (administration et conducteur de travaux), jamais par le technicien ; son coût HT entre dans le coût réel de l'intervention, dans la marge à l'heure d'un SAV hors contrat, sans prix de vente, et dans les marges d'un devis ou d'un chantier, qui le comptaient déjà ; une seule règle d'éligibilité vaut pour les heures et le matériel (décision du 28-10-2026 et réponses du 29-10-2026, sections plus haut ; choix par défaut, à confirmer, en passation, section 4). Cinq audits internes :
+  - n° 1 : deux erreurs de la passation (portée de la validation comptable du 28-10-2026, règle de l'affaire d'une suite) et un test manquant sur les montants ;
+  - n° 2 : une erreur de la passation (marge de l'intervention d'un devis converti aussi en chantier) et deux tests manquants sur les montants ;
+  - n° 3 : aucune erreur, deux tests manquants sur les montants ;
+  - n° 4 : aucune erreur, deux tests manquants sur les montants et un hors montants ;
+  - tous corrigés ou versés dans la PR avant fusion ; le n° 5 l'a dite fusionnable sur `50d407b`.
+
+**Choix de mise en œuvre, à confirmer par Nelson.** Les audits n° 3 et 4 n'ont relevé, sur un code et une documentation inchangés, que des tests manquants qui touchent aux montants ; chacun appelait, selon la règle 3, un nouvel audit. Pour ne pas boucler sans fin (« il faut eviter de tourner en rond », décision du 23-10-2026), l'audit n° 5 a porté sur les tests ajoutés, sans chercher de nouveaux mutants ailleurs, toute erreur constatée restant à signaler où qu'elle soit. La question est posée en passation, section 3.
+
+**Mentions antérieures.** Les sections précédentes gardent leur rédaction d'origine ; les mentions suivantes y sont levées par la présente section :
+
+- décision du 28-10-2026 sur le matériel des interventions curatives, lecture retenue : « rien n'en est codé » ; le lot est appliqué par #357 ;
+- réponses du 29-10-2026 sur le matériel d'une curative, lecture retenue : « rien n'en est codé » ; le lot est appliqué par #357.
+
+### Suivi ouvert pendant ce lot
+
+Aucune issue : les tests manquants relevés par les audits sont versés dans #357. Les notes destinées à la documentation sont versées par #357 elle-même ou par la PR qui consigne cette section (limite de l'écran, passation, section 4 ; mention du lot dans la validation comptable du 28-10-2026, README).
