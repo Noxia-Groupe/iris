@@ -21735,6 +21735,25 @@ if (!TEST_DATABASE_URL) {
       await saisirAchat(intervention.id, 1, admin, 409);
     });
 
+    // Audit interne n° 4 de #357 : le conducteur de travaux, de l'encadrement, archive et restaure aussi le matériel d'une
+    // curative de son périmètre, comme l'administration (le test précédent n'archive que par l'administration) ; le coût
+    // réel et la marge à l'heure suivent, et chaque acte est journalisé à son nom.
+    test('le conducteur archive et restaure le matériel d’une curative de son périmètre : coût réel et marge à l’heure suivent', async () => {
+      const conducteur = await prisma.user.create({ data: { email: `materiel-curative.archivage.${suffixe}@iris.test`, name: 'TEST Matériel curative conducteur archivage', role: 'CONDUCTEUR_TRAVAUX' } });
+      const authConducteur = parJeton(conducteur.id);
+      const intervention = await curative('archivage par le conducteur', authConducteur);
+      const achat = await saisirAchat(intervention.id, 9, authConducteur);
+      const acte = (action) => envoyer('post', `/api/interventions/${intervention.id}/couts/achats/${achat.id}/${action}`, authConducteur, { motif: `TEST ${action} par le conducteur` });
+      const archivage = await acte('archiver');
+      assert.equal(archivage.status, 200, JSON.stringify(archivage.body));
+      assert.deepEqual([(await couts(intervention.id)).body.totalMaterielHT, (await couts(intervention.id)).body.margeSav.margeHT, (await couts(intervention.id, authConducteur)).body.totalMaterielHT], [0, 0, 0]);
+      const restauration = await acte('restaurer');
+      assert.equal(restauration.status, 200, JSON.stringify(restauration.body));
+      assert.deepEqual([(await couts(intervention.id)).body.totalMaterielHT, (await couts(intervention.id)).body.margeSav.margeHT], [9, -9]);
+      const journal = await prisma.journalSaisieChantier.findMany({ where: { cibleId: achat.id, action: { in: ['ARCHIVAGE', 'RESTAURATION'] } }, orderBy: { createdAt: 'asc' } });
+      assert.deepEqual(journal.map((entree) => [entree.action, entree.auteurId]), [['ARCHIVAGE', conducteur.id], ['RESTAURATION', conducteur.id]]);
+    });
+
     // Audit interne n° 3 de #357 : la correction, l'archivage et la restauration du matériel d'une curative sont refusés
     // au technicien affecté (403), comme sa saisie ; rien n'est écrit, et le coût réel et la marge à l'heure gardent le
     // montant saisi par l'encadrement.
@@ -21754,6 +21773,35 @@ if (!TEST_DATABASE_URL) {
       assert.equal(await prisma.journalSaisieChantier.count({ where: { cibleId: achat.id, action: { not: 'CREATION' } } }), 0, 'rien n’est journalisé');
       const lecture = (await couts(intervention.id)).body;
       assert.deepEqual([lecture.totalMaterielHT, lecture.totalCoutsHT, lecture.margeSav.materielHT, lecture.margeSav.margeHT], [6, 36, 6, 9.5]);
+    });
+
+    // Audit interne n° 4 de #357 : le matériel d'une curative est réservé à l'encadrement, administration et conducteur de
+    // travaux (« L'encadrement (Recommandé) ») ; le responsable, qui voit la suite d'une affaire de son équipe, ne le saisit,
+    // ne le corrige, ne l'archive ni ne le restaure (403) : rien n'est écrit, et la marge du chantier garde son matériel.
+    test('le responsable qui voit la suite d’une affaire de son équipe ne saisit, ne corrige, n’archive ni ne restaure son matériel (403) : marge du chantier inchangée', async () => {
+      const responsable = await prisma.user.create({ data: { email: `materiel-curative.responsable.${suffixe}@iris.test`, name: 'TEST Matériel curative responsable', role: 'RESPONSABLE' } });
+      const authResponsable = parJeton(responsable.id);
+      const chantier = await prisma.chantier.create({ data: {
+        nom: `TEST Matériel curative responsable ${suffixe}`, client: client.raisonSociale, clientId: client.id, dateDebut: new Date('2026-10-01T00:00:00Z'),
+        budgetGlobalVendu: 1000, budgetMaterielVendu: 300, budgetMainOeuvreVendu: 700, heuresVendues: 20, responsableId: responsable.id,
+      } });
+      const suite = await suiteDe((await curative('responsable', admin, { chantierId: chantier.id })).id);
+      const achat = await saisirAchat(suite.id, 8);
+      const fiche = await request(app).get(`/api/interventions/${suite.id}`).set(authResponsable);
+      assert.equal(fiche.status, 200, 'la suite est dans le périmètre du responsable : le refus vient de son rôle');
+      const refus = [
+        await envoyer('post', `/api/interventions/${suite.id}/couts/achats`, authResponsable, { date: await aujourdhui(), fournisseurId: fournisseur.id, description: 'TEST Pièce du responsable', montantHT: 50 }),
+        await envoyer('patch', `/api/interventions/${suite.id}/couts/achats/${achat.id}`, authResponsable, { montantHT: 0.5, motifCorrection: 'TEST correction par le responsable' }),
+        await envoyer('post', `/api/interventions/${suite.id}/couts/achats/${achat.id}/archiver`, authResponsable, { motif: 'TEST archivage par le responsable' }),
+        await envoyer('post', `/api/interventions/${suite.id}/couts/achats/${achat.id}/restaurer`, authResponsable, { motif: 'TEST restauration par le responsable' }),
+      ];
+      assert.deepEqual(refus.map((reponse) => reponse.status), [403, 403, 403, 403], JSON.stringify(refus.map((reponse) => reponse.body)));
+      const lignes = await prisma.coutInterventionAchat.findMany({ where: { interventionId: suite.id } });
+      assert.deepEqual(lignes.map((ligne) => [Number(ligne.montantHT), ligne.archivedAt]), [[8, null]], 'rien n’est écrit');
+      assert.equal(await prisma.journalSaisieChantier.count({ where: { interventionId: suite.id, cible: 'COUT_INTERVENTION_ACHAT' } }), 1, 'seule la saisie de l’administration est journalisée');
+      const ficheChantier = await request(app).get(`/api/chantiers/${chantier.id}`).set(admin);
+      assert.equal(ficheChantier.status, 200, JSON.stringify(ficheChantier.body));
+      assert.deepEqual([ficheChantier.body.metrics.materielReel, ficheChantier.body.metrics.coutsSuites.materiel], [8, 8]);
     });
 
     test('marge à l’heure : le matériel de l’intervention et de ses suites, suite annulée comprise, s’ajoute au coût, sans prix de vente ; l’archivé en sort', async () => {
@@ -21924,6 +21972,40 @@ if (!TEST_DATABASE_URL) {
       const annulation = await envoyer('post', `/api/devis/${devis.body.id}/annulation`, admin, { motif: 'TEST client renonce' });
       assert.equal(annulation.status, 409, JSON.stringify(annulation.body));
       assert.match(annulation.body.error, /l’intervention issue de ce devis porte déjà 1 coût/);
+    });
+
+    // Audit interne n° 4 de #357 : la clôture de l'affaire d'une suite, écrite pendant la saisie de son matériel par le
+    // conducteur, est relue sous le verrou partagé de l'affaire (#341) : la saisie l'attend, puis est refusée (409), et
+    // rien n'entre dans la marge du chantier clôturé, comme pour les heures (test « clôture concurrente » de #341).
+    test('clôture concurrente de l’affaire d’une suite : la saisie du matériel attend le verrou de l’affaire, puis est refusée, rien n’entre dans la marge', async () => {
+      const conducteur = await prisma.user.create({ data: { email: `materiel-curative.cloture.${suffixe}@iris.test`, name: 'TEST Matériel curative conducteur clôture', role: 'CONDUCTEUR_TRAVAUX' } });
+      const authConducteur = parJeton(conducteur.id);
+      const chantier = await prisma.chantier.create({ data: {
+        nom: `TEST Matériel curative clôture concurrente ${suffixe}`, client: client.raisonSociale, clientId: client.id, dateDebut: new Date('2026-10-01T00:00:00Z'),
+        budgetGlobalVendu: 1000, budgetMaterielVendu: 300, budgetMainOeuvreVendu: 700, heuresVendues: 20, responsableId: conducteur.id,
+      } });
+      const suite = await suiteDe((await curative('clôture concurrente', admin, { chantierId: chantier.id })).id);
+      let reponse; let bloque = false;
+      // La clôture, écrite mais pas encore validée, laisse passer les contrôles faits avant la transaction ; seule la
+      // garde relue sous le verrou partagé de l'affaire peut l'attendre.
+      await prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`UPDATE "Chantier" SET "statut" = 'TERMINE' WHERE "id" = ${chantier.id}`;
+        const [{ pid }] = await tx.$queryRaw`SELECT pg_backend_pid() AS pid`;
+        reponse = envoyer('post', `/api/interventions/${suite.id}/couts/achats`, authConducteur, { date: '01-10-2026', fournisseurId: fournisseur.id, description: 'TEST Pièce pendant la clôture', montantHT: 7 }).then((r) => r);
+        for (let tour = 0; tour < 250 && !bloque; tour += 1) {
+          bloque = (await prisma.$queryRaw`SELECT count(*)::int AS n FROM pg_stat_activity WHERE ${pid}::int = ANY(pg_blocking_pids(pid))`)[0].n > 0;
+          if (!bloque) await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+      }, { timeout: 20000 });
+      const saisie = await reponse;
+      assert.equal(bloque, true, 'la saisie attend le verrou de l’affaire');
+      assert.equal(saisie.status, 409, JSON.stringify(saisie.body));
+      assert.equal(await prisma.coutInterventionAchat.count({ where: { interventionId: suite.id } }), 0, 'aucun matériel sur la suite');
+      assert.equal(await prisma.journalSaisieChantier.count({ where: { interventionId: suite.id, cible: 'COUT_INTERVENTION_ACHAT' } }), 0, 'aucune trace');
+      assert.equal((await prisma.chantier.findUniqueOrThrow({ where: { id: chantier.id } })).statut, 'TERMINE');
+      const fiche = await request(app).get(`/api/chantiers/${chantier.id}`).set(admin);
+      assert.equal(fiche.status, 200, JSON.stringify(fiche.body));
+      assert.deepEqual([fiche.body.metrics.materielReel, fiche.body.metrics.coutsSuites.materiel], [0, 0]);
     });
 
     // Audit interne n° 2 de #357 : le matériel saisi par l'API sur une suite du chantier qu'un devis a ouvert entre
