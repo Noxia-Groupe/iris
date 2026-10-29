@@ -21555,6 +21555,64 @@ if (!TEST_DATABASE_URL) {
       }
       assert.equal(await prixEnBase((await saisir(tech, intervention.id, 1)).id), 60);
     });
+
+    // Audit n° 2 de #354 : le retrait du rattachement et le premier rattachement réécrivent aussi la fiche. Une
+    // saisie qui attend son verrou pendant l'un d'eux ne fige ni le prix de la main d'œuvre retirée, ni l'absence
+    // de prix d'avant le premier rattachement : elle est refusée (409), et la suivante suit le nouveau
+    // rattachement. Même montage que le test précédent : la transaction du test tient ce que le rattachement doit
+    // prendre après la fiche (la ligne du rattachement, que le retrait supprime ; la main d'œuvre, qu'un
+    // rattachement verrouille FOR SHARE), si bien que la saisie part pendant qu'il attend, la fiche déjà prise.
+    test('heure saisie pendant le retrait ou le premier rattachement d’une main d’œuvre : jamais figée selon le rattachement d’avant', async () => {
+      const mainOeuvre = await creerMainOeuvre('TEST-MSAV-RETRAIT', '45.50');
+      const date = await aujourdhui();
+      const attendre = async (condition, message) => {
+        let vrai = false;
+        for (let tour = 0; tour < 250 && !vrai; tour += 1) {
+          vrai = await condition();
+          if (!vrai) await new Promise((r) => setTimeout(r, 20));
+        }
+        assert.equal(vrai, true, message);
+      };
+      const course = async (tech, interventionId, mainOeuvreId, tenir) => {
+        let rattachement;
+        let saisie;
+        await prisma.$transaction(async (tx) => {
+          await tenir(tx);
+          const [{ pid }] = await tx.$queryRaw`SELECT pg_backend_pid() AS pid`;
+          rattachement = envoyer('put', `/api/intervenants/${tech.fiche.id}/main-oeuvre`, admin, { mainOeuvreId }).then((r) => r);
+          await attendre(async () => (await prisma.$queryRaw`SELECT count(*)::int AS n FROM pg_stat_activity WHERE ${pid}::int = ANY(pg_blocking_pids(pid))`)[0].n > 0, 'le rattachement attend, la fiche déjà prise');
+          saisie = envoyer('post', `/api/interventions/${interventionId}/couts/heures`, tech.auth, { date, nbrHeures: 1 }).then((r) => r);
+          await attendre(async () => (await prisma.$queryRaw`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%FROM "Intervenant"%FOR UPDATE%'`)[0].n > 0, 'la saisie attend le verrou de la fiche');
+        }, { timeout: 20000 });
+        assert.equal((await rattachement).status, 200);
+        const reponse = await saisie;
+        return reponse;
+      };
+      const verifier = async (reponse, interventionId, prixAttendu) => {
+        if (reponse.status === 201) {
+          assert.equal(await prixEnBase(reponse.body.id), prixAttendu, 'le rattachement validé avant la lecture du prix est relu');
+        } else {
+          assert.equal(reponse.status, 409, JSON.stringify(reponse.body));
+          assert.equal(await prisma.coutInterventionHeure.count({ where: { interventionId } }), 0);
+        }
+      };
+
+      // Retrait : la saisie ne fige pas l'ancien prix ; la suivante n'a pas de prix.
+      const retire = await technicien('retrait', 30, mainOeuvre.id);
+      const surRetrait = await curative('retrait');
+      await affecter(surRetrait.id, retire.fiche);
+      const pendantRetrait = await course(retire, surRetrait.id, null, (tx) => tx.$queryRaw`SELECT "intervenantId" FROM "IntervenantMainOeuvre" WHERE "intervenantId" = ${retire.fiche.id} FOR UPDATE`);
+      await verifier(pendantRetrait, surRetrait.id, null);
+      assert.equal(await prixEnBase((await saisir(retire, surRetrait.id, 1)).id), null);
+
+      // Premier rattachement : la saisie ne fige pas l'absence de prix ; la suivante prend le prix.
+      const pose = await technicien('premier-rattachement', 30);
+      const surPose = await curative('premier rattachement');
+      await affecter(surPose.id, pose.fiche);
+      const pendantPose = await course(pose, surPose.id, mainOeuvre.id, (tx) => tx.$queryRaw`SELECT "id" FROM "CataloguePrestation" WHERE "id" = ${mainOeuvre.id} FOR UPDATE`);
+      await verifier(pendantPose, surPose.id, 45.5);
+      assert.equal(await prixEnBase((await saisir(pose, surPose.id, 1)).id), 45.5);
+    });
   });
 
   // Décisions de Nelson du 27-10-2026 à 15:50 UTC : « oui, il faut egalement refusé aussi ces saisies »

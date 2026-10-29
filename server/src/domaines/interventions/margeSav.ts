@@ -34,10 +34,11 @@ const auCentime = (montant: Prisma.Decimal) => montant.toDecimalPlaces(2, Prisma
 
 // Prix à copier sur une heure saisie hors contrat : le prix de vente à l'heure hors contrat de la main
 // d'œuvre rattachée à l'intervenant, même désactivée (le rattachement est gardé) ; null sans rattachement.
-// L'appelant tient le verrou de la fiche intervenant (verrouillerContexteCout). Le rattachement prend ce
-// verrou et réécrit la fiche : un changement de rattachement attend la saisie ; validé avant le début de sa
-// transaction, il est lu ; validé pendant qu'elle attend ce verrou, il la fait refuser (conflit, 409), comme
-// un changement de taux, la saisie, sérialisable, lisant sinon le rattachement de son instantané.
+// L'appelant tient le verrou de la fiche intervenant (verrouillerContexteCout). Le rattachement (pose,
+// changement ou retrait) prend ce verrou et réécrit la fiche : il attend une saisie qui le tient ; validé
+// avant l'instantané de la saisie (sa première lecture), il est lu ; validé après, qu'elle attende ou non
+// ce verrou, il la fait refuser (conflit, 409, à relancer), comme un changement de taux, la saisie,
+// sérialisable, lisant sinon le rattachement de son instantané.
 export async function prixVenteHoraireHorsContrat(tx: Prisma.TransactionClient, intervenantId: string): Promise<Prisma.Decimal | null> {
   const rattachement = await tx.intervenantMainOeuvre.findUnique({ where: { intervenantId }, select: { prestation: { select: { prixVenteHt: true } } } });
   return rattachement?.prestation.prixVenteHt ?? null;
