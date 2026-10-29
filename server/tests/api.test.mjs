@@ -8527,15 +8527,22 @@ if (!TEST_DATABASE_URL) {
     });
 
     // Le contrat terminé ferme les heures comme le contrat suspendu, sans que l'intervention soit annulée.
-    test('une intervention d’un contrat terminé ne reçoit plus d’heures', async () => {
+    // La correction d'une heure suit la même règle que sa saisie (audit interne n° 2 de #357, N9).
+    test('une intervention d’un contrat terminé ne reçoit plus d’heures, ni de correction de ses heures', async () => {
       const technicien = await compteTechnicienSav('sav.cout.contrat.termine@iris.test', 'TEST Technicien contrat terminé');
       const contrat = await prisma.contratMaintenance.create({ data: { clientId, titre: 'TEST Contrat terminé heures', periodiciteMois: 12, dureePrevisionnelleMinutes: 60, dateDebut: new Date('2026-01-01T00:00:00.000Z'), prochaineEcheance: new Date('2026-12-01T00:00:00.000Z') } });
       const intervention = await prisma.intervention.create({ data: { reference: `I26-TERMINE-${Date.now()}`, clientId, contratMaintenanceId: contrat.id, dateDemande: contrat.prochaineEcheance, titre: 'TEST Visite contrat terminé' } });
       await prisma.interventionAffectation.create({ data: { interventionId: intervention.id, intervenantId: technicien.intervenantId } });
       const saisir = () => request(app).post(`/api/interventions/${intervention.id}/couts/heures`).set('Authorization', `Bearer ${technicien.jeton}`).send({ date: '01-10-2026', nbrHeures: 1 });
-      assert.equal((await saisir()).status, 201);
+      const corriger = (heureId, nbrHeures) => request(app).patch(`/api/interventions/${intervention.id}/couts/heures/${heureId}`).set('Authorization', `Bearer ${technicien.jeton}`).send({ nbrHeures, motifCorrection: 'TEST correction contrat terminé' });
+      const saisie = await saisir();
+      assert.equal(saisie.status, 201, JSON.stringify(saisie.body));
+      const correction = await corriger(saisie.body.id, 2);
+      assert.equal(correction.status, 200, `contrat actif : correction acceptée ${JSON.stringify(correction.body)}`);
       await prisma.contratMaintenance.update({ where: { id: contrat.id }, data: { statut: 'TERMINE' } });
       assert.equal((await saisir()).status, 409, 'contrat terminé : saisie refusée');
+      assert.equal((await corriger(saisie.body.id, 3)).status, 409, 'contrat terminé : correction refusée');
+      assert.equal(Number((await prisma.coutInterventionHeure.findUniqueOrThrow({ where: { id: saisie.body.id } })).nbrHeures), 2, 'la correction refusée n’écrit rien');
       assert.equal((await request(app).get(`/api/interventions/${intervention.id}/couts`).set('Authorization', `Bearer ${technicien.jeton}`)).status, 409, 'contrat terminé : lecture technicien refusée');
       assert.equal(await prisma.coutInterventionHeure.count({ where: { interventionId: intervention.id } }), 1);
     });
@@ -21750,6 +21757,19 @@ if (!TEST_DATABASE_URL) {
       assert.deepEqual([(await couts(intervention.id)).body.margeSav.materielHT, (await couts(intervention.id)).body.margeSav.margeHT], [70, -39]);
     });
 
+    // Audit interne n° 2 de #357 : sur une suite annulée, dont le matériel reste compté dans la marge à l'heure, ce
+    // matériel ne se corrige plus (409), comme il ne se saisit plus ; son coût dans la marge ne change pas.
+    test('matériel d’une suite annulée : sa correction est refusée (409) et la marge à l’heure garde son coût', async () => {
+      const intervention = await curative('correction sur suite annulée');
+      const suite = await suiteDe(intervention.id);
+      const achat = await saisirAchat(suite.id, 4);
+      await annuler(suite.id);
+      const refus = await envoyer('patch', `/api/interventions/${suite.id}/couts/achats/${achat.id}`, admin, { montantHT: 40, motifCorrection: 'TEST correction refusée' });
+      assert.equal(refus.status, 409, JSON.stringify(refus.body));
+      assert.equal(Number((await prisma.coutInterventionAchat.findUniqueOrThrow({ where: { id: achat.id } })).montantHT), 4, 'rien n’est écrit');
+      assert.deepEqual([(await couts(intervention.id)).body.margeSav.materielHT, (await couts(intervention.id)).body.margeSav.margeHT], [4, -4]);
+    });
+
     test('le matériel saisi sur une curative issue d’un devis entre dans la marge de son devis, et celui d’une suite d’affaire dans la marge du chantier', async () => {
       // Intervention issue d'un devis, sans chantier : total HT du devis moins ses coûts et ceux de ses suites (#339).
       const devis = await envoyer('post', '/api/devis', admin, { clientId: client.id, objet: `TEST Devis matériel curative ${suffixe}`, lignes: [
@@ -21833,6 +21853,36 @@ if (!TEST_DATABASE_URL) {
       const annulation = await envoyer('post', `/api/devis/${devis.body.id}/annulation`, admin, { motif: 'TEST client renonce' });
       assert.equal(annulation.status, 409, JSON.stringify(annulation.body));
       assert.match(annulation.body.error, /l’intervention issue de ce devis porte déjà 1 coût/);
+    });
+
+    // Audit interne n° 2 de #357 : le matériel saisi par l'API sur une suite du chantier qu'un devis a ouvert entre
+    // dans la marge de ce chantier (#339) ; vivant, il dit l'affaire commencée et retient l'annulation du devis,
+    // comme les heures de la suite ; archivé, il ne la retient plus.
+    test('matériel d’une suite du chantier d’un devis : marge du chantier, annulation du devis retenue tant qu’il est vivant', async () => {
+      const devis = await envoyer('post', '/api/devis', admin, { clientId: client.id, objet: `TEST Devis matériel suite du chantier ${suffixe}`, lignes: [
+        { designation: 'TEST Pose', nature: 'MAIN_OEUVRE', quantite: 2, prixUnitaireHt: 150, tauxTva: 20 },
+      ] });
+      assert.equal(devis.status, 201, JSON.stringify(devis.body));
+      assert.equal((await envoyer('post', `/api/devis/${devis.body.id}/signature`, admin, { signataire: 'TEST Signataire matériel suite', confirme: true })).status, 201);
+      const chantier = await envoyer('post', `/api/devis/${devis.body.id}/convertir`, admin, { cible: 'CHANTIER' });
+      assert.equal(chantier.status, 201, JSON.stringify(chantier.body));
+      const suite = await suiteDe((await curative('initiale du chantier d’un devis', admin, { chantierId: chantier.body.id })).id);
+      const achat = await saisirAchat(suite.id, 15);
+      const fiche = await request(app).get(`/api/chantiers/${chantier.body.id}`).set(admin);
+      assert.equal(fiche.status, 200, JSON.stringify(fiche.body));
+      assert.deepEqual([fiche.body.metrics.materielReel, fiche.body.metrics.coutsSuites.materiel], [15, 15]);
+
+      const refus = await envoyer('post', `/api/devis/${devis.body.id}/annulation`, admin, { motif: 'TEST client renonce' });
+      assert.equal(refus.status, 409, JSON.stringify(refus.body));
+      assert.match(refus.body.error, /suites SAV de ce chantier portent déjà 1 coût/);
+      assert.equal((await prisma.chantier.findUniqueOrThrow({ where: { id: chantier.body.id } })).statut, 'EN_COURS');
+      assert.notEqual((await prisma.devis.findUniqueOrThrow({ where: { id: devis.body.id } })).statut, 'ANNULE');
+
+      // Archivé, l'achat n'engage plus rien : l'affaire s'annule, et la suite ne reçoit plus de matériel.
+      await archiver(suite.id, achat.id);
+      const annulation = await envoyer('post', `/api/devis/${devis.body.id}/annulation`, admin, { motif: 'TEST client renonce' });
+      assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
+      await saisirAchat(suite.id, 1, admin, 409);
     });
   });
 
