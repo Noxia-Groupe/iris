@@ -17,7 +17,7 @@ import { getCompanySettings } from '../administration/metier';
 import { CLES_COMPTABLES, verrouillerParametrageComptable, ImputationIncompletError, ecrituresPourPiece } from '../comptabilite/metier';
 import {
   factureInclude, formaterAdresseFacturation, FactureRattachementRefuse, ventilationTvaDerivee, ventilationFacture,
-  lignesAvoirPartiel, AvoirPlafondError, derniereDateFactureNumerotee, refusDocumentFacture,
+  lignesAvoirPartiel, AvoirPlafondError, derniereDateFactureNumerotee, refusDocumentFacture, refuserOrigineAnnulee,
 } from './metier';
 import { rendreDocumentFacturePdf } from './pdf';
 import { tempsPasseDeLaChaine } from './tempsPasse';
@@ -223,12 +223,12 @@ export function enregistrerRoutesFactures(app: Express): void {
         // Sous verrou partagé : un changement de client de l'affaire en cours (cf. PATCH
         // /api/chantiers/:id) attend la fin de cette création et voit alors la facture, ou s'enregistre
         // d'abord, et l'affaire n'est plus celle de ce client. Une annulation en cours est attendue de
-        // même, puis refusée ci-dessous.
+        // même, puis refusée ci-dessous ; pour une intervention ou un contrat, par refuserOrigineAnnulee.
         if (origine === 'CHANTIER') {
           const [chantier] = await tx.$queryRaw<Array<{ statut: string }>>(Prisma.sql`SELECT "statut" FROM "Chantier" WHERE "id" = ${chantierId} AND "clientId" = ${clientId} FOR SHARE`);
           if (!chantier) throw new FactureRattachementRefuse(404, 'Affaire facturable introuvable.');
           if (chantier.statut === 'ANNULE') throw new FactureRattachementRefuse(409, 'Une affaire annulée ne peut pas être facturée.');
-        }
+        } else await refuserOrigineAnnulee(tx, { origine, chantierId, interventionId, contratMaintenanceId });
         const creee = await tx.facture.create({ data: { clientId, clientRaisonSociale: client.raisonSociale, origine, chantierId, interventionId, contratMaintenanceId, motifHorsAffaire, dateEmission, dateEcheance, totalHt, totalTva, totalTtc, createdById: req.user!.id, lignes: { create: lignes }, ventilationTva: { create: ventilationTva } }, include: factureInclude });
         await tx.journalFacture.create({ data: { factureId: creee.id, acteurId: req.user!.id, action: 'CREATION_BROUILLON', detail: `Origine ${origine}` } });
         return creee;
@@ -345,6 +345,9 @@ export function enregistrerRoutesEmissionFactures(app: Express): void {
         const facture = await tx.facture.findUnique({ where: { id: paramId(req) }, include: { lignes: true, ventilationTva: true } });
         if (!facture) return { erreur: 'NOT_FOUND' as const };
         if (facture.statut !== 'BROUILLON') return { erreur: 'NOT_DRAFT' as const };
+        // Un brouillon dont l'origine a été annulée depuis sa création ne s'émet pas (choix par défaut, à
+        // confirmer) ; faute de route qui l'abandonne, il reste brouillon.
+        await refuserOrigineAnnulee(tx, facture);
         const annee = facture.dateEmission.getUTCFullYear();
         const derniereEmise = await derniereDateFactureNumerotee(tx);
         if (derniereEmise && facture.dateEmission < derniereEmise.dateEmission) return { erreur: 'CHRONOLOGY' as const, limite: derniereEmise.dateEmission };
@@ -377,6 +380,7 @@ export function enregistrerRoutesEmissionFactures(app: Express): void {
       res.json(decimalToNumber(resultat.facture));
     } catch (error) {
       if (error instanceof ImputationIncompletError || error instanceof IdentiteEmetteurIncompleteError || error instanceof IdentiteClientIncompleteError) return res.status(409).json({ error: error.message });
+      if (error instanceof FactureRattachementRefuse) return res.status(error.statut).json({ error: error.message });
       if ((error as { code?: string }).code === 'P2002') return res.status(409).json({ error: 'Numérotation de facture déjà attribuée, veuillez réessayer.' });
       res.status(500).json({ error: 'Émission de facture impossible.' });
     }

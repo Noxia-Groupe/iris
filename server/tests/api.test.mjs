@@ -23711,4 +23711,271 @@ if (!TEST_DATABASE_URL) {
       assert.equal(await prisma.facture.count({ where: { interventionId: intervention.id, type: 'FACTURE', statut: { not: 'ANNULEE' } } }), 1);
     });
   });
+
+  // Origine annulée : pas de facture (décision de Nelson de la nuit du 26 au 27-10-2026, point 14 : « Devis annulé : il
+  // faut refuser zn cas d’annulation car pas d’intervention ou contrat donc pas de facture »). Lectures retenues et refus
+  // à l'émission d'un brouillon : choix par défaut, à confirmer.
+  describe('Refus de facturer un contrat ou une intervention annulés', () => {
+    let admin = {};
+    let adminId = '';
+    const suffixe = `${Date.now()}`;
+    let client = null;
+    const envoyer = (methode, chemin, corps) => request(app)[methode](chemin).set(admin).send(corps);
+    // Jour civil de la société : la numérotation est chronologique, et une émission future est refusée.
+    const aujourdhui = async () => {
+      const fuseau = (await prisma.companySettings.findUnique({ where: { id: 'singleton' } }))?.fuseauHoraire || 'Europe/Paris';
+      return jourCivilEntreprise(new Date(), fuseau).split('-').reverse().join('-');
+    };
+    const creerFacture = async (origine, rattachement) => {
+      const jour = await aujourdhui();
+      return envoyer('post', '/api/factures', { clientId: client.id, origine, ...rattachement, dateEmission: jour, dateEcheance: jour, lignes: [{ designation: `TEST Origine ${origine}`, quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }] });
+    };
+    const brouillon = async (origine, rattachement) => {
+      const res = await creerFacture(origine, rattachement);
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      return res.body;
+    };
+    const emettre = (id) => request(app).post(`/api/factures/${id}/emettre`).set(admin);
+    const devisConverti = async (objet, cibles) => {
+      const devis = await envoyer('post', '/api/devis', { clientId: client.id, objet: `TEST Origine annulée ${objet} ${suffixe}`, lignes: [{ designation: 'TEST Pose', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }] });
+      assert.equal(devis.status, 201, JSON.stringify(devis.body));
+      assert.equal((await envoyer('post', `/api/devis/${devis.body.id}/signature`, { signataire: `TEST Signataire ${objet}`, confirme: true })).status, 201);
+      const crees = { devis: devis.body };
+      for (const cible of cibles) {
+        const res = await envoyer('post', `/api/devis/${devis.body.id}/convertir`, { cible, ...(cible === 'CONTRAT' ? { periodiciteMois: 6, dureePrevisionnelleMinutes: 90, dateDebut: '01-01-2026' } : {}) });
+        assert.equal(res.status, 201, `${cible} : ${JSON.stringify(res.body)}`);
+        crees[cible] = res.body;
+      }
+      return crees;
+    };
+    const annulerDevis = async (id) => {
+      const res = await envoyer('post', `/api/devis/${id}/annulation`, { motif: 'TEST le client renonce' });
+      assert.equal(res.status, 200, JSON.stringify(res.body));
+      return res.body;
+    };
+    // Visite réalisée (écrite terminée en base : la règle de clôture n'est pas l'objet de ces tests).
+    const visiteTerminee = async (contratId) => {
+      const res = await envoyer('post', `/api/contrats-maintenance/${contratId}/generer-intervention`, {});
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      await prisma.intervention.update({ where: { id: res.body.id }, data: { statut: 'TERMINEE' } });
+      return res.body;
+    };
+    const curative = async (titre, chantierId) => {
+      const res = await envoyer('post', '/api/interventions', { clientId: client.id, titre: `TEST ${titre}`, ...(chantierId ? { chantierId } : {}) });
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      return res.body;
+    };
+    const annulerDepuisSaFiche = async (id) => {
+      const res = await envoyer('patch', `/api/interventions/${id}/statut`, { statut: 'ANNULEE', motif: 'TEST annulée depuis sa fiche' });
+      assert.equal(res.status, 200, JSON.stringify(res.body));
+    };
+    const statutContrat = (contratId, statut) => envoyer('patch', `/api/contrats-maintenance/${contratId}/statut`, { statut, motif: `TEST contrat ${statut}` });
+    const facturesDe = (ou) => prisma.facture.count({ where: { OR: ou } });
+    // Prérequis comptables de l'émission, posés s'ils manquent : le bloc reste exécutable seul.
+    const assurerFacturation = async () => {
+      const compte = async (code, nature) => (await prisma.compteComptable.upsert({ where: { code }, create: { code, nature, libelle: `TEST ${code}` }, update: { actif: true } })).id;
+      const regles = await prisma.regleComptable.findMany({ include: { compte: true } });
+      for (const [cle, code, nature] of [['CLIENT', '411361', 'ACTIF'], ['VENTE_PRESTATION', '706361', 'PRODUIT'], ['VENTE_ARTICLE', '707361', 'PRODUIT']]) {
+        const actuelle = regles.find((r) => r.cle === cle);
+        if (!actuelle?.compte?.actif || actuelle.compte.nature !== nature) await regleFixture(cle, await compte(code, nature));
+      }
+      if (!regles.find((r) => r.cle === 'JOURNAL_VENTES')?.journal) await regleFixture('JOURNAL_VENTES', 'VTE');
+      const tva = (await prisma.regleTvaComptable.findMany({ include: { compte: true } })).find((r) => Number(r.taux) === 20);
+      if (!tva?.compte?.actif || tva.compte.nature !== 'TVA') await tvaFixture(20, await compte('445361', 'TVA'));
+    };
+    // Un refus d'émission n'écrit rien : la pièce reste un brouillon sans numéro ni écriture, et la séquence ne bouge pas.
+    const refusSansEcriture = async (facture, message) => {
+      const annee = Number((await aujourdhui()).slice(-4));
+      const sequence = await prisma.sequenceFacture.findUnique({ where: { annee } });
+      const refus = await emettre(facture.id);
+      assert.deepEqual([refus.status, refus.body.error], [409, message], facture.origine);
+      const lue = await prisma.facture.findUniqueOrThrow({ where: { id: facture.id }, include: { journal: true, ecrituresComptables: true } });
+      assert.deepEqual([lue.statut, lue.numero, lue.emisLe, lue.identiteEmetteurId, lue.ecrituresComptables.length, lue.journal.map((j) => j.action)], ['BROUILLON', null, null, null, 0, ['CREATION_BROUILLON']]);
+      assert.deepEqual(await prisma.sequenceFacture.findUnique({ where: { annee } }), sequence, 'aucun numéro consommé');
+    };
+    // Une transaction de test tient la ligne sous verrou exclusif, puis l'annule et valide : la requête lancée entre-temps
+    // doit attendre ce verrou (sa lecture sous verrou partagé), puis relire le statut annulé.
+    const pendantAnnulation = async (table, id, annuler, lancer, motif) => {
+      let liberer, pret;
+      const attente = new Promise((resolve) => { liberer = resolve; });
+      const verrouPris = new Promise((resolve) => { pret = resolve; });
+      const verrou = prisma.$transaction(async (tx) => {
+        await tx.$queryRawUnsafe(`SELECT "id" FROM "${table}" WHERE "id" = $1 FOR UPDATE`, id);
+        pret();
+        await attente;
+        await annuler(tx);
+      }, { timeout: 15000 });
+      await verrouPris;
+      let requete; let bloque = false;
+      try {
+        requete = lancer().then((r) => r);
+        for (let tour = 0; tour < 250; tour++) {
+          const sessions = await prisma.$queryRawUnsafe(`SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%"${table}"%FOR SHARE%'`);
+          if (sessions.length) { bloque = true; break; }
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+      } finally {
+        liberer();
+        await verrou;
+      }
+      const reponse = await requete;
+      assert.equal(bloque, true, `${motif} : la requête attend le verrou de « ${table} »`);
+      return reponse;
+    };
+    const annulation = () => ({ annuleLe: new Date(), annuleParId: adminId, motifAnnulation: 'TEST annulation concurrente' });
+
+    before(async () => {
+      const secours = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
+      assert.equal(secours.status, 200);
+      admin = { Authorization: `Bearer ${secours.body.token}` };
+      adminId = secours.body.user.id;
+      const cree = await envoyer('post', '/api/clients', { raisonSociale: `TEST Client origine annulée ${suffixe}`, siren: await sirenLibre() });
+      assert.equal(cree.status, 201, JSON.stringify(cree.body));
+      client = cree.body;
+      const site = await envoyer('post', `/api/clients/${client.id}/sites`, { nom: 'TEST Facturation origine annulée', adresse: '4 rue des Annulations', codePostal: '14000', ville: 'Caen', estSiteFacturation: true });
+      assert.equal(site.status, 201, JSON.stringify(site.body));
+    });
+
+    test('création : intervention annulée depuis sa fiche, visite réalisée d’un contrat annulé avec son devis, ce contrat, intervention d’une affaire annulée : 409, sans rien écrire', async () => {
+      const annulee = await curative('Curative annulée depuis sa fiche');
+      await annulerDepuisSaFiche(annulee.id);
+      const refusAnnulee = await creerFacture('INTERVENTION', { interventionId: annulee.id });
+      assert.deepEqual([refusAnnulee.status, refusAnnulee.body.error], [409, 'Une intervention annulée ne peut pas être facturée.']);
+
+      // Contrat annulé avec son devis : sa visite réalisée avant l'annulation reste terminée, mais ne se facture plus.
+      const { devis: devisContrat, CONTRAT: contrat } = await devisConverti('contrat', ['CONTRAT']);
+      const visite = await visiteTerminee(contrat.id);
+      assert.equal((await annulerDevis(devisContrat.id)).contratAnnule, contrat.id);
+      assert.deepEqual([(await prisma.contratMaintenance.findUniqueOrThrow({ where: { id: contrat.id } })).statut, (await prisma.intervention.findUniqueOrThrow({ where: { id: visite.id } })).statut], ['ANNULE', 'TERMINEE']);
+      const refusVisite = await creerFacture('INTERVENTION', { interventionId: visite.id });
+      assert.deepEqual([refusVisite.status, refusVisite.body.error], [409, 'Le contrat de cette intervention est annulé : elle ne peut pas être facturée.']);
+      const refusContrat = await creerFacture('CONTRAT', { contratMaintenanceId: contrat.id });
+      assert.deepEqual([refusContrat.status, refusContrat.body.error], [409, 'Un contrat annulé ne peut pas être facturé.']);
+
+      // Affaire annulée avec son devis : une intervention qui lui est rattachée, terminée, ne se facture plus, ni l'affaire.
+      const { devis: devisAffaire, CHANTIER: chantier } = await devisConverti('affaire', ['CHANTIER']);
+      const rattachee = await curative('Curative rattachée à l’affaire', chantier.id);
+      await prisma.intervention.update({ where: { id: rattachee.id }, data: { statut: 'TERMINEE' } });
+      assert.equal((await annulerDevis(devisAffaire.id)).chantierArchive, chantier.id);
+      assert.equal((await prisma.intervention.findUniqueOrThrow({ where: { id: rattachee.id } })).statut, 'TERMINEE');
+      const refusRattachee = await creerFacture('INTERVENTION', { interventionId: rattachee.id });
+      assert.deepEqual([refusRattachee.status, refusRattachee.body.error], [409, 'L’affaire de cette intervention est annulée : elle ne peut pas être facturée.']);
+      const refusAffaire = await creerFacture('CHANTIER', { chantierId: chantier.id });
+      assert.deepEqual([refusAffaire.status, refusAffaire.body.error], [409, 'Une affaire annulée ne peut pas être facturée.']);
+
+      assert.equal(await facturesDe([{ interventionId: { in: [annulee.id, visite.id, rattachee.id] } }, { contratMaintenanceId: contrat.id }, { chantierId: chantier.id }]), 0, 'aucune facture');
+    });
+
+    test('témoins : contrat suspendu ou clos, visite réalisée d’un contrat clos, intervention d’une affaire clôturée : la facture se crée', async () => {
+      const contrat = await envoyer('post', '/api/contrats-maintenance', { clientId: client.id, titre: `TEST Contrat témoin ${suffixe}`, periodiciteMois: 6, dureePrevisionnelleMinutes: 90, dateDebut: '01-01-2026' });
+      assert.equal(contrat.status, 201, JSON.stringify(contrat.body));
+      const visite = await visiteTerminee(contrat.body.id);
+      assert.equal((await statutContrat(contrat.body.id, 'SUSPENDU')).status, 200);
+      await brouillon('CONTRAT', { contratMaintenanceId: contrat.body.id });
+      await brouillon('INTERVENTION', { interventionId: visite.id });
+      assert.equal((await statutContrat(contrat.body.id, 'TERMINE')).status, 200);
+      await brouillon('CONTRAT', { contratMaintenanceId: contrat.body.id });
+      await brouillon('INTERVENTION', { interventionId: visite.id });
+
+      const { CHANTIER: chantier } = await devisConverti('affaire clôturée', ['CHANTIER']);
+      const rattachee = await curative('Curative d’une affaire clôturée', chantier.id);
+      await prisma.intervention.update({ where: { id: rattachee.id }, data: { statut: 'TERMINEE' } });
+      const cloture = await envoyer('patch', `/api/chantiers/${chantier.id}/statut`, { statut: 'TERMINE' });
+      assert.equal(cloture.status, 200, JSON.stringify(cloture.body));
+      await brouillon('INTERVENTION', { interventionId: rattachee.id });
+      await brouillon('CHANTIER', { chantierId: chantier.id });
+      assert.equal(await facturesDe([{ contratMaintenanceId: contrat.body.id }, { interventionId: { in: [visite.id, rattachee.id] } }, { chantierId: chantier.id }]), 6);
+    });
+
+    test('émission : un brouillon dont l’origine a été annulée depuis sa création ne s’émet pas, sans numéro ni écriture ; celui d’un contrat clos s’émet', async () => {
+      await assurerFacturation();
+      const { devis: devisContrat, CONTRAT: contrat } = await devisConverti('émission contrat', ['CONTRAT']);
+      const visite = await visiteTerminee(contrat.id);
+      const surContrat = await brouillon('CONTRAT', { contratMaintenanceId: contrat.id });
+      const surVisite = await brouillon('INTERVENTION', { interventionId: visite.id });
+      const { devis: devisAffaire, CHANTIER: chantier } = await devisConverti('émission affaire', ['CHANTIER']);
+      const rattachee = await curative('Curative émission affaire', chantier.id);
+      await prisma.intervention.update({ where: { id: rattachee.id }, data: { statut: 'TERMINEE' } });
+      const surAffaire = await brouillon('CHANTIER', { chantierId: chantier.id });
+      const surRattachee = await brouillon('INTERVENTION', { interventionId: rattachee.id });
+      const annulee = await curative('Curative émission annulée');
+      const surAnnulee = await brouillon('INTERVENTION', { interventionId: annulee.id });
+
+      await annulerDevis(devisContrat.id);
+      await annulerDevis(devisAffaire.id);
+      await annulerDepuisSaFiche(annulee.id);
+      await refusSansEcriture(surContrat, 'Un contrat annulé ne peut pas être facturé.');
+      await refusSansEcriture(surVisite, 'Le contrat de cette intervention est annulé : elle ne peut pas être facturée.');
+      await refusSansEcriture(surAffaire, 'Une affaire annulée ne peut pas être facturée.');
+      await refusSansEcriture(surRattachee, 'L’affaire de cette intervention est annulée : elle ne peut pas être facturée.');
+      await refusSansEcriture(surAnnulee, 'Une intervention annulée ne peut pas être facturée.');
+
+      // Témoin : un contrat clos n'est pas annulé, son brouillon s'émet.
+      const clos = await envoyer('post', '/api/contrats-maintenance', { clientId: client.id, titre: `TEST Contrat clos émis ${suffixe}`, periodiciteMois: 6, dureePrevisionnelleMinutes: 90, dateDebut: '01-01-2026' });
+      assert.equal(clos.status, 201, JSON.stringify(clos.body));
+      const surClos = await brouillon('CONTRAT', { contratMaintenanceId: clos.body.id });
+      assert.equal((await statutContrat(clos.body.id, 'TERMINE')).status, 200);
+      const emise = await emettre(surClos.id);
+      assert.equal(emise.status, 200, JSON.stringify(emise.body));
+      assert.deepEqual([emise.body.statut, emise.body.totalHt, emise.body.totalTtc], ['EMISE', 100, 120]);
+    });
+
+    test('avoir : une facture émise avant l’annulation de son contrat s’annule toujours par son avoir total', async () => {
+      await assurerFacturation();
+      const { devis, CONTRAT: contrat } = await devisConverti('avoir après annulation', ['CONTRAT']);
+      const facture = await brouillon('CONTRAT', { contratMaintenanceId: contrat.id });
+      const emise = await emettre(facture.id);
+      assert.equal(emise.status, 200, JSON.stringify(emise.body));
+      // La facture existante n'empêche pas l'annulation du devis (constat ouvert, passation, section 3).
+      assert.equal((await annulerDevis(devis.id)).contratAnnule, contrat.id);
+      const annulation = await request(app).post(`/api/factures/${facture.id}/annuler`).set(admin);
+      assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
+      assert.deepEqual([annulation.body.statut, annulation.body.avoir.totalTtc], ['ANNULEE', 120]);
+    });
+
+    test('concurrence : une annulation en cours est attendue, puis la création ou l’émission refusée, sans rien écrire', async () => {
+      // Intervention annulée pendant la création de sa facture.
+      const enCours = await curative('Curative annulée pendant la facture');
+      const surIntervention = await pendantAnnulation('Intervention', enCours.id,
+        (tx) => tx.intervention.update({ where: { id: enCours.id }, data: { statut: 'ANNULEE' } }),
+        () => creerFacture('INTERVENTION', { interventionId: enCours.id }), 'intervention');
+      assert.deepEqual([surIntervention.status, surIntervention.body.error], [409, 'Une intervention annulée ne peut pas être facturée.']);
+
+      // Contrat annulé pendant la création de sa facture, puis pendant celle de sa visite.
+      const contrat = await envoyer('post', '/api/contrats-maintenance', { clientId: client.id, titre: `TEST Contrat annulé pendant la facture ${suffixe}`, periodiciteMois: 6, dureePrevisionnelleMinutes: 90, dateDebut: '01-01-2026' });
+      assert.equal(contrat.status, 201, JSON.stringify(contrat.body));
+      const surContrat = await pendantAnnulation('ContratMaintenance', contrat.body.id,
+        (tx) => tx.contratMaintenance.update({ where: { id: contrat.body.id }, data: { statut: 'ANNULE', ...annulation() } }),
+        () => creerFacture('CONTRAT', { contratMaintenanceId: contrat.body.id }), 'contrat');
+      assert.deepEqual([surContrat.status, surContrat.body.error], [409, 'Un contrat annulé ne peut pas être facturé.']);
+      const autre = await envoyer('post', '/api/contrats-maintenance', { clientId: client.id, titre: `TEST Contrat de la visite annulé pendant la facture ${suffixe}`, periodiciteMois: 6, dureePrevisionnelleMinutes: 90, dateDebut: '01-01-2026' });
+      assert.equal(autre.status, 201, JSON.stringify(autre.body));
+      const visiteAutre = await visiteTerminee(autre.body.id);
+      const surVisite = await pendantAnnulation('ContratMaintenance', autre.body.id,
+        (tx) => tx.contratMaintenance.update({ where: { id: autre.body.id }, data: { statut: 'ANNULE', ...annulation() } }),
+        () => creerFacture('INTERVENTION', { interventionId: visiteAutre.id }), 'contrat de la visite');
+      assert.deepEqual([surVisite.status, surVisite.body.error], [409, 'Le contrat de cette intervention est annulé : elle ne peut pas être facturée.']);
+
+      // Affaire annulée pendant la création de la facture d'une intervention qui lui est rattachée.
+      const { CHANTIER: chantier } = await devisConverti('affaire annulée pendant la facture', ['CHANTIER']);
+      const rattachee = await curative('Curative d’une affaire annulée pendant la facture', chantier.id);
+      const surAffaire = await pendantAnnulation('Chantier', chantier.id,
+        (tx) => tx.chantier.update({ where: { id: chantier.id }, data: { statut: 'ANNULE', ...annulation() } }),
+        () => creerFacture('INTERVENTION', { interventionId: rattachee.id }), 'affaire');
+      assert.deepEqual([surAffaire.status, surAffaire.body.error], [409, 'L’affaire de cette intervention est annulée : elle ne peut pas être facturée.']);
+      assert.equal(await facturesDe([{ interventionId: { in: [enCours.id, visiteAutre.id, rattachee.id] } }, { contratMaintenanceId: { in: [contrat.body.id, autre.body.id] } }]), 0, 'aucune facture');
+
+      // Émission d'un brouillon pendant l'annulation de son contrat.
+      await assurerFacturation();
+      const dernier = await envoyer('post', '/api/contrats-maintenance', { clientId: client.id, titre: `TEST Contrat annulé pendant l’émission ${suffixe}`, periodiciteMois: 6, dureePrevisionnelleMinutes: 90, dateDebut: '01-01-2026' });
+      assert.equal(dernier.status, 201, JSON.stringify(dernier.body));
+      const surDernier = await brouillon('CONTRAT', { contratMaintenanceId: dernier.body.id });
+      const emission = await pendantAnnulation('ContratMaintenance', dernier.body.id,
+        (tx) => tx.contratMaintenance.update({ where: { id: dernier.body.id }, data: { statut: 'ANNULE', ...annulation() } }),
+        () => emettre(surDernier.id), 'émission');
+      assert.deepEqual([emission.status, emission.body.error], [409, 'Un contrat annulé ne peut pas être facturé.']);
+      const lue = await prisma.facture.findUniqueOrThrow({ where: { id: surDernier.id } });
+      assert.deepEqual([lue.statut, lue.numero], ['BROUILLON', null]);
+    });
+  });
 }

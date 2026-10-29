@@ -9,11 +9,15 @@ import EnvoiDocument, { type DocumentAEnvoyer } from '../components/EnvoiDocumen
 import { nombreFr, totauxApercuAvoir, type AvoirPrecedent } from '../lib/apercuAvoir';
 import FactureTempsPasse from '../components/FactureTempsPasse';
 import { corpsFactureTempsPasse, type ApercuFactureTempsPasse } from '../lib/factureTempsPasse';
+import { sourcesFacturables } from '../lib/sourcesFacture';
 
 type Client = { id: string; raisonSociale: string };
 type Origine = 'CHANTIER' | 'INTERVENTION' | 'CONTRAT' | 'HORS_AFFAIRE';
 type NatureLigne = 'PRESTATION' | 'ARTICLE';
-type Source = { id: string; nom?: string; titre?: string; reference?: string; clientId?: string; client?: Client; auTempsPasse?: boolean };
+type Source = {
+  id: string; nom?: string; titre?: string; reference?: string; clientId?: string; client?: Client; auTempsPasse?: boolean;
+  statut?: string; contratMaintenanceId?: string | null; chantier?: { statut?: string } | null;
+};
 type Ligne = { designation: string; nature: NatureLigne; quantite: string; prixUnitaireHt: string; tauxTva: string };
 type Trace = {
   facture: { id: string; origine: Origine; motifHorsAffaire: string | null; client: Client;
@@ -434,8 +438,8 @@ export default function Factures() {
   const ouvrirEnvoi = (facture: Facture) => { setErreur(''); setEnvoi({ libelle: libellePiece(facture), chemin: `/factures/${facture.id}`, nomFichier: `${facture.numero || 'facture'}.pdf` }); };
 
   const emissionImpossible = (facture: Facture) => !!derniereDateEmission && facture.dateEmission.slice(0, 10) < derniereDateEmission.slice(0, 10);
-  const sources = (origine === 'CHANTIER' ? chantiers : origine === 'INTERVENTION' ? interventions : contrats)
-    .filter((source) => !clientSelection || source.clientId === clientSelection || source.client?.id === clientSelection);
+  // Ni affaire, ni contrat, ni intervention d'origine annulée : le serveur refuse leur facture.
+  const sources = sourcesFacturables(origine === 'CHANTIER' ? chantiers : origine === 'INTERVENTION' ? interventions : contrats, contrats, clientSelection);
   const sourceName = (source: Source) => source.nom || source.titre || source.reference || source.id;
 
   return (
