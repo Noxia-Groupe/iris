@@ -63,6 +63,11 @@ export const rattacherMainOeuvre: express.RequestHandler = async (req, res) => {
       } else {
         await tx.intervenantMainOeuvre.delete({ where: { intervenantId: id } });
       }
+      // Le changement validé, la fiche est réécrite sans rien y changer (lot « marge d'un SAV hors contrat ») :
+      // une saisie d'heures SAV, sérialisable, qui attend son verrou (verrouillerContexteCout) est alors refusée
+      // (conflit, 409), comme après un changement de taux, au lieu de figer le prix de vente de son instantané,
+      // pris avant ce changement.
+      await tx.$executeRaw(Prisma.sql`UPDATE "Intervenant" SET "nom" = "nom" WHERE "id" = ${id}`);
       await journaliserAdministration(tx, req as AuthRequest, {
         domaine: 'REGLAGES', type: 'INTERVENANT', action: 'RATTACHEMENT_MAIN_OEUVRE', cibleId: fiche.id, cibleLibelle: fiche.nom,
         avant: { mainOeuvre: libelleMainOeuvre(actuel?.prestation) }, apres: { mainOeuvre: libelleMainOeuvre(cible) },

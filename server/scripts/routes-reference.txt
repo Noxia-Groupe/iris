@@ -122,7 +122,7 @@ GET /api/intervenants requireAuth#07b983da0ce5 > <anonymous>#5f66470a380c
 POST /api/intervenants requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#c6ba071ecbe1
 PUT /api/intervenants/:id requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#783c0d87a196
 PUT /api/intervenants/:id/compte requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#5e61db3bb78c
-PUT /api/intervenants/:id/main-oeuvre requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > rattacherMainOeuvre#6b47f279f68e
+PUT /api/intervenants/:id/main-oeuvre requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > rattacherMainOeuvre#f080f1a68b8e
 DELETE /api/intervenants/:id requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#c87065a29eb2
 GET /api/planning/chantiers requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > requirePlanningActif#20945635a340 > <anonymous>#35c56b70d597
 GET /api/planning/events requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > requirePlanningActif#20945635a340 > <anonymous>#72fc077cb353

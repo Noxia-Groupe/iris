@@ -21266,9 +21266,6 @@ if (!TEST_DATABASE_URL) {
     });
   });
 
-  // Décisions de Nelson du 27-10-2026 à 15:50 UTC : « oui, il faut egalement refusé aussi ces saisies »
-  // (coûts d'une suite sur une affaire close ou annulée) et « annule l'intervention initiale » (suites de
-  // l'intervention issue d'un devis annulé).
   // Lot « marge d'un SAV hors contrat » (décisions de Nelson de la nuit du 26 au 27-10-2026, points 4 à 7,
   // et du 27-10-2026 à 10:27 UTC) : prix de vente à l'heure hors contrat de la main d'œuvre de
   // l'intervenant figé sur l'heure le jour de sa saisie ; marge à l'heure de l'intervention initiale et de
@@ -21456,8 +21453,113 @@ if (!TEST_DATABASE_URL) {
       assert.equal(lecture.status, 200, JSON.stringify(lecture.body));
       assert.equal(lecture.body.margeSav, null);
     });
+
+    // Audit n° 1 de #354 : chaque ligne se calcule en décimal exact. 0,29 h à 45,50 € valent 13,195 €, soit
+    // 13,20 € à l'arrondi au centime ; un produit en virgule flottante (13,194999…) donnerait 13,19 €.
+    test('marge à l’heure : chaque ligne se calcule en décimal exact, sans passer par la virgule flottante', async () => {
+      const fiche = await prisma.intervenant.create({ data: { nom: `TEST Marge SAV décimal ${suffixe}`, role: 'Technicien', tauxHoraireCharge: 30 } });
+      const intervention = await curative('décimal');
+      await prisma.coutInterventionHeure.create({ data: {
+        interventionId: intervention.id, intervenantId: fiche.id, date: new Date('2026-10-20T00:00:00Z'), nbrHeures: '0.29', tauxHoraireApplique: 30, prixVenteHoraireApplique: '45.50', createdById: adminId,
+      } });
+      const lecture = await couts(intervention.id);
+      assert.equal(lecture.status, 200, JSON.stringify(lecture.body));
+      // Ventes 13,20 ; coût 0,29 h à 30 € = 8,70 ; marge 4,50.
+      assert.deepEqual(lecture.body.margeSav, {
+        ventesHT: 13.2, coutsHT: 8.7, margeHT: 4.5, nombreSuites: 0, heuresNonValorisees: 0, intervenantsNonValorises: [], heuresSuitesAnnulees: 0,
+      });
+    });
+
+    // Audit n° 1 de #354 : le signalement nomme chaque intervenant sans prix une seule fois, dans l'ordre
+    // alphabétique français (Émile entre Albert et Zoé), et ne compte pas les heures d'une suite annulée, qui ne
+    // sont de toute façon pas vendues.
+    test('heures sans prix : chaque intervenant nommé une fois, dans l’ordre alphabétique, hors suites annulées', async () => {
+      const fiche = (prenom) => prisma.intervenant.create({ data: { nom: `TEST MSAV ${prenom} ${suffixe}`, role: 'Technicien', tauxHoraireCharge: 30 } });
+      const [zoe, emile, albert, annule] = [await fiche('Zoé'), await fiche('Émile'), await fiche('Albert'), await fiche('Annulé')];
+      const heure = (interventionId, intervenant, nbrHeures) => prisma.coutInterventionHeure.create({ data: {
+        interventionId, intervenantId: intervenant.id, date: new Date('2026-10-20T00:00:00Z'), nbrHeures, tauxHoraireApplique: 30, prixVenteHoraireApplique: null, createdById: adminId,
+      } });
+      const initiale = await curative('signalement');
+      await heure(initiale.id, zoe, 1);
+      await heure(initiale.id, zoe, 0.5);
+      await heure(initiale.id, emile, 0.25);
+      await heure(initiale.id, albert, 2);
+      const suiteAnnulee = await suiteDe(initiale.id);
+      await heure(suiteAnnulee.id, annule, 3);
+      const annulation = await envoyer('patch', `/api/interventions/${suiteAnnulee.id}/statut`, admin, { statut: 'ANNULEE', motif: 'TEST annulation de la suite' });
+      assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
+      const marge = (await couts(initiale.id)).body.margeSav;
+      assert.deepEqual(marge.intervenantsNonValorises, [albert.nom, emile.nom, zoe.nom]);
+      assert.equal(marge.heuresNonValorisees, 3.75);
+      assert.equal(marge.heuresSuitesAnnulees, 3);
+    });
+
+    // Audit n° 1 de #354 : la suite d'une visite reprend son contrat ; elle ne reçoit pas davantage le prix hors
+    // contrat, qui resterait figé sur ses heures quand viendra la valorisation sous contrat (lot à part).
+    test('une heure saisie sur la suite d’une visite de contrat ne reçoit pas de prix de vente hors contrat', async () => {
+      const mainOeuvre = await creerMainOeuvre('TEST-MSAV-SUITE-VISITE', '45.50');
+      const tech = await technicien('suite-visite', 30, mainOeuvre.id);
+      const contrat = await prisma.contratMaintenance.create({ data: {
+        clientId: client.id, titre: `TEST Contrat suite marge SAV ${suffixe}`, periodiciteMois: 12, dureePrevisionnelleMinutes: 60,
+        dateDebut: new Date('2026-01-01T00:00:00.000Z'), prochaineEcheance: new Date('2026-12-01T00:00:00.000Z'),
+      } });
+      const visite = await prisma.intervention.create({ data: {
+        reference: `I26-MSAVS-${suffixe}`, clientId: client.id, contratMaintenanceId: contrat.id, dateDemande: new Date('2026-02-01T00:00:00.000Z'), titre: 'TEST Marge SAV visite à suivre',
+      } });
+      const suite = await suiteDe(visite.id);
+      assert.equal(suite.contratMaintenanceId, contrat.id);
+      await affecter(suite.id, tech.fiche);
+      assert.equal(await prixEnBase((await saisir(tech, suite.id, 1)).id), null);
+      assert.equal((await couts(suite.id)).body.margeSav, null);
+    });
+
+    // Audit n° 1 de #354 : un changement de rattachement validé pendant que la saisie attend le verrou de la
+    // fiche ne laisse pas figer le prix de l'ancienne main d'œuvre, lu dans l'instantané de la saisie, pris
+    // avant lui : la saisie est refusée (409), comme après un changement de taux, et la suivante prend le
+    // nouveau prix. Le test passe par les vraies routes : sa transaction tient la nouvelle main d'œuvre (FOR
+    // UPDATE), si bien que le rattachement, qui a déjà pris la fiche, l'attend ; la saisie part alors et attend
+    // la fiche ; la transaction du test se termine sans rien écrire, le rattachement s'enregistre, puis la saisie
+    // reprend.
+    test('heure saisie pendant un changement de rattachement : jamais figée au prix de l’ancienne main d’œuvre', async () => {
+      const ancienne = await creerMainOeuvre('TEST-MSAV-ANCIENNE', '45.50');
+      const nouvelle = await creerMainOeuvre('TEST-MSAV-NOUVELLE', '60');
+      const tech = await technicien('concurrence', 30, ancienne.id);
+      const intervention = await curative('concurrence');
+      await affecter(intervention.id, tech.fiche);
+      const date = await aujourdhui();
+      const attendre = async (condition, message) => {
+        let vrai = false;
+        for (let tour = 0; tour < 250 && !vrai; tour += 1) {
+          vrai = await condition();
+          if (!vrai) await new Promise((r) => setTimeout(r, 20));
+        }
+        assert.equal(vrai, true, message);
+      };
+      let rattachement;
+      let saisie;
+      await prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT "id" FROM "CataloguePrestation" WHERE "id" = ${nouvelle.id} FOR UPDATE`;
+        const [{ pid }] = await tx.$queryRaw`SELECT pg_backend_pid() AS pid`;
+        rattachement = envoyer('put', `/api/intervenants/${tech.fiche.id}/main-oeuvre`, admin, { mainOeuvreId: nouvelle.id }).then((r) => r);
+        await attendre(async () => (await prisma.$queryRaw`SELECT count(*)::int AS n FROM pg_stat_activity WHERE ${pid}::int = ANY(pg_blocking_pids(pid))`)[0].n > 0, 'le rattachement attend la main d’œuvre, la fiche déjà prise');
+        saisie = envoyer('post', `/api/interventions/${intervention.id}/couts/heures`, tech.auth, { date, nbrHeures: 1 }).then((r) => r);
+        await attendre(async () => (await prisma.$queryRaw`SELECT count(*)::int AS n FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%FROM "Intervenant"%FOR UPDATE%'`)[0].n > 0, 'la saisie attend le verrou de la fiche');
+      }, { timeout: 20000 });
+      assert.equal((await rattachement).status, 200);
+      const reponse = await saisie;
+      if (reponse.status === 201) {
+        assert.equal(await prixEnBase(reponse.body.id), 60, 'le rattachement validé avant la lecture du prix est relu');
+      } else {
+        assert.equal(reponse.status, 409, JSON.stringify(reponse.body));
+        assert.equal(await prisma.coutInterventionHeure.count({ where: { interventionId: intervention.id } }), 0);
+      }
+      assert.equal(await prixEnBase((await saisir(tech, intervention.id, 1)).id), 60);
+    });
   });
 
+  // Décisions de Nelson du 27-10-2026 à 15:50 UTC : « oui, il faut egalement refusé aussi ces saisies »
+  // (coûts d'une suite sur une affaire close ou annulée) et « annule l'intervention initiale » (suites de
+  // l'intervention issue d'un devis annulé).
   describe('Suites d’une affaire close ou annulée : refus des coûts et annulation avec le devis', () => {
     let admin = {};
     let adminId = '';
