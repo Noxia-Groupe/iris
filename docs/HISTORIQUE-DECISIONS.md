@@ -1092,7 +1092,7 @@ Ces lots restent non validés pour mise en service ; seule l'attente de la valid
 
 ## Lot du 29-10-2026 (après-midi)
 
-*Rédigé le 29-10-2026.* Fusion faite par Claude Code selon la décision de Nelson du 20-10-2026, avec une CI verte et un audit interne fusionnable sur la même SHA. Le lot touche aux montants : il n'est ni validé comptablement ni validé pour mise en service. La validation comptable du 28-10-2026, donnée avant lui à la marge à l'heure d'un SAV hors contrat (#354), ne couvre pas le matériel qu'il y ajoute.
+*Rédigé le 29-10-2026.* Fusion faite par Claude Code selon la décision de Nelson du 20-10-2026, avec une CI verte et un audit interne fusionnable sur la même SHA, cet audit, le n° 5, ayant été limité aux tests ajoutés (choix de Claude Code, plus bas). Le lot touche aux montants : il n'est ni validé comptablement ni validé pour mise en service. La validation comptable du 28-10-2026, donnée avant lui à la marge à l'heure d'un SAV hors contrat (#354), ne couvre pas le matériel qu'il y ajoute.
 
 ### Lot fusionné
 
@@ -1111,7 +1111,9 @@ Ces lots restent non validés pour mise en service ; seule l'attente de la valid
 
 - décision du 28-10-2026 sur le matériel des interventions curatives, lecture retenue : « rien n'en est codé » ; le lot est appliqué par #357 ;
 - réponses du 29-10-2026 sur le matériel d'une curative, lecture retenue : « rien n'en est codé » ; le lot est appliqué par #357 ;
-- décisions de la nuit du 26 au 27-10-2026 sur les questions de montants, lecture retenue, seconde PR de l'intervention de suivi liée, point 1 : « Aujourd'hui, seule une intervention d'un contrat actif, visite ou suite d'une visite, reçoit du matériel ; une curative, comme sa suite, ne porte que des heures. » ; une curative et sa suite en reçoivent depuis #357.
+- décisions de la nuit du 26 au 27-10-2026 sur les questions de montants, lecture retenue, seconde PR de l'intervention de suivi liée, point 1 : « Aujourd'hui, seule une intervention d'un contrat actif, visite ou suite d'une visite, reçoit du matériel ; une curative, comme sa suite, ne porte que des heures. » ; une curative et sa suite en reçoivent depuis #357 ;
+- décisions et lots des 19 (soir) et 20-10-2026, libellé du coût cumulé d'une intervention (#257) : « hors contrat, où aucun matériel ne se saisit » ; du matériel s'y saisit depuis #357, et le libellé « Main-d’œuvre cumulée » n'y est gardé que sans matériel (passation, section 4) ;
+- même section, lot pilote 3b (#257) : « le matériel reste réservé aux contrats actifs » ; il se saisit aussi hors contrat depuis #357.
 
 ### Suivi ouvert pendant ce lot
 
@@ -1152,3 +1154,26 @@ Claude Code a reposé les deux lectures (19:05 UTC), cité mot pour mot :
 Réponse de Nelson (19:11 UTC), citée mot pour mot : « Oui pour les deux lectures ».
 
 Lecture retenue par Claude Code, à corriger par Nelson si besoin : sont validés le refus d'émettre un brouillon dont l'origine a été annulée depuis sa création, et les deux lectures du point 14 (le refus vaut pour toute intervention annulée, depuis sa fiche comme avec son devis, et pour les visites d'un contrat annulé réalisées avant l'annulation, qui restent terminées). Avec la décision de 17:44 UTC (section précédente), tous les choix du lot sont confirmés. « Validation comptable ok » valide comptablement le lot de #361 tel qu'il est dans `03452a3` ; les correctifs de son audit n° 2 (documentation et un test) n'en changent ni montant ni règle. Ce n'est pas une mise en service, qui reste au feu vert de Nelson. Restent ouverts, sans rien de tranché, les deux constats du lot 4 suite (facture déjà créée sur le contrat ; saisies antérieures au début d'une intervention) et l'abandon d'un brouillon (passation, section 3, #352).
+
+## Lot du 29-10-2026 (soir)
+
+*Rédigé le 29-10-2026.* Fusions faites par Claude Code selon la décision de Nelson du 20-10-2026, chacune avec une CI verte et un audit interne fusionnable sur le diff complet, sur la même SHA.
+
+### Lots fusionnés
+
+- #360 (tests, suivi #359) : le libellé « Coût réel cumulé : 0,00 € HT » d'une visite de contrat sans matériel est éprouvé à l'écran (T9 de l'audit complet a posteriori de #357) ; un audit interne, fusionnable ; #359 close.
+- #361 (lot « refus de facturer un contrat ou une intervention annulés », décision de Nelson de la nuit du 26 au 27-10-2026, point 14) : la création d'une facture saisie ligne par ligne est refusée pour une intervention annulée, une intervention d'un contrat annulé, visite réalisée comprise, ou rattachée à une affaire annulée, et pour un contrat annulé ; l'émission d'un brouillon dont l'origine a été annulée depuis sa création est refusée ; l'écran Factures ne propose plus ces origines ; le refus d'une intervention au temps passé se juge après celui d'une origine annulée. Lectures et choix par défaut confirmés par Nelson (deux sections précédentes) ; validé comptablement par Nelson le 29-10-2026, sur le lot tel qu'il était dans `03452a3` ; non validé pour mise en service. Trois audits internes, sur le diff complet :
+  - n° 1 (`42782d2`) : trois erreurs (une intervention au temps passé annulée renvoyée vers une facture refusée à son tour, cas renvoyé à ce lot par #352 ; un statut « rien n'est codé » ; la décision de 17:44 UTC à consigner), deux tests manquants sur les montants et un hors montants, versés avant le n° 2 ; le premier correctif a été appliqué autrement que par le patch de l'auditeur (refus au temps passé dans la transaction de création), variante jugée juste par l'audit n° 2 ;
+  - n° 2 (`03452a3`) : trois erreurs de documentation (un statut, une attribution, les décisions du soir à consigner) et un test manquant sur les montants, versés avant le n° 3 ; ses correctifs ne changent ni montant ni règle ;
+  - n° 3 (`835c777`) : fusionnable, sans erreur ; un test manquant hors montants (#362).
+
+**Mentions antérieures.** Les sections précédentes gardent leur rédaction d'origine ; les mentions suivantes y sont levées par la présente section :
+
+- décisions de la nuit du 26 au 27-10-2026 sur les questions de montants, point 14 : « Aujourd'hui, l'écran Factures propose le contrat annulé, et l'API accepte l'intervention annulée. » et « Nouveau lot, prévu. » ; le lot est appliqué par #361, et ses deux lectures sont confirmées par Nelson le 29-10-2026 ;
+- décisions du 27-10-2026 sur la marge des suites et l'intervention d'un devis, 10:27 UTC, lecture retenue, point 2 : « tous deux restent à confirmer » ; la question des visites réalisées d'un contrat annulé est tranchée par Nelson le 29-10-2026 à 19:11 UTC (« Oui pour les deux lectures ») ;
+- lot du 28-10-2026 (soir), suivi ouvert pendant ce lot : « saisie ligne par ligne d'une intervention au temps passé annulée, à reprendre avec le lot du point 14 » ; reprise par #361 (premier correctif de son audit n° 1) ;
+- lot du 29-10-2026 (après-midi), suivi ouvert pendant ce lot : #359 est close par #360.
+
+### Suivi ouvert pendant ce lot
+
+Étiquette `suivi-audit` : #362 (audit n° 3 de #361, T5 : ordre des seuls messages de refus d'une origine annulée). #352 est complétée par les notes N2 et N5 de l'audit n° 1 de #361 (abandon d'un brouillon dont l'origine a été annulée ; suite non annulée d'une intervention au temps passé annulée depuis sa fiche). Les notes destinées à la documentation sont versées par #361 elle-même (N1, N2 et N4 de l'audit n° 1, N2 de l'audit n° 2), sauf N1 de l'audit n° 3 (rangement de la question de l'abandon d'un brouillon dont l'origine a été annulée), versée par la PR qui consigne cette section, avec la note N5 de l'audit de #360 et les notes N9 à N11 de l'audit n° 3 de #358. La note N3 de l'audit n° 1 (annulation de l'affaire simulée par `FOR NO KEY UPDATE` dans le test de concurrence) est versée par #361 dans ce test.
