@@ -58,13 +58,11 @@ export async function chargerInterventionCout(req: AuthRequest) {
   });
 }
 type InterventionCout = { statut: string; contratMaintenanceId: string | null; contratMaintenance: { statut: string } | null };
-// Matériel : réservé aux interventions d'un contrat actif.
+// Heures du technicien et matériel de l'encadrement : sur une intervention d'un contrat actif, et aussi
+// hors contrat (heures : décision de Nelson du 17-10-2026, lot pilote 3b ; matériel d'une curative :
+// décision du 28-10-2026, « Oui il faut pouvoir saisir du materiel pour une intervention curative »).
+// Une intervention d'un contrat suspendu ou terminé reste fermée.
 export function interventionCoutEligible(intervention: InterventionCout) {
-  return !!intervention.contratMaintenanceId && intervention.contratMaintenance?.statut === 'ACTIF' && STATUTS_COUT_INTERVENTION.includes(intervention.statut);
-}
-// Heures du technicien : sur une intervention d'un contrat actif, et aussi hors contrat (décision de
-// Nelson du 17-10-2026, lot pilote 3b). Une intervention d'un contrat suspendu ou terminé reste fermée.
-export function interventionHeuresEligible(intervention: InterventionCout) {
   if (!STATUTS_COUT_INTERVENTION.includes(intervention.statut)) return false;
   return !intervention.contratMaintenanceId || intervention.contratMaintenance?.statut === 'ACTIF';
 }
