@@ -32,7 +32,8 @@ export const libelleDevisMarge = (marge: MargeDevisIntervention) => marge.devis.
  * Marge d'une intervention SAV hors contrat, sans devis ni chantier (lot « marge d'un SAV hors contrat »,
  * décisions de Nelson de la nuit du 26 au 27-10-2026, points 4 à 7, et du 27-10-2026) : les heures de
  * l'intervention et de ses suites, vendues au prix de vente à l'heure de la main d'œuvre de chaque
- * intervenant figé à la saisie, moins leur coût. Le serveur ne l'envoie qu'à l'administration.
+ * intervenant figé à la saisie, moins leur coût et celui du matériel, sans prix de vente (lot « matériel d'une
+ * intervention curative »). Le serveur ne l'envoie qu'à l'administration.
  */
 export type MargeSavHorsContrat = {
   ventesHT: number; coutsHT: number; materielHT: number; margeHT: number; nombreSuites: number;

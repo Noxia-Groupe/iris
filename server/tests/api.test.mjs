@@ -21778,6 +21778,62 @@ if (!TEST_DATABASE_URL) {
       assert.equal(fiche.status, 200, JSON.stringify(fiche.body));
       assert.deepEqual([fiche.body.metrics.materielReel, fiche.body.metrics.coutsSuites.materiel], [25.5, 25.5]);
     });
+
+    // Audit interne n° 1 de #357 : le matériel saisi par l'API sur une suite d'affaire suit la règle de son affaire
+    // (#341) ; celui de l'intervention issue d'un devis converti aussi en chantier entre dans la marge du chantier
+    // (#344) et retient l'annulation du devis, comme ses heures.
+    test('matériel d’une suite d’affaire close ou annulée, et de l’intervention d’un devis rattachée à son chantier : règle de l’affaire, marge du chantier, annulation du devis retenue', async () => {
+      const conducteur = await prisma.user.create({ data: { email: `materiel-curative.affaire.${suffixe}@iris.test`, name: 'TEST Matériel curative conducteur affaire', role: 'CONDUCTEUR_TRAVAUX' } });
+      const authConducteur = parJeton(conducteur.id);
+      const chantier = await prisma.chantier.create({ data: {
+        nom: `TEST Matériel curative affaire close ${suffixe}`, client: client.raisonSociale, clientId: client.id, dateDebut: new Date('2026-10-01T00:00:00Z'),
+        budgetGlobalVendu: 1000, budgetMaterielVendu: 300, budgetMainOeuvreVendu: 700, heuresVendues: 20, responsableId: conducteur.id,
+      } });
+      const materielSuites = async () => (await request(app).get(`/api/chantiers/${chantier.id}`).set(admin)).body.metrics.coutsSuites.materiel;
+      const suite = await suiteDe((await curative('affaire close', admin, { chantierId: chantier.id })).id);
+      const avant = await saisirAchat(suite.id, 10, authConducteur);
+      assert.equal(await materielSuites(), 10);
+
+      // Chantier clôturé : le conducteur ne saisit, ne corrige ni n'archive plus le matériel de la suite ;
+      // l'administration garde la main, comme sur les saisies du chantier.
+      await prisma.chantier.update({ where: { id: chantier.id }, data: { statut: 'TERMINE', dateFin: new Date('2026-10-15T00:00:00Z') } });
+      for (const reponse of [
+        await envoyer('post', `/api/interventions/${suite.id}/couts/achats`, authConducteur, { date: await aujourdhui(), fournisseurId: fournisseur.id, description: 'TEST Pièce refusée', montantHT: 5 }),
+        await envoyer('patch', `/api/interventions/${suite.id}/couts/achats/${avant.id}`, authConducteur, { montantHT: 99, motifCorrection: 'TEST correction refusée' }),
+        await envoyer('post', `/api/interventions/${suite.id}/couts/achats/${avant.id}/archiver`, authConducteur, { motif: 'TEST archivage refusé' }),
+      ]) {
+        assert.equal(reponse.status, 403, JSON.stringify(reponse.body));
+        assert.match(reponse.body.error, /clôturé/);
+      }
+      assert.equal(await materielSuites(), 10, 'rien n’est écrit');
+      await saisirAchat(suite.id, 2.5);
+      assert.equal(await materielSuites(), 12.5);
+
+      // Affaire annulée : plus aucun matériel, administration comprise.
+      await prisma.chantier.update({ where: { id: chantier.id }, data: { statut: 'ANNULE', annuleLe: new Date(), annuleParId: adminId, motifAnnulation: 'TEST affaire annulée' } });
+      assert.match((await saisirAchat(suite.id, 1, admin, 409)).error, /annulée/);
+      assert.equal(await prisma.coutInterventionAchat.count({ where: { interventionId: suite.id } }), 2);
+
+      // Intervention issue d'un devis converti en chantier puis en intervention : rattachée au chantier, son matériel
+      // compte avec lui (pas de marge de devis) et retient l'annulation du devis.
+      const devis = await envoyer('post', '/api/devis', admin, { clientId: client.id, objet: `TEST Devis matériel chantier ${suffixe}`, lignes: [
+        { designation: 'TEST Pose', nature: 'MAIN_OEUVRE', quantite: 2, prixUnitaireHt: 150, tauxTva: 20 },
+      ] });
+      assert.equal(devis.status, 201, JSON.stringify(devis.body));
+      assert.equal((await envoyer('post', `/api/devis/${devis.body.id}/signature`, admin, { signataire: 'TEST Signataire matériel chantier', confirme: true })).status, 201);
+      const chantierDevis = await envoyer('post', `/api/devis/${devis.body.id}/convertir`, admin, { cible: 'CHANTIER', responsableId: conducteur.id });
+      assert.equal(chantierDevis.status, 201, JSON.stringify(chantierDevis.body));
+      const interventionDevis = await envoyer('post', `/api/devis/${devis.body.id}/convertir`, admin, { cible: 'INTERVENTION' });
+      assert.equal(interventionDevis.status, 201, JSON.stringify(interventionDevis.body));
+      await saisirAchat(interventionDevis.body.id, 40, authConducteur);
+      const fiche = await request(app).get(`/api/chantiers/${chantierDevis.body.id}`).set(admin);
+      assert.equal(fiche.status, 200, JSON.stringify(fiche.body));
+      assert.deepEqual([fiche.body.metrics.materielReel, fiche.body.metrics.coutsInterventionDevis.materiel, fiche.body.metrics.coutsSuites.materiel], [40, 40, 0]);
+      assert.equal((await couts(interventionDevis.body.id)).body.margeDevis, null, 'elle compte avec le chantier, sans marge de devis');
+      const annulation = await envoyer('post', `/api/devis/${devis.body.id}/annulation`, admin, { motif: 'TEST client renonce' });
+      assert.equal(annulation.status, 409, JSON.stringify(annulation.body));
+      assert.match(annulation.body.error, /l’intervention issue de ce devis porte déjà 1 coût/);
+    });
   });
 
   // Décisions de Nelson du 27-10-2026 à 15:50 UTC : « oui, il faut egalement refusé aussi ces saisies »

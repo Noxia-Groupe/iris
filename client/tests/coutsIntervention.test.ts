@@ -4,7 +4,8 @@ import { resumeCoutsIntervention, libelleDevisMarge, detailMargeSav, alerteMarge
 
 test('coûts SAV : coût réel pour l’administration, main-d’œuvre seule hors contrat sans matériel, matériel seul pour un conducteur, rien sans total', () => {
   assert.deepEqual(resumeCoutsIntervention({ totalCoutsHT: 96.5, totalMaterielHT: 12.5 }), { libelle: 'Coût réel cumulé', montant: 96.5 });
-  // Hors contrat, l'administration ne reçoit pas de total matériel (null) : le total n'est que la main-d'œuvre.
+  // Sans total matériel transmis (null, garde défensive : le serveur l'envoie toujours depuis le lot « matériel
+  // d'une intervention curative »), le total n'est que la main-d'œuvre.
   assert.deepEqual(resumeCoutsIntervention({ totalCoutsHT: 60, totalMaterielHT: null }), { libelle: 'Main-d’œuvre cumulée', montant: 60 });
   assert.deepEqual(resumeCoutsIntervention({ totalCoutsHT: 0, totalMaterielHT: null }), { libelle: 'Main-d’œuvre cumulée', montant: 0 });
   // Avec un contrat, un total matériel nul reste un coût réel : il pourrait en recevoir.
