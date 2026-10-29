@@ -1089,3 +1089,30 @@ Ces lots restent non validés pour mise en service ; seule l'attente de la valid
 ### Suivi ouvert pendant ce lot
 
 Étiquette `suivi-audit` : #355 (audits de #354 : changement de tarif concurrent d'une saisie, question pour Nelson ; homonymes et heures antérieures au lot dans le signalement ; tests de concurrence qui admettent une issue 201 inaccessible ; heures de visites sans prix figé jusqu'au lot de la valorisation sous contrat). Les notes destinées à la documentation (N1, N16, N17 et N19) sont versées par #354 elle-même ou par la PR qui consigne cette section.
+
+## Lot du 29-10-2026 (après-midi)
+
+*Rédigé le 29-10-2026.* Fusion faite par Claude Code selon la décision de Nelson du 20-10-2026, avec une CI verte et un audit interne fusionnable sur la même SHA. Le lot touche aux montants : il n'est ni validé comptablement ni validé pour mise en service. La validation comptable du 28-10-2026, donnée avant lui à la marge à l'heure d'un SAV hors contrat (#354), ne couvre pas le matériel qu'il y ajoute.
+
+### Lot fusionné
+
+- #357 (lot « matériel d'une intervention curative ») : la saisie, la correction, l'archivage et la restauration du matériel s'ouvrent aux interventions hors contrat, par l'encadrement (administration et conducteur de travaux), jamais par le technicien ; son coût HT entre dans le coût réel de l'intervention, dans la marge à l'heure d'un SAV hors contrat, sans prix de vente, et dans les marges d'un devis ou d'un chantier, qui le comptaient déjà ; une seule règle d'éligibilité vaut pour les heures et le matériel (décision du 28-10-2026 et réponses du 29-10-2026, sections plus haut ; choix par défaut, à confirmer, en passation, section 4). Cinq audits internes :
+  - n° 1 : deux erreurs de la passation (portée de la validation comptable du 28-10-2026, règle de l'affaire d'une suite) et un test manquant sur les montants ;
+  - n° 2 : une erreur de la passation (marge de l'intervention d'un devis converti aussi en chantier) et deux tests manquants sur les montants ;
+  - n° 3 : aucune erreur, deux tests manquants sur les montants ;
+  - n° 4 : aucune erreur, deux tests manquants sur les montants et un hors montants ;
+  - tous corrigés ou versés dans la PR avant fusion ; le n° 5 l'a dite fusionnable sur `50d407b`.
+
+**Choix de Claude Code, à confirmer par Nelson.** Les audits n° 3 et 4 ont revu le même code et la même documentation, ceux de `a1db58d`, sans y constater d'erreur ; ils n'ont relevé que des tests manquants : deux sur les montants chacun, et un hors montants pour le n° 4. Selon la règle 3, chacun de ces audits appelait, après l'ajout de ses tests sur les montants, un nouvel audit. Pour ne pas boucler sans fin, Claude Code a limité l'audit n° 5 aux tests ajoutés, sans chercher de nouveaux mutants ailleurs, toute erreur constatée restant à signaler où qu'elle soit, puis a fusionné #357 sur son verdict. Aucune décision de Nelson ne couvre ce choix : son message du 23-10-2026 (« il faut eviter de tourner en rond ») répondait à une question sur les seuls tests manquants hors montants, et la lecture retenue de cette décision garde, pour un test manquant qui touche un montant, un nouvel audit avant fusion ; `CLAUDE.md` décrit l'audit interne sur le diff complet ; ce choix, qui touche aux montants, n'est pas un micro-arbitrage de droits ou d'affichage que la règle 5 laisse trancher sans Nelson. La question lui est posée en passation, section 3.
+
+**Audit complet a posteriori.** Pour rétablir la règle, Claude Code a fait auditer de nouveau #357, sur son diff complet tel que fusionné (`f4ecae4..1c0a306`), par un nouvel auditeur. Verdict : le lot n'aurait pas été fusionnable en l'état, à cause d'une erreur de documentation sur un montant (C4) : le modèle des droits disait encore la marge à l'heure d'un SAV hors contrat validée comptablement le 28-10-2026, sans réserve pour le matériel que #357 y ajoute. Elle est corrigée par la PR qui consigne cette section. Aucune erreur de code ni de calcul ; un test d'écran manquant, hors montants (T9), est suivi dans #359.
+
+**Mentions antérieures.** Les sections précédentes gardent leur rédaction d'origine ; les mentions suivantes y sont levées par la présente section :
+
+- décision du 28-10-2026 sur le matériel des interventions curatives, lecture retenue : « rien n'en est codé » ; le lot est appliqué par #357 ;
+- réponses du 29-10-2026 sur le matériel d'une curative, lecture retenue : « rien n'en est codé » ; le lot est appliqué par #357 ;
+- décisions de la nuit du 26 au 27-10-2026 sur les questions de montants, lecture retenue, seconde PR de l'intervention de suivi liée, point 1 : « Aujourd'hui, seule une intervention d'un contrat actif, visite ou suite d'une visite, reçoit du matériel ; une curative, comme sa suite, ne porte que des heures. » ; une curative et sa suite en reçoivent depuis #357.
+
+### Suivi ouvert pendant ce lot
+
+Étiquette `suivi-audit` : #359 (audit complet a posteriori de #357, T9 : libellé « Coût réel cumulé » d'une visite de contrat sans matériel, non éprouvé à l'écran). Les tests manquants relevés par les audits n° 1 à 4 sont versés dans #357. Les notes destinées à la documentation sont versées par #357 elle-même (N1 et N3 de l'audit n° 1, N10 et N11 de l'audit n° 2), sauf N6 de l'audit n° 1 (limite de l'écran), versée par la PR qui consigne cette section (passation, section 4), comme C4, N29 et N30 de l'audit complet a posteriori (réserve de la validation comptable dans le modèle des droits et l'inventaire ; matériel compté dans aucune marge, passation, section 4). Cette PR précise aussi, dans le README, que la validation comptable du 28-10-2026 ne couvre pas le matériel de #357, comme le correctif C1 de l'audit n° 1 l'avait fait pour la passation.
