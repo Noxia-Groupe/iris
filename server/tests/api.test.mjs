@@ -24615,6 +24615,20 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await request(app).get('/api/chantiers').set(admin)).body.find((c) => c.id === chantier.id).coutMaterielPrevu, 94.53, 'liste : lu par l’administration');
     });
 
+    test('destinataire de la marge qui ne lit pas les prix d’achat (conducteur titulaire) : le matériel attendu tiré du coût prévu lui est vide, comme le coût prévu', async () => {
+      const devis = await devisSigne('matériel attendu', [fourniture('TEST Détecteur bris', '4', '35', '12.35')]); // 49,40
+      const chantier = await convertir(devis.id, admin, { responsableId: comptes.conducteur.id });
+      const administration = (await lireChantier(chantier.id)).metrics.estimation;
+      assert.deepEqual([administration.sourceMateriel, administration.coutMaterielAttendu], ['DEVIS', 49.4]);
+      const fiche = await lireChantier(chantier.id, jeton('conducteur'));
+      assert.ok(fiche.metrics.estimation, 'le conducteur titulaire voit la marge estimée (réglages par défaut)');
+      const e = fiche.metrics.estimation;
+      assert.deepEqual([fiche.coutMaterielPrevu, e.sourceMateriel, e.coutMaterielAttendu, e.coutEstime], [null, 'DEVIS', null, null]);
+      assert.notEqual(fiche.metrics.margeEstimee, null, 'la marge estimée reste au conducteur');
+      const liste = await request(app).get('/api/chantiers').set(jeton('conducteur'));
+      assert.equal(liste.body.find((c) => c.id === chantier.id).metrics.estimation.coutMaterielAttendu, null, 'liste : vide aussi');
+    });
+
     test('un devis sans aucun prix d’achat donne un coût prévu nul ; un chantier sans coût prévu (créé à la main ou avant le lot) garde l’estimation par les chantiers terminés', async () => {
       const devis = await devisSigne('sans achat', [fourniture('TEST Détecteur', '2', '80')]);
       const chantier = await convertir(devis.id);
@@ -24647,6 +24661,61 @@ if (!TEST_DATABASE_URL) {
       assert.equal(Number(modification.body.coutMaterielPrevu), 42.5, 'lu par l’administration dans la réponse');
       assert.equal(await enBase(chantier.id), '42.5');
       await assert.rejects(prisma.chantier.update({ where: { id: chantier.id }, data: { coutMaterielPrevu: -1 } }));
+    });
+
+    // Audit n° 1 de #368 : arrondi de chaque ligne avant la somme, matériel des suites, chantier clos, et
+    // masquage dans les réponses d'écriture et pour une clé d'intégration.
+    test('chaque fourniture est arrondie au centime avant la somme : 2 × (0,5 × 2,01 €) font 2,02 €, et non 2,01 €', async () => {
+      const devis = await devisSigne('arrondi par ligne', [fourniture('TEST Cosse A', '0.5', '3', '2.01'), fourniture('TEST Cosse B', '0.5', '3', '2.01')]);
+      const chantier = await convertir(devis.id);
+      assert.equal(chantier.coutMaterielPrevu, 2.02);
+      assert.equal(await enBase(chantier.id), '2.02');
+    });
+
+    test('marge estimée : le matériel des suites s’ajoute au coût prévu ; un chantier clos est estimé à son réel', async () => {
+      const devis = await devisSigne('suites et clôture', [fourniture('TEST Sirène', '2', '60', '25')]); // 50,00
+      const chantier = await convertir(devis.id, admin, { responsableId: comptes.conducteur.id });
+      const reference = () => `TEST-COUT-PREVU-${randomUUID()}`;
+      const initiale = await prisma.intervention.create({ data: { reference: reference(), clientId: client.id, titre: 'TEST Coût prévu initiale', chantierId: chantier.id } });
+      const suite = await prisma.intervention.create({ data: { reference: reference(), clientId: client.id, titre: 'TEST Coût prévu suite', chantierId: chantier.id, interventionInitialeId: initiale.id } });
+      await prisma.coutInterventionAchat.create({ data: { interventionId: suite.id, fournisseurId: fournisseur.id, date: new Date(), description: 'TEST Achat suite coût prévu', montantHT: 7.5, createdById: adminId } });
+      const enCours = await lireChantier(chantier.id);
+      assert.equal(enCours.metrics.coutsSuites.materiel, 7.5);
+      assert.deepEqual([enCours.metrics.estimation.sourceMateriel, enCours.metrics.estimation.coutMaterielAttendu], ['DEVIS', 57.5]);
+      const cloture = await envoyer('patch', `/api/chantiers/${chantier.id}/statut`, admin, { statut: 'TERMINE' });
+      assert.equal(cloture.status, 200, JSON.stringify(cloture.body));
+      const clos = await lireChantier(chantier.id);
+      assert.deepEqual([clos.metrics.estimation.sourceMateriel, clos.metrics.estimation.coutMaterielAttendu], ['REEL', 7.5]);
+    });
+
+    test('écritures du conducteur titulaire (modification, clôture) : la réponse lui masque le coût prévu', async () => {
+      const devis = await devisSigne('écriture conducteur', [fourniture('TEST Clavier', '1', '90', '40')]);
+      const chantier = await convertir(devis.id, admin, { responsableId: comptes.conducteur.id });
+      assert.equal(chantier.coutMaterielPrevu, 40);
+      const renomme = await envoyer('patch', `/api/chantiers/${chantier.id}`, jeton('conducteur'), { nom: `TEST Coût prévu conducteur ${suffixe}` });
+      assert.equal(renomme.status, 200, JSON.stringify(renomme.body));
+      assert.equal(renomme.body.coutMaterielPrevu, null, 'modification : masqué au conducteur');
+      const clos = await envoyer('patch', `/api/chantiers/${chantier.id}/statut`, jeton('conducteur'), { statut: 'TERMINE' });
+      assert.equal(clos.status, 200, JSON.stringify(clos.body));
+      assert.equal(clos.body.coutMaterielPrevu, null, 'clôture : masqué au conducteur');
+      assert.equal(await enBase(chantier.id), '40');
+    });
+
+    test('clé d’intégration : le coût prévu sort avec finances:read, vide sans', async () => {
+      const devis = await devisSigne('clé', [fourniture('TEST Lecteur', '2', '70', '31.5')]); // 63,00
+      const chantier = await convertir(devis.id);
+      const creer = async (nom, scopes) => {
+        const cle = await envoyer('post', '/api/admin/api-keys', admin, { nom, scopes });
+        assert.equal(cle.status, 201, JSON.stringify(cle.body));
+        return { Authorization: `Bearer ${cle.body.apiKey}` };
+      };
+      const lire = async (auth) => {
+        const res = await request(app).get('/api/v1/chantiers').set(auth);
+        assert.equal(res.status, 200, JSON.stringify(res.body));
+        return res.body.find((c) => c.id === chantier.id);
+      };
+      assert.equal((await lire(await creer(`TEST coût prévu sans finances ${suffixe}`, ['chantiers:read']))).coutMaterielPrevu, null);
+      assert.equal((await lire(await creer(`TEST coût prévu avec finances ${suffixe}`, ['chantiers:read', 'finances:read']))).coutMaterielPrevu, 63);
     });
   });
 }

@@ -37,11 +37,12 @@ export interface MetriquesChantier {
 }
 
 /** Hypothèses de la marge estimée en fin de chantier, telles que le serveur les a prises. Le coût
- * total, celui de la main-d'œuvre et le coût horaire ne sont transmis qu'à l'administration. */
+ * total, celui de la main-d'œuvre et le coût horaire ne sont transmis qu'à l'administration ; le matériel
+ * attendu tiré du coût d'achat prévu au devis, qu'à qui lit les prix d'achat prévus. */
 export interface EstimationMarge {
   coutEstime: number | null;
   coutMainOeuvreAttendu: number | null;
-  coutMaterielAttendu: number;
+  coutMaterielAttendu: number | null;
   coutHoraireReference: number | null;
   sourceCoutHoraire: 'CHANTIER' | 'SOCIETE' | 'VENDU' | 'REEL';
   ratioMateriel: number | null;

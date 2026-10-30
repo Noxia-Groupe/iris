@@ -128,10 +128,10 @@ Chaque chantier porte des alertes de suivi calculées par le serveur (`metrics.a
 La marge estimée (`metrics.margeEstimee`, hypothèses dans `metrics.estimation`) compte,
 pour chaque poste, le plus élevé du réel déjà dépensé et du coût attendu : heures vendues
 au coût horaire moyen réellement appliqué sur le chantier (à défaut celui de la société,
-à défaut le budget main-d'œuvre vendu) ; matériel : pour un chantier ouvert depuis un devis,
-le coût d'achat prévu au devis (une fourniture sans prix d'achat prévu comptant pour zéro),
-sinon le matériel vendu multiplié par le ratio achats / matériel vendu observé sur les
-chantiers terminés (à défaut, au prix de vente). Un
+à défaut le budget main-d'œuvre vendu) ; matériel : pour un chantier ouvert depuis un devis
+depuis #368, le coût d'achat prévu de ses fournitures (une fourniture sans prix d'achat prévu
+comptant pour zéro), sinon (chantier ouvert avant) le matériel vendu multiplié par le ratio
+achats / matériel vendu observé sur les chantiers terminés (à défaut, au prix de vente). Un
 chantier terminé est estimé à son réel. `EN_PERTE`, `MARGE_FAIBLE` et l'estimation suivent
 la visibilité de la marge : ils ne sont jamais envoyés à un rôle ou une clé à qui la marge
 est masquée. Les dépassements et `SANS_SAISIE` restent visibles de tous ceux qui voient le

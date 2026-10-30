@@ -38,7 +38,7 @@ test('fiche chantier : la marge estimée part du coût d’achat prévu au devis
   const estimation = page.locator('[data-estimation]');
   await expect(estimation).toContainText('coût d’achat prévu au devis (91,2 € HT), une fourniture sans prix d’achat prévu comptant pour zéro.');
 
-  // Conducteur titulaire : la même hypothèse, sans montant.
+  // Conducteur titulaire : la même hypothèse, sans montant, ni dans l'hypothèse ni dans le matériel attendu.
   const contexte = await browser.newContext();
   const vueConducteur = await contexte.newPage();
   await vueConducteur.addInitScript(([token, user]) => {
@@ -47,7 +47,7 @@ test('fiche chantier : la marge estimée part du coût d’achat prévu au devis
   }, [jetonPour(conducteur.id), JSON.stringify({ ...conducteur, permissions: ['chantiers:read', 'clients:read'] })]);
   await vueConducteur.goto(`/chantiers/${chantier.id}`, { waitUntil: 'networkidle' });
   const vue = vueConducteur.locator('[data-estimation]');
-  await expect(vue).toContainText('coût d’achat prévu au devis, une fourniture sans prix d’achat prévu comptant pour zéro.');
+  await expect(vue.locator('li', { hasText: 'Matériel attendu' })).toHaveText('Matériel attendu : coût d’achat prévu au devis, une fourniture sans prix d’achat prévu comptant pour zéro.');
   await expect(vue).not.toContainText('€ HT)');
   await contexte.close();
 });

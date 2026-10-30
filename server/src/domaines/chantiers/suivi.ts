@@ -227,11 +227,19 @@ export function serializeChantier(chantier: any, params: Parametres, canSeeMarge
   // Les lignes de coûts des suites ne servent qu'au calcul : seuls leurs totaux sortent, dans
   // metrics.coutsSuites, masqués comme les autres montants.
   const { coutsSuites: _coutsSuites, coutsInterventionDevis: _coutsInterventionDevis, ...chantierSansCoutsSuites } = c;
+  const metrics = computeChantierMetrics(c, params, canSeeMarge, contexte);
+  // Le matériel attendu tiré du coût prévu le redonne, au matériel des suites près, tant que les achats
+  // restent dessous ; le coût total l'inclut. Ils suivent donc le coût prévu, la marge estimée restant
+  // à ses destinataires (limite connue, à confirmer : elle le redonne par différence quand la
+  // main-d'œuvre attendue se déduit de la fiche).
+  const estimation = metrics.estimation;
   const serialise = {
     ...chantierSansCoutsSuites,
     budgetGlobalVendu: canSeeMarge ? c.budgetGlobalVendu : null,
     coutMaterielPrevu: prixAchatVisible && montantsVisibles ? c.coutMaterielPrevu ?? null : null,
-    metrics: computeChantierMetrics(c, params, canSeeMarge, contexte),
+    metrics: estimation?.sourceMateriel === 'DEVIS' && !prixAchatVisible
+      ? { ...metrics, estimation: { ...estimation, coutMaterielAttendu: null, coutEstime: null } }
+      : metrics,
   };
   if (!montantsVisibles) return chantierSansMontants(serialise);
   return coutMainOeuvreVisible ? serialise : chantierSansCoutMainOeuvre(serialise);
