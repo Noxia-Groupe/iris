@@ -112,6 +112,26 @@ export function dateDuJour() {
   return `${valeur('day')}-${valeur('month')}-${valeur('year')}`;
 }
 
+// Millisecondes restant avant minuit, au fuseau de l'entreprise (Europe/Paris, comme dateDuJour).
+export function avantMinuit(maintenant = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/Paris', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+  }).formatToParts(maintenant);
+  const valeur = (type: string) => Number(parts.find((part) => part.type === type)!.value);
+  return 86_400_000 - (((valeur('hour') * 60 + valeur('minute')) * 60 + valeur('second')) * 1000 + maintenant.getMilliseconds());
+}
+
+// Un parcours qui prépare ses données pour le jour même ne doit pas chevaucher minuit (#366) : s'il reste
+// moins que son délai avant minuit, il attend que minuit soit passé, et son délai s'allonge d'autant. Il ne
+// peut durer plus que son délai : il se déroule alors tout entier dans un même jour.
+export async function horsDuPassageDeMinuit() {
+  const info = base.info();
+  const attente = avantMinuit();
+  if (attente >= info.timeout) return;
+  info.setTimeout(info.timeout + attente + 1_000);
+  await new Promise((resolve) => setTimeout(resolve, attente + 1_000));
+}
+
 type Outils = {
   session: Session;
   allerSurPageAdmin: (path: string) => Promise<Page>;
