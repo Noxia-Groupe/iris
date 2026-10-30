@@ -37,12 +37,11 @@ export interface MetriquesChantier {
 }
 
 /** Hypothèses de la marge estimée en fin de chantier, telles que le serveur les a prises. Le coût
- * total, celui de la main-d'œuvre et le coût horaire ne sont transmis qu'à l'administration ; le matériel
- * attendu tiré du coût d'achat prévu au devis, qu'à qui lit les prix d'achat prévus. */
+ * total, celui de la main-d'œuvre et le coût horaire ne sont transmis qu'à l'administration. */
 export interface EstimationMarge {
   coutEstime: number | null;
   coutMainOeuvreAttendu: number | null;
-  coutMaterielAttendu: number | null;
+  coutMaterielAttendu: number;
   coutHoraireReference: number | null;
   sourceCoutHoraire: 'CHANTIER' | 'SOCIETE' | 'VENDU' | 'REEL';
   ratioMateriel: number | null;
@@ -216,8 +215,8 @@ export function hypotheseCoutHoraire(e: EstimationMarge, heuresSuites = 0): stri
 }
 
 /** Libellé de l'hypothèse retenue pour le matériel ; celui des suites SAV, non vendu, s'y ajoute. Le coût
- * d'achat prévu au devis n'est transmis qu'à qui lit les prix d'achat prévus : sans lui, l'hypothèse est
- * décrite sans montant. */
+ * d'achat prévu au devis n'est transmis qu'à qui lit les prix d'achat prévus ou reçoit la rentabilité du chantier :
+ * sans lui, l'hypothèse est décrite sans montant. */
 export function hypotheseMateriel(e: EstimationMarge, materielSuites?: number | null, coutMaterielPrevu?: number | null): string {
   const suites = materielSuites ? ', plus le matériel des suites SAV' : '';
   switch (e.sourceMateriel) {

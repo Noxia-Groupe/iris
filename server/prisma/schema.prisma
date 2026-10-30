@@ -121,7 +121,8 @@ model Chantier {
   // prévu × quantité, arrondi au centime, de chaque ligne du devis qui en porte un, fourniture ou
   // main-d'œuvre (sous-traitance), une fourniture sans prix d'achat comptant pour zéro (réponses de
   // Nelson du 30-10-2026). Vide pour un chantier créé à la main ou converti avant le lot : sa
-  // marge estimée garde le ratio des chantiers terminés. Lu par qui lit le prix d'achat prévu des devis.
+  // marge estimée garde le ratio des chantiers terminés. Lu par qui lit le prix d'achat prévu des devis
+  // ou reçoit la rentabilité du chantier (réponse de Nelson du 30-10-2026, « Ouvrir la lecture »).
   coutMaterielPrevu     Decimal? @db.Decimal(12, 2)
 
   // Rémunération commerciale : bascule vers le barème réduit au lieu du barème standard

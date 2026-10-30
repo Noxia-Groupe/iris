@@ -6,7 +6,8 @@ const api = `http://127.0.0.1:${process.env.E2E_API_PORT || '3001'}/api`;
 // Lot « budget et heures prévues du chantier », PR 1 (décision de Nelson de la nuit du 26 au 27-10-2026, point 15 :
 // « oui ca alimente forcément le budget » ; réponse du 30-10-2026 : une fourniture sans prix d'achat prévu compte pour
 // « Zéro ») : sur la fiche d'un chantier ouvert depuis un devis, la marge estimée part du coût d'achat prévu au devis,
-// montant compris pour l'administration, sans montant pour le conducteur, qui ne lit pas les prix d'achat prévus.
+// montant compris pour l'administration et pour le conducteur titulaire, qui reçoit la rentabilité du chantier sans lire
+// les prix d'achat prévus du devis (réponse du 30-10-2026 : « Ouvrir la lecture »).
 
 const base64url = (valeur: object) => Buffer.from(JSON.stringify(valeur)).toString('base64url');
 function jetonPour(userId: string) {
@@ -14,7 +15,7 @@ function jetonPour(userId: string) {
   return `${corps}.${createHmac('sha256', 'secret-e2e-uniquement').update(corps).digest('base64url')}`;
 }
 
-test('fiche chantier : la marge estimée part du coût d’achat prévu au devis, avec son montant pour l’administration seule', async ({ session, request, creerClient, allerSurPageAdmin, browser }) => {
+test('fiche chantier : la marge estimée part du coût d’achat prévu au devis, avec son montant pour l’administration et le conducteur titulaire', async ({ session, request, creerClient, allerSurPageAdmin, browser }) => {
   const envoyer = async (methode: 'post' | 'put' | 'patch', path: string, data?: object) => {
     const response = await request[methode](`${api}${path}`, { headers: { Authorization: `Bearer ${session.token}` }, data });
     expect(response.ok(), `${path} : ${await response.text()}`).toBeTruthy();
@@ -38,7 +39,7 @@ test('fiche chantier : la marge estimée part du coût d’achat prévu au devis
   const estimation = page.locator('[data-estimation]');
   await expect(estimation).toContainText('coût d’achat prévu au devis (91,2 € HT), une fourniture sans prix d’achat prévu comptant pour zéro.');
 
-  // Conducteur titulaire : la même hypothèse, sans montant, ni dans l'hypothèse ni dans le matériel attendu.
+  // Conducteur titulaire : la même hypothèse, avec son montant, et le matériel attendu.
   const contexte = await browser.newContext();
   const vueConducteur = await contexte.newPage();
   await vueConducteur.addInitScript(([token, user]) => {
@@ -47,7 +48,7 @@ test('fiche chantier : la marge estimée part du coût d’achat prévu au devis
   }, [jetonPour(conducteur.id), JSON.stringify({ ...conducteur, permissions: ['chantiers:read', 'clients:read'] })]);
   await vueConducteur.goto(`/chantiers/${chantier.id}`, { waitUntil: 'networkidle' });
   const vue = vueConducteur.locator('[data-estimation]');
-  await expect(vue.locator('li', { hasText: 'Matériel attendu' })).toHaveText('Matériel attendu : coût d’achat prévu au devis, une fourniture sans prix d’achat prévu comptant pour zéro.');
-  await expect(vue).not.toContainText('€ HT)');
+  await expect(vue).toContainText('coût d’achat prévu au devis (91,2 € HT), une fourniture sans prix d’achat prévu comptant pour zéro.');
+  await expect(vue.locator('li', { hasText: 'Matériel attendu' }).locator('strong')).toHaveText(/^91\s€$/); // arrondi à l'euro, comme les autres postes de la fiche
   await contexte.close();
 });

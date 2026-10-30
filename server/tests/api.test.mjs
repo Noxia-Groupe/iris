@@ -24582,8 +24582,9 @@ if (!TEST_DATABASE_URL) {
   // « oui ca alimente forcément le budget » ; réponse du 30-10-2026 : une fourniture sans prix d'achat prévu compte pour
   // « Zéro ») : le coût d'achat prévu des lignes du devis, fournitures et main-d'œuvre qui porte un prix d'achat prévu
   // (réponse du 30-10-2026, 13:12 UTC : « Ajouté au coût prévu »), est figé à la conversion en chantier et remplace, dans
-  // la marge estimée, le ratio des chantiers terminés. Il se lit comme le prix d'achat prévu des devis : par
-  // l'administration, ou une clé d'intégration avec finances:read.
+  // la marge estimée, le ratio des chantiers terminés. Il se lit par qui lit le prix d'achat prévu des devis
+  // (l'administration, une clé d'intégration avec finances:read) et par qui reçoit la rentabilité du chantier
+  // (réponse du 30-10-2026 : « Ouvrir la lecture »).
   describe('Coût matériel prévu du chantier : prix d’achat prévus des lignes du devis', () => {
     let admin = {};
     let adminId = '';
@@ -24659,28 +24660,39 @@ if (!TEST_DATABASE_URL) {
       await achat(chantier.id, 250);
       const depasse = (await lireChantier(chantier.id)).metrics.estimation;
       assert.deepEqual([depasse.sourceMateriel, depasse.coutMaterielAttendu], ['DEVIS', 250], 'un poste n’est jamais estimé sous le réel');
-      // Le conducteur, titulaire du chantier, ne lit pas les prix d'achat prévus : le coût prévu lui est masqué.
+      // Le conducteur, titulaire du chantier, reçoit sa rentabilité : il lit le coût prévu, sans lire les prix d'achat
+      // prévus du devis (réponse de Nelson du 30-10-2026, « Ouvrir la lecture »).
       const conducteur = await lireChantier(chantier.id, jeton('conducteur'));
-      assert.equal(conducteur.coutMaterielPrevu, null);
+      assert.equal(conducteur.coutMaterielPrevu, 194.53);
       if (conducteur.metrics?.estimation) assert.equal(conducteur.metrics.estimation.sourceMateriel, 'DEVIS');
       const liste = await request(app).get('/api/chantiers').set(jeton('conducteur'));
       assert.equal(liste.status, 200, JSON.stringify(liste.body));
-      assert.equal(liste.body.find((c) => c.id === chantier.id).coutMaterielPrevu, null, 'liste : masqué');
+      assert.equal(liste.body.find((c) => c.id === chantier.id).coutMaterielPrevu, 194.53, 'liste : lu par le conducteur titulaire');
       assert.equal((await request(app).get('/api/chantiers').set(admin)).body.find((c) => c.id === chantier.id).coutMaterielPrevu, 194.53, 'liste : lu par l’administration');
     });
 
-    test('destinataire de la marge qui ne lit pas les prix d’achat (conducteur titulaire) : le matériel attendu tiré du coût prévu lui est vide, comme le coût prévu', async () => {
+    test('destinataire de la rentabilité qui ne lit pas les prix d’achat du devis (conducteur titulaire) : il lit le coût prévu et le matériel attendu ; sans la rentabilité, ni l’un ni l’autre', async () => {
       const devis = await devisSigne('matériel attendu', [fourniture('TEST Détecteur bris', '4', '35', '12.35')]); // 49,40
       const chantier = await convertir(devis.id, admin, { responsableId: comptes.conducteur.id });
-      const administration = (await lireChantier(chantier.id)).metrics.estimation;
-      assert.deepEqual([administration.sourceMateriel, administration.coutMaterielAttendu], ['DEVIS', 49.4]);
       const fiche = await lireChantier(chantier.id, jeton('conducteur'));
       assert.ok(fiche.metrics.estimation, 'le conducteur titulaire voit la marge estimée (réglages par défaut)');
       const e = fiche.metrics.estimation;
-      assert.deepEqual([fiche.coutMaterielPrevu, e.sourceMateriel, e.coutMaterielAttendu, e.coutEstime], [null, 'DEVIS', null, null]);
-      assert.notEqual(fiche.metrics.margeEstimee, null, 'la marge estimée reste au conducteur');
+      assert.deepEqual([fiche.coutMaterielPrevu, e.sourceMateriel, e.coutMaterielAttendu, e.coutEstime], [49.4, 'DEVIS', 49.4, null], 'coût total masqué : il inclut le coût de main-d’œuvre');
       const liste = await request(app).get('/api/chantiers').set(jeton('conducteur'));
-      assert.equal(liste.body.find((c) => c.id === chantier.id).metrics.estimation.coutMaterielAttendu, null, 'liste : vide aussi');
+      assert.equal(liste.body.find((c) => c.id === chantier.id).coutMaterielPrevu, 49.4, 'liste : lu aussi');
+      // Sans la rentabilité du chantier (réglage de la société), ni montant vendu, ni coût prévu, ni marge estimée.
+      const avant = await prisma.parametres.findUnique({ where: { id: 'singleton' } });
+      try {
+        assert.equal((await envoyer('put', '/api/parametres', admin, { rentabiliteConducteur: false })).status, 200);
+        const sans = await lireChantier(chantier.id, jeton('conducteur'));
+        assert.deepEqual([sans.budgetGlobalVendu, sans.coutMaterielPrevu, sans.metrics.estimation], [null, null, null]);
+        assert.equal((await request(app).get('/api/chantiers').set(jeton('conducteur'))).body.find((c) => c.id === chantier.id).coutMaterielPrevu, null, 'liste : masqué aussi');
+        const ecrit = await envoyer('patch', `/api/chantiers/${chantier.id}`, jeton('conducteur'), { nom: `TEST Coût prévu sans rentabilité ${suffixe}` });
+        assert.equal(ecrit.status, 200, JSON.stringify(ecrit.body));
+        assert.deepEqual([ecrit.body.budgetGlobalVendu, ecrit.body.coutMaterielPrevu], [null, null], 'réponse d’écriture : masqué aussi');
+      } finally {
+        assert.equal((await envoyer('put', '/api/parametres', admin, { rentabiliteConducteur: avant.rentabiliteConducteur })).status, 200);
+      }
     });
 
     test('un devis sans aucun prix d’achat donne un coût prévu nul ; un chantier sans coût prévu (créé à la main ou avant le lot) garde l’estimation par les chantiers terminés', async () => {
@@ -24742,16 +24754,16 @@ if (!TEST_DATABASE_URL) {
       assert.deepEqual([clos.metrics.estimation.sourceMateriel, clos.metrics.estimation.coutMaterielAttendu], ['REEL', 7.5]);
     });
 
-    test('écritures du conducteur titulaire (modification, clôture) : la réponse lui masque le coût prévu', async () => {
+    test('écritures du conducteur titulaire (modification, clôture) : la réponse lui donne le coût prévu, comme sa lecture', async () => {
       const devis = await devisSigne('écriture conducteur', [fourniture('TEST Clavier', '1', '90', '40')]);
       const chantier = await convertir(devis.id, admin, { responsableId: comptes.conducteur.id });
       assert.equal(chantier.coutMaterielPrevu, 40);
       const renomme = await envoyer('patch', `/api/chantiers/${chantier.id}`, jeton('conducteur'), { nom: `TEST Coût prévu conducteur ${suffixe}` });
       assert.equal(renomme.status, 200, JSON.stringify(renomme.body));
-      assert.equal(renomme.body.coutMaterielPrevu, null, 'modification : masqué au conducteur');
+      assert.equal(Number(renomme.body.coutMaterielPrevu), 40, 'modification : lu par le conducteur titulaire');
       const clos = await envoyer('patch', `/api/chantiers/${chantier.id}/statut`, jeton('conducteur'), { statut: 'TERMINE' });
       assert.equal(clos.status, 200, JSON.stringify(clos.body));
-      assert.equal(clos.body.coutMaterielPrevu, null, 'clôture : masqué au conducteur');
+      assert.equal(Number(clos.body.coutMaterielPrevu), 40, 'clôture : lu par le conducteur titulaire');
       assert.equal(await enBase(chantier.id), '40');
     });
 

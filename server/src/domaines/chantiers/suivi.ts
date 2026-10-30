@@ -220,26 +220,19 @@ export function computeChantierMetrics(chantier: any, params: Parametres, canSee
 // Exception : au technicien, ni budgets par poste, ni coûts, ni taux, ni alertes de
 // dépassement (cf. voitMontantsChantier et chantierSansMontants) ; aux autres comptes non
 // administrateurs, ni taux ni coût de main-d'œuvre (cf. voitCoutMainOeuvre). Le coût matériel prévu,
-// somme des prix d'achat prévus du devis, ne sort que pour qui lit ces prix (cf. voitPrixAchatDevis) ;
-// la marge estimée qui en découle suit, elle, la règle de la marge.
+// somme des prix d'achat prévus du devis, sort pour qui lit ces prix (cf. voitPrixAchatDevis) et pour qui
+// reçoit la rentabilité du chantier, comme le montant vendu (canSeeMarge) : la marge estimée, avec la marge
+// du jour et les heures, le redonnerait par calcul (réponse de Nelson du 30-10-2026, « Ouvrir la lecture »).
 export function serializeChantier(chantier: any, params: Parametres, canSeeMarge: boolean, contexte?: ContexteSuivi, montantsVisibles = true, coutMainOeuvreVisible = true, prixAchatVisible = false) {
   const c = decimalToNumber(chantier);
   // Les lignes de coûts des suites ne servent qu'au calcul : seuls leurs totaux sortent, dans
   // metrics.coutsSuites, masqués comme les autres montants.
   const { coutsSuites: _coutsSuites, coutsInterventionDevis: _coutsInterventionDevis, ...chantierSansCoutsSuites } = c;
-  const metrics = computeChantierMetrics(c, params, canSeeMarge, contexte);
-  // Le matériel attendu tiré du coût prévu le redonne, au matériel des suites près, tant que les achats
-  // restent dessous ; le coût total l'inclut. Ils suivent donc le coût prévu, la marge estimée restant
-  // à ses destinataires (limite connue, à confirmer : elle le redonne par différence quand la
-  // main-d'œuvre attendue se déduit de la fiche).
-  const estimation = metrics.estimation;
   const serialise = {
     ...chantierSansCoutsSuites,
     budgetGlobalVendu: canSeeMarge ? c.budgetGlobalVendu : null,
-    coutMaterielPrevu: prixAchatVisible && montantsVisibles ? c.coutMaterielPrevu ?? null : null,
-    metrics: estimation?.sourceMateriel === 'DEVIS' && !prixAchatVisible
-      ? { ...metrics, estimation: { ...estimation, coutMaterielAttendu: null, coutEstime: null } }
-      : metrics,
+    coutMaterielPrevu: (prixAchatVisible || canSeeMarge) && montantsVisibles ? c.coutMaterielPrevu ?? null : null,
+    metrics: computeChantierMetrics(c, params, canSeeMarge, contexte),
   };
   if (!montantsVisibles) return chantierSansMontants(serialise);
   return coutMainOeuvreVisible ? serialise : chantierSansCoutMainOeuvre(serialise);

@@ -93,9 +93,11 @@ export function peutCloturerChantier(user: AuthRequest['user'], chantier: { resp
 // voitRentabilite, budgets par poste selon voitMontantsChantier), pour qu'un enregistrement
 // renvoyé tel quel ne contourne pas ces règles.
 export async function chantierSelonRentabilite<T extends { responsableId: string | null; budgetGlobalVendu: unknown; budgetMaterielVendu: unknown; budgetMainOeuvreVendu: unknown; coutMaterielPrevu?: unknown }>(req: express.Request, chantier: T) {
-  const lu = voitPrixAchatDevis(req) ? chantier : { ...chantier, coutMaterielPrevu: null };
-  const sansVendu = voitRentabilite(req, lu, await getParametres()) ? lu : { ...lu, budgetGlobalVendu: null };
-  return voitMontantsChantier(req) ? sansVendu : { ...sansVendu, budgetMaterielVendu: null, budgetMainOeuvreVendu: null };
+  // Coût matériel prévu : à qui lit les prix d'achat prévus des devis ou reçoit la rentabilité (cf. serializeChantier).
+  const rentabilite = voitRentabilite(req, chantier, await getParametres());
+  const lu = voitPrixAchatDevis(req) || rentabilite ? chantier : { ...chantier, coutMaterielPrevu: null };
+  const sansVendu = rentabilite ? lu : { ...lu, budgetGlobalVendu: null };
+  return voitMontantsChantier(req) ? sansVendu : { ...sansVendu, budgetMaterielVendu: null, budgetMainOeuvreVendu: null, coutMaterielPrevu: null };
 }
 
 // Accès aux données financières : accordé au cas par cas, indépendamment du rôle
