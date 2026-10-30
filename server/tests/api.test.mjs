@@ -15540,8 +15540,15 @@ if (!TEST_DATABASE_URL) {
       try {
         await definirSociete({ telephone });
         const jour = await aujourdhui();
-        const brouillon = await request(app).post('/api/factures').set(admin()).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST émetteur figé', dateEmission: jour, dateEcheance: jour, lignes: [{ designation: 'TEST Taux sans compte', quantite: 1, prixUnitaireHt: 10, tauxTva: 7.77 }] });
+        const brouillon = await request(app).post('/api/factures').set(admin()).send({ clientId, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST émetteur figé', dateEmission: jour, dateEcheance: jour, lignes: [{ designation: 'TEST Taux sans compte', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }] });
         assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
+        // Depuis le lot « TVA française », un taux sans compte (7,77 %) ne se saisit plus ; un brouillon enregistré
+        // avant ce lot le garde : il est écrit en base.
+        await prisma.$transaction([
+          prisma.factureLigne.updateMany({ where: { factureId: brouillon.body.id }, data: { tauxTva: 7.77, totalTtc: 10.78 } }),
+          prisma.factureVentilationTva.updateMany({ where: { factureId: brouillon.body.id }, data: { tauxTva: 7.77, totalTva: 0.78, totalTtc: 10.78 } }),
+          prisma.facture.update({ where: { id: brouillon.body.id }, data: { totalTva: 0.78, totalTtc: 10.78 } }),
+        ]);
         const refus = await emettre(brouillon.body.id);
         assert.equal(refus.status, 409, JSON.stringify(refus.body));
         assert.match(refus.body.error, /Paramétrage comptable incomplet/);
@@ -16995,8 +17002,14 @@ if (!TEST_DATABASE_URL) {
     test('décimales : taux de TVA et taux d’acompte à deux décimales imprimés sans arrondi', async () => {
       const client = await creerClient(`TEST Client deux décimales devis ${Date.now()}`);
       const devis = await creerDevis(client.id, 'TEST Devis à deux décimales', [
-        { designation: 'TEST Fourniture au second taux', quantite: 1, prixUnitaireHt: 8, tauxTva: 1.75 },
+        { designation: 'TEST Fourniture au second taux', quantite: 1, prixUnitaireHt: 8, tauxTva: 20 },
       ], { acompteExige: true, tauxAcompte: 12.25 });
+      // Depuis le lot « TVA française », un taux à deux décimales ne se saisit plus ; un devis enregistré avant ce
+      // lot le garde, et s'imprime sans arrondi : il est écrit en base.
+      await prisma.$transaction([
+        prisma.devisLigne.updateMany({ where: { devisId: devis.id }, data: { tauxTva: 1.75, totalTtc: 8.14 } }),
+        prisma.devis.update({ where: { id: devis.id }, data: { totalTva: 0.14, totalTtc: 8.14 } }),
+      ]);
       const { texte } = await texteDevis(devis.id);
       assert.match(texte, /^TEST Fourniture au second taux\s+1\s+8,00 €\s+1,75 %\s+8,00 €$/m, texte);
       assert.ok(texte.includes('TVA 1,75 % sur 8,00 € : 0,14 €') && texte.includes('TVA totale : 0,14 €'), texte);
@@ -19373,32 +19386,34 @@ if (!TEST_DATABASE_URL) {
       const ttcTropGros = await creer([ligneTp(mo.elec, { quantite: '109890109' }), { designation: 'TEST Gros matériel', nature: 'FOURNITURE', quantite: 1, prixUnitaireHt: '4999999999.99', tauxTva: 20 }]);
       assert.equal(ttcTropGros.status, 400, JSON.stringify(ttcTropGros.body));
       assert.equal(ttcTropGros.body.error, 'Montant de devis hors des limites acceptées.');
-      // TVA de la main d'œuvre aux bornes comprises, 0 et 100 %, et envoyée identique : acceptée.
-      for (const [taux, tva, ttc] of [['0', 0, 45.5], ['100', 45.5, 91]]) {
+      // TVA de la main d'œuvre aux taux français extrêmes, 0 et 20 %, et envoyée identique : acceptée.
+      for (const [taux, tva, ttc] of [['0', 0, 45.5], ['20', 9.1, 54.6]]) {
         const borne = await creerMainOeuvre(`TVA${taux}`, { tauxTva: taux });
         const accepte = await creer([ligneTp(borne, { tauxTva: taux })]);
         assert.equal(accepte.status, 201, `${taux} : ${JSON.stringify(accepte.body)}`);
         assert.deepEqual([accepte.body.lignes[0].tauxTva, accepte.body.totalHt, accepte.body.totalTva, accepte.body.totalTtc], [Number(taux), 45.5, tva, ttc]);
       }
-      // La TVA d'une main d'œuvre, que le catalogue admet plus large, est contrôlée comme celle d'une ligne.
-      const tvaLarge = await creerMainOeuvre('TVA', { tauxTva: '150' });
+      // La TVA d'une main d'œuvre est contrôlée comme celle d'une ligne : une fiche enregistrée avant le lot « TVA
+      // française » peut porter un autre taux (écrit en base), qu'une nouvelle ligne de devis ne reprend pas.
+      const tvaLarge = await creerMainOeuvre('TVA');
+      await prisma.cataloguePrestation.update({ where: { id: tvaLarge.id }, data: { tauxTva: 7 } });
       const refusTva = await creer([ligneTp(tvaLarge)]);
       assert.equal(refusTva.status, 400, JSON.stringify(refusTva.body));
-      assert.match(refusTva.body.error, /TVA de la main d’œuvre invalide pour un devis/);
+      assert.match(refusTva.body.error, /TVA de la main d’œuvre non acceptée pour un devis/);
       assert.equal(await devisDuClient(), avant + 2, 'aucun refus n’écrit de devis (les deux bornes de TVA sont acceptées)');
-      // Prix au centime et TVA au centième : la ligne et le devis se calculent sur leurs valeurs exactes,
+      // Prix au centime et TVA à 5,5 % : la ligne et le devis se calculent sur leurs valeurs exactes,
       // à chaque tarif, et la base les accepte.
-      const auCentime = await creerMainOeuvre('CENTIME', { tauxTva: '1.75', prixVenteHt: '45.55', prixHeureSousContratHt: '40.05' });
-      for (const [tarif, prix, ht, tva, ttc] of [['HORS_CONTRAT', 45.55, 68.33, 1.2, 69.53], ['SOUS_CONTRAT', 40.05, 60.08, 1.05, 61.13]]) {
-        const exact = await creer([ligneTp(auCentime, { tarifTempsPasse: tarif, quantite: '1.5', prixUnitaireHt: String(prix), tauxTva: '1.75' })]);
+      const auCentime = await creerMainOeuvre('CENTIME', { tauxTva: '5.5', prixVenteHt: '45.55', prixHeureSousContratHt: '40.05' });
+      for (const [tarif, prix, ht, tva, ttc] of [['HORS_CONTRAT', 45.55, 68.33, 3.76, 72.09], ['SOUS_CONTRAT', 40.05, 60.08, 3.3, 63.38]]) {
+        const exact = await creer([ligneTp(auCentime, { tarifTempsPasse: tarif, quantite: '1.5', prixUnitaireHt: String(prix), tauxTva: '5.5' })]);
         assert.equal(exact.status, 201, `${tarif} : ${JSON.stringify(exact.body)}`);
         const [ligneExacte] = exact.body.lignes;
-        assert.deepEqual([ligneExacte.prixUnitaireHt, ligneExacte.tauxTva, ligneExacte.totalHt, ligneExacte.totalTtc, exact.body.totalHt, exact.body.totalTva, exact.body.totalTtc], [prix, 1.75, ht, ttc, ht, tva, ttc], tarif);
+        assert.deepEqual([ligneExacte.prixUnitaireHt, ligneExacte.tauxTva, ligneExacte.totalHt, ligneExacte.totalTtc, exact.body.totalHt, exact.body.totalTva, exact.body.totalTtc], [prix, 5.5, ht, ttc, ht, tva, ttc], tarif);
       }
       // Une autre TVA envoyée est refusée, et le refus rappelle celle de la main d'œuvre au format français.
-      const autreTva = await creer([ligneTp(auCentime, { quantite: '1.5', tauxTva: '1.76' })]);
+      const autreTva = await creer([ligneTp(auCentime, { quantite: '1.5', tauxTva: '5.6' })]);
       assert.equal(autreTva.status, 400, JSON.stringify(autreTva.body));
-      assert.match(autreTva.body.error, /TVA de la ligne au temps passé est celle de la main d’œuvre : 1,75 %/);
+      assert.match(autreTva.body.error, /TVA de la ligne au temps passé est celle de la main d’œuvre : 5,5 %/);
       // Montant maximal exact, celui des colonnes DECIMAL(12, 2) : la ligne et le devis l'acceptent.
       const auMaximum = await creerMainOeuvre('MAXIMUM', { tauxTva: '0', prixVenteHt: '9999999999.99' });
       // Le prix est envoyé, comme le fait l'écran : un prix à dix chiffres entiers se lit.
@@ -24157,6 +24172,360 @@ if (!TEST_DATABASE_URL) {
       assert.deepEqual([surVisite.status, surVisite.body.error], [409, 'Une intervention annulée ne peut pas être facturée.']);
       const reemission = await emettre(facture.id);
       assert.deepEqual([reemission.status, reemission.body.error], [409, 'Seul un brouillon peut être émis.']);
+    });
+  });
+  // TVA française (décision de Nelson de la nuit du 26 au 27-10-2026, point 13 : « Il faut les tva francaise que ce soit
+  // l’autoliquidation a 0%, 5,5%, ou 10% ou 20% » ; « Catalogue, devis, factures ») : seuls ces quatre taux se saisissent.
+  // Réponses de Nelson du 29-10-2026 : toute saisie nouvelle ou modifiée ; les pièces déjà saisies gardent leur taux ; un
+  // avoir suit les taux de la facture qu'il corrige ; aucune mention pour le 0 % tant que le cabinet ne l'a pas fixée.
+  describe('TVA française : seuls 0 %, 5,5 %, 10 % et 20 % se saisissent', () => {
+    let admin = {};
+    let adminId = '';
+    const suffixe = `${Date.now()}`;
+    let client = null;
+    let fiche = null;
+    let reglagesInitiaux = null;
+    const REFUS = 'Taux de TVA non accepté : 0 %, 5,5 %, 10 % ou 20 %.';
+    const TAUX_REFUSES = [7, '19.6', '2.1', '5.55', '100', '5,6'];
+    const envoyer = (methode, chemin, corps) => request(app)[methode](chemin).set(admin).send(corps);
+    const aujourdhui = async () => {
+      const fuseau = (await prisma.companySettings.findUnique({ where: { id: 'singleton' } }))?.fuseauHoraire || 'Europe/Paris';
+      return jourCivilEntreprise(new Date(), fuseau).split('-').reverse().join('-');
+    };
+    const creerFacture = async (lignes) => {
+      const jour = await aujourdhui();
+      return envoyer('post', '/api/factures', { clientId: client.id, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'TEST TVA française', dateEmission: jour, dateEcheance: jour, lignes });
+    };
+    const ligneFacture = (tauxTva, prixUnitaireHt = 100) => ({ designation: `TEST TVA ${tauxTva}`, quantite: 1, prixUnitaireHt, tauxTva });
+    const ligneDevis = (tauxTva) => ({ designation: `TEST Pose TVA ${tauxTva}`, nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 100, tauxTva });
+    // Prérequis comptables de l'émission, posés s'ils manquent : le bloc reste exécutable seul.
+    const assurerFacturation = async () => {
+      const compte = async (code, nature) => (await prisma.compteComptable.upsert({ where: { code }, create: { code, nature, libelle: `TEST ${code}` }, update: { actif: true } })).id;
+      const regles = await prisma.regleComptable.findMany({ include: { compte: true } });
+      for (const [cle, code, nature] of [['CLIENT', '411371', 'ACTIF'], ['VENTE_PRESTATION', '706371', 'PRODUIT'], ['VENTE_ARTICLE', '707371', 'PRODUIT']]) {
+        const actuelle = regles.find((r) => r.cle === cle);
+        if (!actuelle?.compte?.actif || actuelle.compte.nature !== nature) await regleFixture(cle, await compte(code, nature));
+      }
+      if (!regles.find((r) => r.cle === 'JOURNAL_VENTES')?.journal) await regleFixture('JOURNAL_VENTES', 'VTE');
+      return compte;
+    };
+
+    before(async () => {
+      const secours = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
+      assert.equal(secours.status, 200);
+      admin = { Authorization: `Bearer ${secours.body.token}` };
+      adminId = secours.body.user.id;
+      const cree = await envoyer('post', '/api/clients', { raisonSociale: `TEST Client TVA française ${suffixe}`, siren: await sirenLibre() });
+      assert.equal(cree.status, 201, JSON.stringify(cree.body));
+      client = cree.body;
+      const site = await envoyer('post', `/api/clients/${client.id}/sites`, { nom: 'TEST Facturation TVA', adresse: '6 rue des Taux', codePostal: '14000', ville: 'Caen', estSiteFacturation: true });
+      assert.equal(site.status, 201, JSON.stringify(site.body));
+      fiche = await prisma.intervenant.create({ data: { nom: `TEST TVA française fiche ${suffixe}`, role: 'Technicien', tauxHoraireCharge: 40 } });
+      reglagesInitiaux = await prisma.parametres.findUniqueOrThrow({ where: { id: 'singleton' }, select: { pasTempsPasseMinutes: true, tempsMinimumMinutes: true } });
+      assert.equal((await envoyer('put', '/api/parametres', { pasTempsPasseMinutes: 15, tempsMinimumMinutes: 60 })).status, 200);
+    });
+
+    after(async () => {
+      await prisma.parametres.update({ where: { id: 'singleton' }, data: reglagesInitiaux });
+    });
+
+    test('catalogue : une fiche se crée et se modifie aux seuls quatre taux ; une fiche d’un autre taux, enregistrée avant le lot, ne se modifie qu’en le changeant', async () => {
+      const corps = (famille, reference, extra = {}) => ({
+        ...(famille === 'main-oeuvre'
+          ? { estMainOeuvre: true, prixVenteHt: '45.50', prixJourHorsContratHt: '320', prixHeureSousContratHt: '40', prixJourSousContratHt: '280', heuresParJour: '7' }
+          : { prixVenteHt: '10' }),
+        reference, nom: `TEST TVA ${reference}`, ...extra,
+      });
+      const chemin = (famille) => `/api/catalogue/${famille === 'main-oeuvre' ? 'prestations' : famille}`;
+      for (const famille of ['prestations', 'articles', 'equipements', 'main-oeuvre']) {
+        let aVingt = null;
+        for (const [taux, attendu] of [[0, 0], ['5.5', 5.5], [10, 10], [20, 20], [undefined, 20]]) {
+          const reference = `TEST-TVA-${famille}-${taux ?? 'defaut'}-${suffixe}`;
+          const res = await envoyer('post', chemin(famille), corps(famille, reference, taux === undefined ? {} : { tauxTva: taux }));
+          assert.equal(res.status, 201, `${famille} ${taux} : ${JSON.stringify(res.body)}`);
+          assert.equal(Number(res.body.tauxTva), attendu, `${famille} ${taux}`);
+          if (taux === 20) aVingt = res.body;
+        }
+        for (const taux of TAUX_REFUSES) {
+          const reference = `TEST-TVA-${famille}-refus-${String(taux).replace(/[^0-9]/g, '')}-${suffixe}`;
+          const res = await envoyer('post', chemin(famille), corps(famille, reference, { tauxTva: taux }));
+          assert.equal(res.status, 400, `${famille} ${taux} : ${JSON.stringify(res.body)}`);
+          // Le catalogue n'a jamais lu la virgule décimale : « 5,6 » y est refusé en amont, comme avant le lot.
+          assert.equal(res.body.error, taux === '5,6' ? 'TVA invalide.' : REFUS, `${famille} ${taux}`);
+        }
+        // Modifiée à un autre taux, chaque famille (main d'œuvre comprise) refuse la fiche, qui garde ses 20 %.
+        const modifiee = await envoyer('put', `${chemin(famille)}/${aVingt.id}`, corps(famille, aVingt.reference, { tauxTva: '7' }));
+        assert.deepEqual([modifiee.status, modifiee.body.error], [400, REFUS], `${famille} modifiée à 7 % : ${JSON.stringify(modifiee.body)}`);
+        const delegue = famille === 'articles' ? prisma.catalogueArticle : famille === 'equipements' ? prisma.catalogueEquipement : prisma.cataloguePrestation;
+        assert.equal(Number((await delegue.findUniqueOrThrow({ where: { id: aVingt.id } })).tauxTva), 20, `${famille} : le refus n’écrit rien`);
+      }
+      // Suivi #324 (N1) : « 5.555 » n'est plus arrondi en silence, « 1000 » n'atteint plus la base, et un champ vide
+      // ne vaut plus 0 % (autoliquidation non saisie).
+      for (const [taux, code] of [['5.555', '5555'], ['1000', '1000'], ['', 'vide'], ['  ', 'blanc']]) {
+        const res = await envoyer('post', '/api/catalogue/articles', corps('articles', `TEST-TVA-articles-refus-${code}-${suffixe}`, { tauxTva: taux }));
+        assert.deepEqual([res.status, res.body.error], [400, REFUS], `« ${taux} » : ${JSON.stringify(res.body)}`);
+      }
+      const refusEnBase = { reference: { contains: '-refus-' }, nom: { contains: suffixe } };
+      assert.deepEqual(await Promise.all([prisma.cataloguePrestation.count({ where: refusEnBase }), prisma.catalogueArticle.count({ where: refusEnBase }), prisma.catalogueEquipement.count({ where: refusEnBase })]), [0, 0, 0], 'aucun refus n’écrit de fiche');
+      // Fiche enregistrée avant le lot à 7 % (écrite en base) : renvoyée telle quelle, elle est refusée ; à 10 %, acceptée.
+      const ancienne = await envoyer('post', '/api/catalogue/articles', corps('articles', `TEST-TVA-ANCIENNE-${suffixe}`, { tauxTva: 20 }));
+      assert.equal(ancienne.status, 201, JSON.stringify(ancienne.body));
+      await prisma.catalogueArticle.update({ where: { id: ancienne.body.id }, data: { tauxTva: 7 } });
+      const inchangee = await envoyer('put', `/api/catalogue/articles/${ancienne.body.id}`, corps('articles', `TEST-TVA-ANCIENNE-${suffixe}`, { tauxTva: '7' }));
+      assert.deepEqual([inchangee.status, inchangee.body.error], [400, REFUS]);
+      assert.equal(Number((await prisma.catalogueArticle.findUniqueOrThrow({ where: { id: ancienne.body.id } })).tauxTva), 7, 'le refus n’écrit rien');
+      const corrigee = await envoyer('put', `/api/catalogue/articles/${ancienne.body.id}`, corps('articles', `TEST-TVA-ANCIENNE-${suffixe}`, { tauxTva: '10' }));
+      assert.equal(corrigee.status, 200, JSON.stringify(corrigee.body));
+      assert.equal(Number((await prisma.catalogueArticle.findUniqueOrThrow({ where: { id: ancienne.body.id } })).tauxTva), 10);
+    });
+
+    test('devis : lignes aux seuls quatre taux, à la création comme à la modification et à la duplication ; un devis d’un autre taux, enregistré avant le lot, se signe et se révise', async () => {
+      const avant = await prisma.devis.count({ where: { clientId: client.id } });
+      const accepte = await envoyer('post', '/api/devis', { clientId: client.id, objet: `TEST Devis quatre taux ${suffixe}`, lignes: [ligneDevis(0), ligneDevis('5,5'), ligneDevis(10), ligneDevis(20)] });
+      assert.equal(accepte.status, 201, JSON.stringify(accepte.body));
+      assert.deepEqual(accepte.body.lignes.map((l) => Number(l.tauxTva)), [0, 5.5, 10, 20]);
+      assert.deepEqual([accepte.body.totalHt, accepte.body.totalTva, accepte.body.totalTtc], [400, 35.5, 435.5]);
+      for (const taux of TAUX_REFUSES) {
+        const refus = await envoyer('post', '/api/devis', { clientId: client.id, objet: `TEST Devis refusé ${suffixe}`, lignes: [ligneDevis(20), ligneDevis(taux)] });
+        assert.deepEqual([refus.status, refus.body.error], [400, REFUS], `${taux} : ${JSON.stringify(refus.body)}`);
+      }
+      assert.equal(await prisma.devis.count({ where: { clientId: client.id } }), avant + 1, 'aucun refus n’écrit de devis');
+      // Devis enregistré avant le lot à 7 % (écrit en base) : modifié en gardant ce taux, refusé ; à 10 %, accepté.
+      const ancien = await envoyer('post', '/api/devis', { clientId: client.id, objet: `TEST Devis ancien taux ${suffixe}`, lignes: [ligneDevis(20)] });
+      assert.equal(ancien.status, 201, JSON.stringify(ancien.body));
+      await prisma.$transaction([
+        prisma.devisLigne.updateMany({ where: { devisId: ancien.body.id }, data: { tauxTva: 7, totalTtc: 107 } }),
+        prisma.devis.update({ where: { id: ancien.body.id }, data: { totalTva: 7, totalTtc: 107 } }),
+      ]);
+      const ligneId = ancien.body.lignes[0].id;
+      const garde = await envoyer('patch', `/api/devis/${ancien.body.id}`, { clientId: client.id, objet: `TEST Devis ancien taux ${suffixe}`, lignes: [{ ...ligneDevis(7), ligneId }] });
+      assert.deepEqual([garde.status, garde.body.error], [400, REFUS]);
+      assert.equal(Number((await prisma.devisLigne.findFirstOrThrow({ where: { devisId: ancien.body.id } })).tauxTva), 7, 'le refus n’écrit rien');
+      // La pièce existante garde son taux : elle se signe telle quelle.
+      const signature = await envoyer('post', `/api/devis/${ancien.body.id}/signature`, { signataire: 'TEST Signataire TVA', confirme: true });
+      assert.equal(signature.status, 201, JSON.stringify(signature.body));
+      assert.equal(Number((await prisma.devis.findUniqueOrThrow({ where: { id: ancien.body.id } })).totalTva), 7);
+      // Une révision reprend le devis signé à l'identique, taux compris ; un duplicata, devis neuf, suit la liste : refusé
+      // (409) sans rien créer ni consommer de numéro d'affaire, alors que le devis aux quatre taux se duplique.
+      const sequence = async () => (await prisma.sequenceAffaire.findMany({ orderBy: { annee: 'asc' } })).map((s) => `${s.annee}:${s.dernierNumero}`).join(',');
+      const sequenceAvant = await sequence();
+      const duplicata = await request(app).post(`/api/devis/${ancien.body.id}/duplication`).set(admin);
+      assert.deepEqual([duplicata.status, duplicata.body.error], [409, 'Duplication impossible : une ligne du devis copié porte un taux de TVA non accepté (0 %, 5,5 %, 10 % ou 20 %). Créez un nouveau devis.']);
+      assert.equal(await prisma.devis.count({ where: { origineDevisId: ancien.body.id } }), 0);
+      assert.equal(await sequence(), sequenceAvant, 'la duplication refusée ne consomme aucun numéro d’affaire');
+      const temoin = await request(app).post(`/api/devis/${accepte.body.id}/duplication`).set(admin);
+      assert.equal(temoin.status, 201, JSON.stringify(temoin.body));
+      assert.deepEqual(temoin.body.lignes.map((l) => Number(l.tauxTva)), [0, 5.5, 10, 20]);
+      const revision = await request(app).post(`/api/devis/${ancien.body.id}/revisions`).set(admin);
+      assert.equal(revision.status, 201, JSON.stringify(revision.body));
+      assert.deepEqual(revision.body.lignes.map((l) => Number(l.tauxTva)), [7]);
+      const autre = await envoyer('post', '/api/devis', { clientId: client.id, objet: `TEST Devis corrigé ${suffixe}`, lignes: [ligneDevis(20)] });
+      await prisma.$transaction([
+        prisma.devisLigne.updateMany({ where: { devisId: autre.body.id }, data: { tauxTva: 7, totalTtc: 107 } }),
+        prisma.devis.update({ where: { id: autre.body.id }, data: { totalTva: 7, totalTtc: 107 } }),
+      ]);
+      const corrige = await envoyer('patch', `/api/devis/${autre.body.id}`, { clientId: client.id, objet: `TEST Devis corrigé ${suffixe}`, lignes: [{ ...ligneDevis(10), ligneId: autre.body.lignes[0].id }] });
+      assert.equal(corrige.status, 200, JSON.stringify(corrige.body));
+      assert.deepEqual([Number(corrige.body.lignes[0].tauxTva), corrige.body.totalTva, corrige.body.totalTtc], [10, 10, 110]);
+    });
+
+    // Contrôle relu sous le verrou de la source : une ligne passée à un autre taux (écrite en base, comme une pièce
+    // antérieure au lot) pendant que la duplication attend ce verrou est refusée, sans duplicata. Le numéro d'affaire,
+    // pris avant la transaction, est alors consommé, comme pour la course du temps passé.
+    test('duplication : une ligne passée à un autre taux pendant que la duplication attend le verrou du devis est refusée, sans duplicata', async () => {
+      const source = await envoyer('post', '/api/devis', { clientId: client.id, objet: `TEST Devis course TVA ${suffixe}`, lignes: [ligneDevis(20)] });
+      assert.equal(source.status, 201, JSON.stringify(source.body));
+      let liberer;
+      const attente = new Promise((resolve) => { liberer = resolve; });
+      let pret;
+      const ligneModifiee = new Promise((resolve) => { pret = resolve; });
+      const modification = prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT 1 FROM "Devis" WHERE "id" = ${source.body.id} FOR UPDATE`;
+        await tx.devisLigne.updateMany({ where: { devisId: source.body.id }, data: { tauxTva: 7, totalTtc: 107 } });
+        await tx.devis.update({ where: { id: source.body.id }, data: { totalTva: 7, totalTtc: 107 } });
+        pret();
+        await attente;
+      }, { timeout: 15000 });
+      await ligneModifiee;
+      let duplication;
+      try {
+        duplication = request(app).post(`/api/devis/${source.body.id}/duplication`).set(admin).timeout({ deadline: 12_000 }).then((reponse) => reponse, (erreur) => ({ status: 0, body: { error: String(erreur) } }));
+        let bloque = false;
+        for (let tour = 0; tour < 150 && !bloque; tour += 1) {
+          const [etat] = await prisma.$queryRaw`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%FROM "Devis"%FOR UPDATE%') AS attente`;
+          bloque = etat.attente;
+          if (!bloque) await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        assert.equal(bloque, true, 'la duplication attend le verrou du devis source');
+      } finally {
+        liberer();
+        await modification;
+      }
+      const refus = await duplication;
+      assert.deepEqual([refus.status, refus.body.error], [409, 'Duplication impossible : une ligne du devis copié porte un taux de TVA non accepté (0 %, 5,5 %, 10 % ou 20 %). Créez un nouveau devis.']);
+      assert.equal(await prisma.devis.count({ where: { origineDevisId: source.body.id } }), 0, 'aucun duplicata');
+    });
+
+    // Une seule ligne d'un autre taux suffit à refuser la duplication, qu'elle soit une ligne ordinaire parmi des lignes aux
+    // quatre taux ou la ligne au temps passé d'un devis au temps passé : sans duplicata ni numéro d'affaire consommé. Un
+    // contrôle de la première ligne seule, ou des seules lignes ordinaires, donnerait un duplicata à 7 %.
+    test('duplication : une seule ligne d’un autre taux suffit au refus, ligne ordinaire parmi d’autres ou ligne au temps passé, sans duplicata ni numéro consommé', async () => {
+      const sequence = async () => (await prisma.sequenceAffaire.findMany({ orderBy: { annee: 'asc' } })).map((s) => `${s.annee}:${s.dernierNumero}`).join(',');
+      const REFUS_DUPLICATION = 'Duplication impossible : une ligne du devis copié porte un taux de TVA non accepté (0 %, 5,5 %, 10 % ou 20 %). Créez un nouveau devis.';
+      const exigerRefus = async (source, cas) => {
+        const sequenceAvant = await sequence();
+        const duplicata = await request(app).post(`/api/devis/${source.id}/duplication`).set(admin);
+        assert.deepEqual([duplicata.status, duplicata.body.error], [409, REFUS_DUPLICATION], `${cas} : ${JSON.stringify(duplicata.body)}`);
+        assert.equal(await prisma.devis.count({ where: { origineDevisId: source.id } }), 0, `${cas} : aucun duplicata`);
+        assert.equal(await sequence(), sequenceAvant, `${cas} : aucun numéro d’affaire consommé`);
+      };
+      // Devis ordinaire de deux lignes, la seconde à 7 % (enregistrée avant le lot, écrite en base, totaux cohérents).
+      const mixte = await envoyer('post', '/api/devis', { clientId: client.id, objet: `TEST Devis mixte TVA ${suffixe}`, lignes: [ligneDevis(20), ligneDevis(10)] });
+      assert.equal(mixte.status, 201, JSON.stringify(mixte.body));
+      await prisma.$transaction([
+        prisma.devisLigne.update({ where: { id: mixte.body.lignes.find((l) => l.ordre === 1).id }, data: { tauxTva: 7, totalTtc: 107 } }),
+        prisma.devis.update({ where: { id: mixte.body.id }, data: { totalTva: 27, totalTtc: 227 } }),
+      ]);
+      assert.deepEqual((await prisma.devisLigne.findMany({ where: { devisId: mixte.body.id }, orderBy: { ordre: 'asc' } })).map((l) => Number(l.tauxTva)), [20, 7]);
+      await exigerRefus(mixte.body, 'ligne ordinaire');
+      // Devis au temps passé dont la ligne au temps passé est à 7 % (ajoutée avant le lot, totaux exacts comme l'exige sa
+      // contrainte), sa fourniture à 20 %.
+      const mo = await envoyer('post', '/api/catalogue/prestations', {
+        estMainOeuvre: true, reference: `TEST-TVA-MO-DUPLI-${suffixe}`, nom: `TEST Main d’œuvre TVA duplication ${suffixe}`, tauxTva: '20',
+        prixVenteHt: '45.50', prixJourHorsContratHt: '320', prixHeureSousContratHt: '40', prixJourSousContratHt: '280', heuresParJour: '7',
+      });
+      assert.equal(mo.status, 201, JSON.stringify(mo.body));
+      const auTempsPasse = await envoyer('post', '/api/devis', { clientId: client.id, objet: `TEST Devis temps passé duplication TVA ${suffixe}`, auTempsPasse: true, lignes: [
+        { tempsPasse: true, designation: 'TEST Main d’œuvre au temps passé', quantite: 1, tarifTempsPasse: 'HORS_CONTRAT', catalogueFamille: 'prestations', catalogueId: mo.body.id },
+        { designation: 'TEST Fourniture', nature: 'FOURNITURE', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 },
+      ] });
+      assert.equal(auTempsPasse.status, 201, JSON.stringify(auTempsPasse.body));
+      await prisma.$executeRaw`UPDATE "DevisLigne" SET "tauxTva" = 7, "totalTtc" = round("totalHt" * 107 / 100, 2) WHERE "devisId" = ${auTempsPasse.body.id} AND "tempsPasse"`;
+      await prisma.devis.update({ where: { id: auTempsPasse.body.id }, data: { totalTva: 5.19, totalTtc: 60.69 } });
+      assert.deepEqual((await prisma.devisLigne.findMany({ where: { devisId: auTempsPasse.body.id }, orderBy: { ordre: 'asc' } })).map((l) => [l.tempsPasse, Number(l.tauxTva)]), [[true, 7], [false, 20]]);
+      await exigerRefus(auTempsPasse.body, 'ligne au temps passé');
+    });
+
+    test('devis au temps passé : la ligne gardée d’un autre taux, ajoutée avant le lot, est refusée ; remplacée, elle prend le taux de sa main d’œuvre', async () => {
+      const mo = await envoyer('post', '/api/catalogue/prestations', {
+        estMainOeuvre: true, reference: `TEST-TVA-MO-GARDEE-${suffixe}`, nom: `TEST Main d’œuvre TVA gardée ${suffixe}`, tauxTva: '10',
+        prixVenteHt: '45.50', prixJourHorsContratHt: '320', prixHeureSousContratHt: '40', prixJourSousContratHt: '280', heuresParJour: '7',
+      });
+      assert.equal(mo.status, 201, JSON.stringify(mo.body));
+      const ligneTp = (extra = {}) => ({ tempsPasse: true, designation: 'TEST Main d’œuvre au temps passé', quantite: 1, tarifTempsPasse: 'HORS_CONTRAT', catalogueFamille: 'prestations', catalogueId: mo.body.id, ...extra });
+      const objet = `TEST Devis temps passé ligne gardée ${suffixe}`;
+      const devis = await envoyer('post', '/api/devis', { clientId: client.id, objet, auTempsPasse: true, lignes: [ligneTp()] });
+      assert.equal(devis.status, 201, JSON.stringify(devis.body));
+      const ligneId = devis.body.lignes[0].id;
+      // Ligne ajoutée avant le lot à 7 % (écrite en base, totaux exacts comme l'exige la contrainte de la ligne).
+      await prisma.$executeRaw`UPDATE "DevisLigne" SET "tauxTva" = 7, "totalTtc" = round("totalHt" * 107 / 100, 2) WHERE id = ${ligneId}`;
+      const gardee = await envoyer('patch', `/api/devis/${devis.body.id}`, { clientId: client.id, objet, lignes: [ligneTp({ ligneId, tarifTempsPasse: undefined, catalogueFamille: undefined, catalogueId: undefined })] });
+      assert.deepEqual([gardee.status, gardee.body.error], [400, 'La ligne au temps passé porte une TVA non acceptée (0 %, 5,5 %, 10 % ou 20 %) : retirez-la, puis ajoutez-la de nouveau depuis une main d’œuvre à l’un de ces taux.']);
+      assert.deepEqual((await prisma.devisLigne.findMany({ where: { devisId: devis.body.id } })).map((l) => [l.id, Number(l.tauxTva)]), [[ligneId, 7]], 'le refus n’écrit rien');
+      // Retirée puis ajoutée de nouveau depuis sa main d'œuvre, à 10 % : acceptée.
+      const remplacee = await envoyer('patch', `/api/devis/${devis.body.id}`, { clientId: client.id, objet, lignes: [ligneTp()] });
+      assert.equal(remplacee.status, 200, JSON.stringify(remplacee.body));
+      assert.deepEqual(remplacee.body.lignes.map((l) => [l.id === ligneId, Number(l.tauxTva), l.totalHt, l.totalTtc]), [[false, 10, 45.5, 50.05]]);
+    });
+
+    test('factures : lignes aux seuls quatre taux ; une facture d’un autre taux, enregistrée avant le lot, s’émet et reçoit un avoir partiel à son taux', async () => {
+      const accepte = await creerFacture([ligneFacture(0), ligneFacture('5,5'), ligneFacture(10), ligneFacture(20)]);
+      assert.equal(accepte.status, 201, JSON.stringify(accepte.body));
+      assert.deepEqual(accepte.body.ventilationTva.map((v) => [Number(v.tauxTva), Number(v.totalTva)]), [[0, 0], [5.5, 5.5], [10, 10], [20, 20]]);
+      assert.deepEqual([accepte.body.totalHt, accepte.body.totalTva, accepte.body.totalTtc], [400, 35.5, 435.5]);
+      const avant = await prisma.facture.count({ where: { clientId: client.id } });
+      for (const taux of TAUX_REFUSES) {
+        const refus = await creerFacture([ligneFacture(20), ligneFacture(taux)]);
+        assert.deepEqual([refus.status, refus.body.error], [400, REFUS], `${taux} : ${JSON.stringify(refus.body)}`);
+      }
+      assert.equal(await prisma.facture.count({ where: { clientId: client.id } }), avant, 'aucun refus n’écrit de facture');
+      // Brouillon enregistré avant le lot à 2,1 % (écrit en base), avec un compte de TVA à ce taux : il s'émet, et son avoir
+      // partiel suit le taux de la facture (règle actuelle des avoirs).
+      const compte = await assurerFacturation();
+      await tvaFixture(20, await compte('445371', 'TVA'));
+      await tvaFixture(2.1, await compte('445372', 'TVA'));
+      const brouillon = await creerFacture([ligneFacture(20)]);
+      assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
+      await prisma.$transaction([
+        prisma.factureLigne.updateMany({ where: { factureId: brouillon.body.id }, data: { tauxTva: 2.1, totalTtc: 102.1 } }),
+        prisma.factureVentilationTva.updateMany({ where: { factureId: brouillon.body.id }, data: { tauxTva: 2.1, totalTva: 2.1, totalTtc: 102.1 } }),
+        prisma.facture.update({ where: { id: brouillon.body.id }, data: { totalTva: 2.1, totalTtc: 102.1 } }),
+      ]);
+      const emise = await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set(admin);
+      assert.equal(emise.status, 200, JSON.stringify(emise.body));
+      assert.deepEqual([emise.body.statut, emise.body.totalTva, emise.body.totalTtc], ['EMISE', 2.1, 102.1]);
+      const avoir = await envoyer('post', `/api/factures/${brouillon.body.id}/avoirs`, { lignes: [{ designation: 'TEST Geste commercial', nature: 'PRESTATION', quantite: 1, prixUnitaireHt: 10, tauxTva: 2.1 }] });
+      assert.equal(avoir.status, 201, JSON.stringify(avoir.body));
+      assert.deepEqual([avoir.body.type, Number(avoir.body.lignes[0].tauxTva), avoir.body.totalHt, avoir.body.totalTva], ['AVOIR', 2.1, 10, 0.21]);
+    });
+
+    // Règle actuelle des avoirs (réponse « Règle actuelle ») : l'avoir d'annulation d'une facture émise à un autre taux,
+    // avant le lot, reprend ses lignes et son taux, comme l'avoir partiel (témoin d'un refus de trop).
+    test('factures : une facture d’un autre taux, émise avant le lot, s’annule par un avoir d’annulation à son taux', async () => {
+      const compte = await assurerFacturation();
+      await tvaFixture(20, await compte('445371', 'TVA'));
+      await tvaFixture(2.1, await compte('445372', 'TVA'));
+      const brouillon = await creerFacture([ligneFacture(20)]);
+      assert.equal(brouillon.status, 201, JSON.stringify(brouillon.body));
+      await prisma.$transaction([
+        prisma.factureLigne.updateMany({ where: { factureId: brouillon.body.id }, data: { tauxTva: 2.1, totalTtc: 102.1 } }),
+        prisma.factureVentilationTva.updateMany({ where: { factureId: brouillon.body.id }, data: { tauxTva: 2.1, totalTva: 2.1, totalTtc: 102.1 } }),
+        prisma.facture.update({ where: { id: brouillon.body.id }, data: { totalTva: 2.1, totalTtc: 102.1 } }),
+      ]);
+      const emise = await request(app).post(`/api/factures/${brouillon.body.id}/emettre`).set(admin);
+      assert.equal(emise.status, 200, JSON.stringify(emise.body));
+      const annulation = await request(app).post(`/api/factures/${brouillon.body.id}/annuler`).set(admin);
+      assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
+      assert.equal(annulation.body.statut, 'ANNULEE');
+      const avoir = await prisma.facture.findFirstOrThrow({ where: { factureOrigineId: brouillon.body.id, estAvoirAnnulation: true }, include: { lignes: true, ventilationTva: true } });
+      assert.deepEqual([avoir.type, avoir.statut, avoir.lignes.map((l) => Number(l.tauxTva)), avoir.ventilationTva.map((v) => Number(v.tauxTva)), Number(avoir.totalHt), Number(avoir.totalTva), Number(avoir.totalTtc)], ['AVOIR', 'EMISE', [2.1], [2.1], 100, 2.1, 102.1]);
+    });
+
+    test('facture au temps passé : le devis d’un autre taux, enregistré avant le lot, ne se facture pas ; le refus n’écrit rien', async () => {
+      const mo = await envoyer('post', '/api/catalogue/prestations', {
+        estMainOeuvre: true, reference: `TEST-TVA-MO-${suffixe}`, nom: `TEST Main d’œuvre TVA ${suffixe}`, tauxTva: '20',
+        prixVenteHt: '45.50', prixJourHorsContratHt: '320', prixHeureSousContratHt: '40', prixJourSousContratHt: '280', heuresParJour: '7',
+      });
+      assert.equal(mo.status, 201, JSON.stringify(mo.body));
+      // Intervention terminée d'un devis au temps passé signé, avec une heure saisie ; `avantSignature` écrit en base, avant
+      // la signature (les lignes d'un devis signé sont figées), le taux d'un devis enregistré avant le lot.
+      const intervention = async (objet, avantSignature) => {
+        const devis = await envoyer('post', '/api/devis', { clientId: client.id, objet: `TEST Devis temps passé TVA ${objet} ${suffixe}`, auTempsPasse: true, lignes: [
+          { tempsPasse: true, designation: 'TEST Main d’œuvre au temps passé', quantite: 1, tarifTempsPasse: 'HORS_CONTRAT', catalogueFamille: 'prestations', catalogueId: mo.body.id },
+          { designation: 'TEST Fourniture', nature: 'FOURNITURE', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 },
+        ] });
+        assert.equal(devis.status, 201, JSON.stringify(devis.body));
+        if (avantSignature) await avantSignature(devis.body.id);
+        assert.equal((await envoyer('post', `/api/devis/${devis.body.id}/signature`, { signataire: 'TEST Signataire TVA', confirme: true })).status, 201);
+        const conversion = await envoyer('post', `/api/devis/${devis.body.id}/convertir`, { cible: 'INTERVENTION' });
+        assert.equal(conversion.status, 201, JSON.stringify(conversion.body));
+        await prisma.intervention.update({ where: { id: conversion.body.id }, data: { statut: 'TERMINEE' } });
+        await prisma.coutInterventionHeure.create({ data: { interventionId: conversion.body.id, intervenantId: fiche.id, date: new Date('2026-10-01T00:00:00Z'), nbrHeures: 1, tauxHoraireApplique: 40, createdById: adminId } });
+        return { devis: devis.body, intervention: conversion.body };
+      };
+      const apercu = (id) => request(app).get(`/api/interventions/${id}/facture-temps-passe`).set(admin);
+      const temoin = await intervention('témoin');
+      assert.equal((await apercu(temoin.intervention.id)).status, 200, 'au taux de 20 %, l’aperçu se calcule');
+      // Fourniture du devis à 7 % (devis enregistré avant le lot) : aperçu et création refusés.
+      const { devis, intervention: ancienne } = await intervention('ancien taux', (id) => prisma.devisLigne.updateMany({ where: { devisId: id, tempsPasse: false }, data: { tauxTva: 7, totalTtc: 10.7 } }));
+      assert.equal(Number((await prisma.devisLigne.findFirstOrThrow({ where: { devisId: devis.id, tempsPasse: false } })).tauxTva), 7);
+      const message = `Le devis ${devis.numero} porte un taux de TVA non accepté sur une facture (0 %, 5,5 %, 10 % ou 20 %) : la facture au temps passé ne peut pas reprendre ses lignes.`;
+      const refusApercu = await apercu(ancienne.id);
+      assert.deepEqual([refusApercu.status, refusApercu.body.error], [409, message]);
+      const jour = await aujourdhui();
+      const refusCreation = await envoyer('post', `/api/interventions/${ancienne.id}/facture-temps-passe`, { dateEmission: jour, dateEcheance: jour, totalHtAttendu: 55.5 });
+      assert.deepEqual([refusCreation.status, refusCreation.body.error], [409, message]);
+      assert.equal(await prisma.facture.count({ where: { interventionId: ancienne.id } }), 0);
+      // La ligne au temps passé elle-même à 7 % (ajoutée avant le lot, totaux exacts comme l'exige sa contrainte) :
+      // aperçu et création refusés de même ; la facture ne reprend pas ce taux pour les heures facturées.
+      const tempsPasse7 = await intervention('ligne au temps passé à 7 %', (id) => prisma.$executeRaw`UPDATE "DevisLigne" SET "tauxTva" = 7, "totalTtc" = round("totalHt" * 107 / 100, 2) WHERE "devisId" = ${id} AND "tempsPasse"`);
+      assert.deepEqual((await prisma.devisLigne.findMany({ where: { devisId: tempsPasse7.devis.id }, orderBy: { ordre: 'asc' } })).map((l) => [l.tempsPasse, Number(l.tauxTva)]), [[true, 7], [false, 20]]);
+      const messageTempsPasse = `Le devis ${tempsPasse7.devis.numero} porte un taux de TVA non accepté sur une facture (0 %, 5,5 %, 10 % ou 20 %) : la facture au temps passé ne peut pas reprendre ses lignes.`;
+      const refusApercuTp = await apercu(tempsPasse7.intervention.id);
+      assert.deepEqual([refusApercuTp.status, refusApercuTp.body.error], [409, messageTempsPasse]);
+      const refusCreationTp = await envoyer('post', `/api/interventions/${tempsPasse7.intervention.id}/facture-temps-passe`, { dateEmission: jour, dateEcheance: jour, totalHtAttendu: 55.5 });
+      assert.deepEqual([refusCreationTp.status, refusCreationTp.body.error], [409, messageTempsPasse]);
+      assert.equal(await prisma.facture.count({ where: { interventionId: tempsPasse7.intervention.id } }), 0);
     });
   });
 }
