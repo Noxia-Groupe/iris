@@ -1,7 +1,10 @@
 import { Fragment, useId, useState } from 'react';
 import { HardHat, Pencil, Plus, Power } from 'lucide-react';
 import { apiFetch } from '../api';
-import { LIBELLE_HEURES_PAR_JOUR, PRIX_MAIN_OEUVRE, formatEuros, formatHeures, valeurSaisie, type ChampPrixMainOeuvre, type MainOeuvre } from '../lib/mainOeuvre';
+import {
+  AIDE_PRIX_DEMI_JOURNEE, LIBELLE_HEURES_PAR_JOUR, PRIX_DEMI_JOURNEE, PRIX_MAIN_OEUVRE, formatEuros, formatHeures, formatPrixFacultatif, valeurSaisie,
+  type ChampPrixDemiJournee, type ChampPrixMainOeuvre, type MainOeuvre,
+} from '../lib/mainOeuvre';
 
 /**
  * Onglet « Main d'œuvre » du catalogue (décisions de Nelson du 24-10-2026) : chaque main d'œuvre est
@@ -12,14 +15,19 @@ import { LIBELLE_HEURES_PAR_JOUR, PRIX_MAIN_OEUVRE, formatEuros, formatHeures, v
  * L'écran crée une main d'œuvre, modifie ses prix et ses heures par jour (choix par défaut, à
  * confirmer : les autres fiches du catalogue ne se modifient que par l'API), la désactive et la
  * réactive. Le serveur contrôle chaque montant (au centime) et journalise chaque changement.
+ *
+ * Lot « budget et heures prévues du chantier », troisième PR (« Prix à part », 30-10-2026) : deux prix de la
+ * demi-journée, hors contrat et sous contrat, facultatifs (choix par défaut, à confirmer) ; vides, la main
+ * d'œuvre ne se vend pas à la demi-journée au devis.
  */
 type Categorie = { id: string; nom: string };
-type ChampModifiable = ChampPrixMainOeuvre | 'heuresParJour';
+type ChampModifiable = ChampPrixMainOeuvre | ChampPrixDemiJournee | 'heuresParJour';
 type ValeursPrix = Record<ChampModifiable, string>;
 
 const saisieVide = {
   reference: '', nom: '', categorieId: '', tauxTva: '20', description: '',
   prixVenteHt: '', prixJourHorsContratHt: '', prixHeureSousContratHt: '', prixJourSousContratHt: '', heuresParJour: '',
+  prixDemiJourneeHorsContratHt: '', prixDemiJourneeSousContratHt: '',
 };
 
 // Fiche entière renvoyée au serveur (la modification remplace la fiche), avec ses prix éventuellement changés.
@@ -29,6 +37,7 @@ const corpsFiche = (fiche: MainOeuvre, prix: Partial<ValeursPrix>, actif?: boole
   estMainOeuvre: true, reference: fiche.reference, nom: fiche.nom, description: fiche.description, categorieId: fiche.categorieId || null,
   tauxTva: fiche.tauxTva, prixVenteHt: fiche.prixVenteHt, prixJourHorsContratHt: fiche.prixJourHorsContratHt,
   prixHeureSousContratHt: fiche.prixHeureSousContratHt, prixJourSousContratHt: fiche.prixJourSousContratHt, heuresParJour: fiche.heuresParJour,
+  prixDemiJourneeHorsContratHt: fiche.prixDemiJourneeHorsContratHt ?? null, prixDemiJourneeSousContratHt: fiche.prixDemiJourneeSousContratHt ?? null,
   ...prix, ...(actif === undefined ? {} : { actif }),
 });
 
@@ -105,7 +114,7 @@ export default function CatalogueMainOeuvre({ fiches, categories, recharger }: {
       <section className="bg-white border border-gray-100 rounded-xl p-5" aria-labelledby={`${id}-titre-creation`}>
         <h2 id={`${id}-titre-creation`} className="font-semibold flex items-center gap-2 text-gray-800"><Plus size={18} aria-hidden="true" /> Nouvelle main d’œuvre</h2>
         <p className="text-sm text-gray-500 mt-1">
-          Une main d’œuvre par corps de métier ou par tarif. Ses quatre prix sont des <strong>prix de vente</strong> hors taxes, jamais des coûts : le coût reste le taux horaire chargé de chaque intervenant. Montants au centime ; heures par jour au quart d’heure près.
+          Une main d’œuvre par corps de métier ou par tarif. Ses prix sont des <strong>prix de vente</strong> hors taxes, jamais des coûts : le coût reste le taux horaire chargé de chaque intervenant. Montants au centime ; heures par jour au quart d’heure près. {AIDE_PRIX_DEMI_JOURNEE}
         </p>
         <form onSubmit={creer} className="mt-4 space-y-4">
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -119,6 +128,7 @@ export default function CatalogueMainOeuvre({ fiches, categories, recharger }: {
               </select>
             </div>
             {PRIX_MAIN_OEUVRE.map(({ cle, libelle }) => <Fragment key={cle}>{champ(cle, `${libelle} (€)`, { requis: true, decimal: true })}</Fragment>)}
+            {PRIX_DEMI_JOURNEE.map(({ cle, libelle }) => <Fragment key={cle}>{champ(cle, `${libelle} (€)`, { decimal: true })}</Fragment>)}
             {champ('heuresParJour', LIBELLE_HEURES_PAR_JOUR, { requis: true, decimal: true })}
             {champ('tauxTva', 'TVA (%)', { decimal: true })}
           </div>
@@ -151,13 +161,17 @@ export default function CatalogueMainOeuvre({ fiches, categories, recharger }: {
                     <p className="text-xs text-gray-500">{f.categorie?.nom || 'Sans catégorie'} · TVA {String(f.tauxTva).replace('.', ',')} %</p>
                     {enEdition ? (
                       <form onSubmit={(e) => { e.preventDefault(); void enregistrerPrix(f); }} className="space-y-3" aria-label={`Prix de ${f.nom}`}>
-                        {[...PRIX_MAIN_OEUVRE.map(({ cle, libelle }) => ({ cle: cle as ChampModifiable, libelle: `${libelle} (€)` })), { cle: 'heuresParJour' as ChampModifiable, libelle: LIBELLE_HEURES_PAR_JOUR }].map(({ cle, libelle }) => (
+                        {[
+                          ...PRIX_MAIN_OEUVRE.map(({ cle, libelle }) => ({ cle: cle as ChampModifiable, libelle: `${libelle} (€)`, requis: true })),
+                          ...PRIX_DEMI_JOURNEE.map(({ cle, libelle }) => ({ cle: cle as ChampModifiable, libelle: `${libelle} (€)`, requis: false })),
+                          { cle: 'heuresParJour' as ChampModifiable, libelle: LIBELLE_HEURES_PAR_JOUR, requis: true },
+                        ].map(({ cle, libelle, requis }) => (
                           <div key={cle} className="form-group mb-0">
                             <label className="form-label" htmlFor={`${id}-${f.id}-${cle}`}>{libelle}</label>
                             <input
                               id={`${id}-${f.id}-${cle}`}
                               className="form-input"
-                              required
+                              required={requis}
                               inputMode="decimal"
                               autoComplete="off"
                               value={enEdition.valeurs[cle]}
@@ -165,6 +179,7 @@ export default function CatalogueMainOeuvre({ fiches, categories, recharger }: {
                             />
                           </div>
                         ))}
+                        <p className="text-xs text-gray-500">{AIDE_PRIX_DEMI_JOURNEE}</p>
                         <div className="flex flex-wrap gap-2">
                           <button type="submit" className="btn btn-primary" disabled={envoi}>Enregistrer les prix</button>
                           <button type="button" className="btn btn-secondary" onClick={() => setEdition(null)}>Annuler</button>
@@ -176,6 +191,12 @@ export default function CatalogueMainOeuvre({ fiches, categories, recharger }: {
                           <div key={cle} className="contents">
                             <dt className="text-gray-500">{libelle}</dt>
                             <dd className="font-medium sm:text-right" data-prix={cle}>{formatEuros(f[cle])}</dd>
+                          </div>
+                        ))}
+                        {PRIX_DEMI_JOURNEE.map(({ cle, libelle }) => (
+                          <div key={cle} className="contents">
+                            <dt className="text-gray-500">{libelle}</dt>
+                            <dd className="font-medium sm:text-right" data-prix={cle}>{formatPrixFacultatif(f[cle])}</dd>
                           </div>
                         ))}
                         <div className="contents">
@@ -193,6 +214,7 @@ export default function CatalogueMainOeuvre({ fiches, categories, recharger }: {
                           onClick={() => { setErreur(''); setMessage(''); setEdition({ id: f.id, valeurs: {
                             prixVenteHt: valeurSaisie(f.prixVenteHt), prixJourHorsContratHt: valeurSaisie(f.prixJourHorsContratHt),
                             prixHeureSousContratHt: valeurSaisie(f.prixHeureSousContratHt), prixJourSousContratHt: valeurSaisie(f.prixJourSousContratHt),
+                            prixDemiJourneeHorsContratHt: valeurSaisie(f.prixDemiJourneeHorsContratHt), prixDemiJourneeSousContratHt: valeurSaisie(f.prixDemiJourneeSousContratHt),
                             heuresParJour: valeurSaisie(f.heuresParJour),
                           } }); }}
                         >

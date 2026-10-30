@@ -203,13 +203,13 @@ PUT /api/catalogue/:family/:id requireAuth#07b983da0ce5 > requireAdmin#72440b319
 PUT /api/v1/catalogue/:family/:id <anonymous>{scope="catalogue:write"}#4aeb6d464b38 > modifierFicheCatalogue#6bed41e242c5
 DELETE /api/catalogue/:family/:id requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > desactiverFicheCatalogue#775098fdc77c
 DELETE /api/v1/catalogue/:family/:id <anonymous>{scope="catalogue:write"}#4aeb6d464b38 > desactiverFicheCatalogue#775098fdc77c
-GET /api/devis/catalogue requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > <anonymous>#8c85d098bcfd
+GET /api/devis/catalogue requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > <anonymous>#eb08907e9f54
 GET /api/devis requireAuth#07b983da0ce5 > <anonymous>{permission="devis:read"}#c4dc4769916b > listerDevis#1b0df21d4732
 GET /api/v1/devis <anonymous>{scope="devis:read"}#4aeb6d464b38 > listerDevis#1b0df21d4732
-POST /api/devis requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > creerDevis#2f71f47dec17
-POST /api/v1/devis <anonymous>{scope="devis:write"}#4aeb6d464b38 > creerDevis#2f71f47dec17
-PATCH /api/devis/:id requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > modifierDevis#9d2dc0192319
-PATCH /api/v1/devis/:id <anonymous>{scope="devis:write"}#4aeb6d464b38 > modifierDevis#9d2dc0192319
+POST /api/devis requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > creerDevis#72e15512a0ca
+POST /api/v1/devis <anonymous>{scope="devis:write"}#4aeb6d464b38 > creerDevis#72e15512a0ca
+PATCH /api/devis/:id requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > modifierDevis#cec50054ed65
+PATCH /api/v1/devis/:id <anonymous>{scope="devis:write"}#4aeb6d464b38 > modifierDevis#cec50054ed65
 POST /api/devis/:id/revisions requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > creerRevision#0b37377b1190
 POST /api/v1/devis/:id/revisions <anonymous>{scope="devis:write"}#4aeb6d464b38 > creerRevision#0b37377b1190
 POST /api/devis/:id/signature requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > signerDevis#aac29183a21a

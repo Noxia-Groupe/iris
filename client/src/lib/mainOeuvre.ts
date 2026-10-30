@@ -14,6 +14,16 @@ export const PRIX_MAIN_OEUVRE: ReadonlyArray<{ cle: ChampPrixMainOeuvre; libelle
 ];
 export const LIBELLE_HEURES_PAR_JOUR = 'Heures par jour (forfait jour)';
 
+// Prix de la demi-journée (lot « budget et heures prévues du chantier », réponse de Nelson du 30-10-2026,
+// « Prix à part ») : deux prix de vente de plus, facultatifs (choix par défaut, à confirmer) ; vides, la main
+// d'œuvre ne se vend pas à la demi-journée au devis.
+export type ChampPrixDemiJournee = 'prixDemiJourneeHorsContratHt' | 'prixDemiJourneeSousContratHt';
+export const PRIX_DEMI_JOURNEE: ReadonlyArray<{ cle: ChampPrixDemiJournee; libelle: string }> = [
+  { cle: 'prixDemiJourneeHorsContratHt', libelle: 'Prix de vente HT à la demi-journée, hors contrat' },
+  { cle: 'prixDemiJourneeSousContratHt', libelle: 'Prix de vente HT à la demi-journée, sous contrat' },
+];
+export const AIDE_PRIX_DEMI_JOURNEE = 'Prix de la demi-journée : facultatifs ; laissés vides, cette main d’œuvre ne se vend pas à la demi-journée sur un devis.';
+
 export type MainOeuvre = {
   id: string;
   reference: string;
@@ -26,6 +36,8 @@ export type MainOeuvre = {
   prixJourHorsContratHt: number;
   prixHeureSousContratHt: number;
   prixJourSousContratHt: number;
+  prixDemiJourneeHorsContratHt: number | null;
+  prixDemiJourneeSousContratHt: number | null;
   heuresParJour: number;
   actif: boolean;
   estMainOeuvre: true;
@@ -36,6 +48,9 @@ export type MainOeuvreResumee = { id: string; reference: string; nom: string; ac
 
 // Montant au centime, virgule décimale : « 45,50 € ».
 export const formatEuros = (montant: number) => `${Number(montant).toFixed(2).replace('.', ',')} €`;
+
+// Prix facultatif (demi-journée) : le montant, ou « Non réglé ».
+export const formatPrixFacultatif = (montant: number | null | undefined) => (montant == null ? 'Non réglé' : formatEuros(montant));
 
 // Heures au quart d'heure, sans zéro inutile : « 7 h », « 7,5 h », « 7,75 h ».
 export const formatHeures = (heures: number) => `${String(Number(heures)).replace('.', ',')} h`;

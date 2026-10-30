@@ -105,6 +105,8 @@ const CHAMPS_JOURNAL: Record<string, string> = {
   prixJourHorsContratHt: 'Prix de vente HT au forfait jour, hors contrat',
   prixHeureSousContratHt: 'Prix de vente HT à l’heure, sous contrat',
   prixJourSousContratHt: 'Prix de vente HT au forfait jour, sous contrat',
+  prixDemiJourneeHorsContratHt: 'Prix de vente HT à la demi-journée, hors contrat',
+  prixDemiJourneeSousContratHt: 'Prix de vente HT à la demi-journée, sous contrat',
   heuresParJour: 'Heures par jour',
   unite: 'Unité',
   prixAchatHt: 'Prix d’achat HT',

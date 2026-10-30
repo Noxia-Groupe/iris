@@ -23,18 +23,27 @@ import { cataloguePayload, catalogueExtraPayload, champsCommunsCatalogue } from 
 //  - chaque création, modification, désactivation ou réactivation est écrite au journal des
 //    paramètres et des droits, avec l'auteur, l'avant et l'après, dans la même transaction.
 // Les autres prestations gardent leur comportement, sans journal.
+//
+// Lot « budget et heures prévues du chantier », troisième PR (réponse de Nelson du 30-10-2026, « Prix à
+// part ») : deux prix de vente de plus, la demi-journée hors contrat et sous contrat, pour la ligne de devis
+// à la demi-journée. Choix par défaut, à confirmer (le plus simple) : facultatifs à la création comme à la
+// modification ; vides, la main d'œuvre ne se vend pas à la demi-journée (le devis le refuse). Mêmes règles
+// de saisie que les quatre autres prix quand ils sont renseignés, même journal, mêmes droits ; refusés pour
+// une prestation ordinaire. La modification remplaçant la fiche entière, un prix absent du corps est vidé.
 
 export const UNITE_MAIN_OEUVRE = 'heure';
-const CHAMPS_PROPRES_MAIN_OEUVRE = ['prixJourHorsContratHt', 'prixHeureSousContratHt', 'prixJourSousContratHt', 'heuresParJour'] as const;
-type ChampPrix = 'prixVenteHt' | 'prixJourHorsContratHt' | 'prixHeureSousContratHt' | 'prixJourSousContratHt';
+const CHAMPS_PROPRES_MAIN_OEUVRE = ['prixJourHorsContratHt', 'prixHeureSousContratHt', 'prixJourSousContratHt', 'heuresParJour', 'prixDemiJourneeHorsContratHt', 'prixDemiJourneeSousContratHt'] as const;
+type ChampPrix = 'prixVenteHt' | 'prixJourHorsContratHt' | 'prixHeureSousContratHt' | 'prixJourSousContratHt' | 'prixDemiJourneeHorsContratHt' | 'prixDemiJourneeSousContratHt';
 const LIBELLES_PRIX: Record<ChampPrix, string> = {
   prixVenteHt: 'Prix de vente HT à l’heure, hors contrat',
   prixJourHorsContratHt: 'Prix de vente HT au forfait jour, hors contrat',
   prixHeureSousContratHt: 'Prix de vente HT à l’heure, sous contrat',
   prixJourSousContratHt: 'Prix de vente HT au forfait jour, sous contrat',
+  prixDemiJourneeHorsContratHt: 'Prix de vente HT à la demi-journée, hors contrat',
+  prixDemiJourneeSousContratHt: 'Prix de vente HT à la demi-journée, sous contrat',
 };
 export const REFUS_CLE_MAIN_OEUVRE = 'Une clé d’intégration ne crée, ne modifie, ne désactive ni ne réactive une main d’œuvre, et ne fait pas passer une prestation en main d’œuvre ou l’inverse : réservé à l’administration, en session.';
-const REFUS_CHAMPS_ORDINAIRE = 'Ces prix et ces heures par jour ne concernent qu’une main d’œuvre (« estMainOeuvre »).';
+const REFUS_CHAMPS_ORDINAIRE = 'Ces prix (heure, forfait jour, demi-journée) et ces heures par jour ne concernent qu’une main d’œuvre (« estMainOeuvre »).';
 
 // Refus métier d'une écriture du catalogue, avec son statut HTTP (403, 404, 409). Les autres
 // erreurs sans code restent des saisies refusées (400).
@@ -70,6 +79,15 @@ function prixMainOeuvre(valeur: unknown, champ: ChampPrix): number {
   return prix;
 }
 
+// Prix de la demi-journée : vide (absent, null ou chaîne de blancs) pour ne pas la vendre, sinon la règle
+// des quatre autres prix.
+function prixDemiJourneeMainOeuvre(valeur: unknown, champ: ChampPrix): number | null {
+  if (!renseigne(valeur)) return null;
+  const prix = nombreDecimalNonNegatif(valeur, 10, true);
+  if (prix === null) throw new Error(`${LIBELLES_PRIX[champ]} : montant facultatif, positif ou nul, au centime (deux décimales au plus) ; laissez-le vide pour ne pas vendre cette main d’œuvre à la demi-journée.`);
+  return prix;
+}
+
 function heuresParJourMainOeuvre(valeur: unknown): number {
   const heures = nombreDecimalNonNegatif(valeur, 2, false);
   // Au plus deux décimales : en centièmes, le compte est exact. Un quart d'heure vaut 25 centièmes.
@@ -80,7 +98,8 @@ function heuresParJourMainOeuvre(valeur: unknown): number {
 }
 
 // Données d'une main d'œuvre : identité commune des prestations (référence unique, nom, description,
-// catégorie, TVA) selon leurs règles actuelles, puis les quatre prix et les heures par jour.
+// catégorie, TVA) selon leurs règles actuelles, puis les quatre prix, les deux prix facultatifs de la
+// demi-journée et les heures par jour.
 export function payloadMainOeuvre(body: Record<string, unknown>) {
   const commun = champsCommunsCatalogue(body);
   const prix = {
@@ -88,11 +107,13 @@ export function payloadMainOeuvre(body: Record<string, unknown>) {
     prixJourHorsContratHt: prixMainOeuvre(body.prixJourHorsContratHt, 'prixJourHorsContratHt'),
     prixHeureSousContratHt: prixMainOeuvre(body.prixHeureSousContratHt, 'prixHeureSousContratHt'),
     prixJourSousContratHt: prixMainOeuvre(body.prixJourSousContratHt, 'prixJourSousContratHt'),
+    prixDemiJourneeHorsContratHt: prixDemiJourneeMainOeuvre(body.prixDemiJourneeHorsContratHt, 'prixDemiJourneeHorsContratHt'),
+    prixDemiJourneeSousContratHt: prixDemiJourneeMainOeuvre(body.prixDemiJourneeSousContratHt, 'prixDemiJourneeSousContratHt'),
   };
   const heuresParJour = heuresParJourMainOeuvre(body.heuresParJour);
   if (renseigne(body.unite) && String(body.unite).trim() !== UNITE_MAIN_OEUVRE) throw new Error('L’unité d’une main d’œuvre est l’heure.');
   if (renseigne(body.prixAchatHt)) throw new Error('Une main d’œuvre ne porte pas de prix d’achat : son coût est le taux horaire chargé de l’intervenant.');
-  if (renseigne(body.dureeIndicativeMin)) throw new Error('Une main d’œuvre n’a pas de durée indicative : elle se vend à l’heure ou au forfait jour.');
+  if (renseigne(body.dureeIndicativeMin)) throw new Error('Une main d’œuvre n’a pas de durée indicative : elle se vend à l’heure, au forfait jour ou à la demi-journée.');
   return { ...commun, ...prix, heuresParJour, estMainOeuvre: true, unite: UNITE_MAIN_OEUVRE, prixAchatHt: null, dureeIndicativeMin: null };
 }
 
@@ -105,8 +126,8 @@ function payloadPrestationOrdinaire(body: Record<string, unknown>) {
 
 // --- Journal ---
 type FichePrestation = Prisma.CataloguePrestationGetPayload<{ include: { categorie: true } }>;
-const CHAMPS_JOURNAL = ['estMainOeuvre', 'reference', 'nom', 'description', 'categorie', 'tauxTva', 'prixVenteHt', 'prixJourHorsContratHt', 'prixHeureSousContratHt', 'prixJourSousContratHt', 'heuresParJour', 'unite', 'prixAchatHt', 'dureeIndicativeMin', 'actif'] as const;
-const CHAMPS_CREATION = ['reference', 'nom', 'description', 'categorie', 'tauxTva', 'prixVenteHt', 'prixJourHorsContratHt', 'prixHeureSousContratHt', 'prixJourSousContratHt', 'heuresParJour', 'unite', 'actif'] as const;
+const CHAMPS_JOURNAL = ['estMainOeuvre', 'reference', 'nom', 'description', 'categorie', 'tauxTva', 'prixVenteHt', 'prixJourHorsContratHt', 'prixHeureSousContratHt', 'prixJourSousContratHt', 'prixDemiJourneeHorsContratHt', 'prixDemiJourneeSousContratHt', 'heuresParJour', 'unite', 'prixAchatHt', 'dureeIndicativeMin', 'actif'] as const;
+const CHAMPS_CREATION = ['reference', 'nom', 'description', 'categorie', 'tauxTva', 'prixVenteHt', 'prixJourHorsContratHt', 'prixHeureSousContratHt', 'prixJourSousContratHt', 'prixDemiJourneeHorsContratHt', 'prixDemiJourneeSousContratHt', 'heuresParJour', 'unite', 'actif'] as const;
 
 // État journalisé : la catégorie par son nom, lisible dans le journal, plutôt que par son identifiant.
 function etatJournal(fiche: FichePrestation): Record<string, unknown> {
@@ -202,7 +223,7 @@ export async function modifierPrestation(req: express.Request, id: string): Prom
     if (rattaches > 0) throw new RefusCatalogue(409, `Cette main d’œuvre est rattachée à ${rattaches} intervenant(s) : retirez d’abord ces rattachements dans Administration > Intervenants.`);
     const apres = await tx.cataloguePrestation.update({
       where: { id },
-      data: { ...dataOrdinaire, ...actif, estMainOeuvre: false, prixJourHorsContratHt: null, prixHeureSousContratHt: null, prixJourSousContratHt: null, heuresParJour: null },
+      data: { ...dataOrdinaire, ...actif, estMainOeuvre: false, prixJourHorsContratHt: null, prixHeureSousContratHt: null, prixJourSousContratHt: null, heuresParJour: null, prixDemiJourneeHorsContratHt: null, prixDemiJourneeSousContratHt: null },
       include: { categorie: true },
     });
     await journaliserMainOeuvre(tx, req, avant, apres);

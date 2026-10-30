@@ -17,10 +17,15 @@ export type FicheCatalogueDevis = {
   tauxTva: number;
   // Présent seulement pour qui voit le prix d'achat prévu (administration).
   prixAchatHt?: number | null;
-  // Main d'œuvre (devis au temps passé) : son drapeau et son prix à l'heure sous contrat, jamais ses
-  // forfaits jour ni ses heures par jour.
+  // Main d'œuvre : son drapeau et son prix à l'heure sous contrat (devis au temps passé), ses forfaits jour
+  // et ses prix de la demi-journée, vides si non réglés (ligne au jour ou à la demi-journée) ; jamais ses
+  // heures par jour.
   estMainOeuvre?: true;
   prixHeureSousContratHt?: number;
+  prixJourHorsContratHt?: number;
+  prixJourSousContratHt?: number;
+  prixDemiJourneeHorsContratHt?: number | null;
+  prixDemiJourneeSousContratHt?: number | null;
 };
 
 export type LigneDevisSaisie = {
@@ -39,6 +44,9 @@ export type LigneDevisSaisie = {
   // Ligne « main d'œuvre au temps passé » d'un devis au temps passé : son tarif (cf. ./tempsPasse.ts).
   tempsPasse?: boolean;
   tarifTempsPasse?: 'HORS_CONTRAT' | 'SOUS_CONTRAT' | null;
+  // Ligne de main d'œuvre au jour ou à la demi-journée : son forfait et son tarif (cf. ./forfaitMainOeuvre.ts).
+  forfaitMainOeuvre?: 'JOUR' | 'DEMI_JOURNEE' | null;
+  tarifForfait?: 'HORS_CONTRAT' | 'SOUS_CONTRAT' | null;
 };
 
 // Total des heures prévues d'un devis (lot « budget et heures prévues du chantier ») : calculé par le
@@ -94,6 +102,22 @@ export function ligneAEnvoyer(ligne: LigneDevisSaisie, ecritPrixAchat: boolean) 
       ...(ligne.catalogueId ? { catalogueFamille: 'prestations' as const, catalogueId: ligne.catalogueId } : {}),
     };
   }
+  // Ligne au jour ou à la demi-journée : de même, le serveur fixe son prix, sa TVA, son unité et sa nature
+  // depuis la main d'œuvre et refuse un prix ou une TVA qui ne sont plus les siens. Jamais de prix d'achat
+  // prévu ; une ligne existante envoie son forfait et son tarif, qui ne changent pas.
+  if (ligne.forfaitMainOeuvre) {
+    return {
+      ...(ligne.ligneId ? { ligneId: ligne.ligneId } : {}),
+      forfaitMainOeuvre: ligne.forfaitMainOeuvre,
+      tarifForfait: ligne.tarifForfait ?? null,
+      designation: ligne.designation,
+      nature: 'MAIN_OEUVRE' as const,
+      quantite: ligne.quantite,
+      prixUnitaireHt: ligne.prixUnitaireHt,
+      tauxTva: ligne.tauxTva,
+      ...(ligne.catalogueId ? { catalogueFamille: 'prestations' as const, catalogueId: ligne.catalogueId } : {}),
+    };
+  }
   return {
     ...(ligne.ligneId ? { ligneId: ligne.ligneId } : {}),
     designation: ligne.designation,
@@ -113,10 +137,19 @@ export function ligneEnEdition(ligne: {
   id: string; designation: string; nature: NatureLigneDevis; quantite: number; prixUnitaireHt: number; tauxTva: number;
   unite?: string | null; reference?: string | null; catalogueFamille?: FamilleCatalogue | null; catalogueId?: string | null; prixAchatUnitaireHt?: number | null;
   tempsPasse?: boolean; tarifTempsPasse?: 'HORS_CONTRAT' | 'SOUS_CONTRAT' | null;
+  forfaitMainOeuvre?: 'JOUR' | 'DEMI_JOURNEE' | null; tarifForfait?: 'HORS_CONTRAT' | 'SOUS_CONTRAT' | null;
 }, voitPrixAchat: boolean): LigneDevisSaisie {
   if (ligne.tempsPasse) {
     return {
       ligneId: ligne.id, tempsPasse: true, tarifTempsPasse: ligne.tarifTempsPasse ?? null,
+      designation: ligne.designation, nature: ligne.nature, quantite: ligne.quantite, prixUnitaireHt: ligne.prixUnitaireHt, tauxTva: ligne.tauxTva,
+      unite: ligne.unite ?? null, reference: ligne.reference ?? null, catalogueFamille: ligne.catalogueFamille ?? null, catalogueId: ligne.catalogueId ?? null,
+    };
+  }
+  // Ligne au jour ou à la demi-journée : jamais de prix d'achat prévu, même pour l'administration.
+  if (ligne.forfaitMainOeuvre) {
+    return {
+      ligneId: ligne.id, forfaitMainOeuvre: ligne.forfaitMainOeuvre, tarifForfait: ligne.tarifForfait ?? null,
       designation: ligne.designation, nature: ligne.nature, quantite: ligne.quantite, prixUnitaireHt: ligne.prixUnitaireHt, tauxTva: ligne.tauxTva,
       unite: ligne.unite ?? null, reference: ligne.reference ?? null, catalogueFamille: ligne.catalogueFamille ?? null, catalogueId: ligne.catalogueId ?? null,
     };
