@@ -1,6 +1,6 @@
 import { createHmac } from 'node:crypto';
 import type { APIRequestContext, Browser, Locator, Page } from '@playwright/test';
-import { test, expect, dateDuJour } from './fixtures';
+import { test, expect, dateDuJour, horsDuPassageDeMinuit } from './fixtures';
 
 const api = `http://127.0.0.1:${process.env.E2E_API_PORT || '3001'}/api`;
 
@@ -42,6 +42,9 @@ const decaler = (jour: string, n: number) => new Date(Date.parse(`${jour}T00:00:
 // Aucun nom ne contient « jour » : la base est partagée, et un libellé de liste qui le contiendrait
 // répondrait au champ « Jour » d'un autre parcours.
 async function preparerJournee(request: APIRequestContext, token: string, creerClient: (libelle: string) => Promise<{ id: string }>) {
+  // Préparées pour aujourd'hui, les interventions ne seraient plus celles du jour si minuit passait avant
+  // l'affichage de « Ma journée » (#366).
+  await horsDuPassageDeMinuit();
   const headers = { Authorization: `Bearer ${token}` };
   const envoyer = async (methode: 'get' | 'post' | 'put' | 'patch', path: string, data?: object) => {
     const response = await request[methode](`${api}${path}`, { headers, data });
