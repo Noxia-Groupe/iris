@@ -98,9 +98,9 @@ GET /api/auth/secours/etat <anonymous>#24b8a487cf83
 POST /api/auth/secours <anonymous>#0ef9b6e1b9ae
 GET /api/me requireAuth#07b983da0ce5 > <anonymous>#eefe8f938bf2
 PUT /api/me/theme requireAuth#07b983da0ce5 > <anonymous>#16df72f47e17
-GET /api/chantiers requireAuth#07b983da0ce5 > listerChantiers#b7bbc3b036ba
-GET /api/v1/chantiers <anonymous>{scope="chantiers:read"}#4aeb6d464b38 > listerChantiers#b7bbc3b036ba
-GET /api/chantiers/:id requireAuth#07b983da0ce5 > <anonymous>#ed76d1cffe44
+GET /api/chantiers requireAuth#07b983da0ce5 > listerChantiers#11dab797928b
+GET /api/v1/chantiers <anonymous>{scope="chantiers:read"}#4aeb6d464b38 > listerChantiers#11dab797928b
+GET /api/chantiers/:id requireAuth#07b983da0ce5 > <anonymous>#47b737c19cf3
 GET /api/chantiers/:id/journal-saisies requireAuth#07b983da0ce5 > <anonymous>#4373de266aea
 POST /api/chantiers requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#5a2a6ae542c5
 PATCH /api/chantiers/:id requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#82e823ced404
@@ -218,8 +218,8 @@ GET /api/devis/:id/envois requireAuth#07b983da0ce5 > <anonymous>{permission="dev
 POST /api/devis/:id/envois requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > envoyerDevis#a62f429280b0
 PUT /api/devis/:id/statut requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > changerStatutDevis#bae4b07f199b
 PUT /api/v1/devis/:id/statut <anonymous>{scope="devis:write"}#4aeb6d464b38 > changerStatutDevis#bae4b07f199b
-POST /api/devis/:id/convertir requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > convertirDevis#d0563988de95
-POST /api/v1/devis/:id/convertir <anonymous>{scope="devis:write"}#4aeb6d464b38 > convertirDevis#d0563988de95
+POST /api/devis/:id/convertir requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > convertirDevis#64396c2c2fc0
+POST /api/v1/devis/:id/convertir <anonymous>{scope="devis:write"}#4aeb6d464b38 > convertirDevis#64396c2c2fc0
 GET /api/devis/a-convertir requireAuth#07b983da0ce5 > <anonymous>{permission="devis:read"}#c4dc4769916b > <anonymous>{permission="devis:write"}#c4dc4769916b > <anonymous>#8e9e09399810
 POST /api/devis/:id/acompte requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#46d632fba771
 POST /api/devis/:id/annulation requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#4177370b8648

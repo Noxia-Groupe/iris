@@ -11,7 +11,7 @@ import { requireAdmin } from '../../http/gardes';
 import { paramId } from '../../http/requete';
 import { routeMixte } from '../../http/routes-mixtes';
 import { FUSEAU_HORAIRE_PAR_DEFAUT, anneeEntreprise, aujourdHuiEntreprise, dateIsoStricte } from '../../commun/dates';
-import { decimalToNumber, centimes } from '../../commun/montants';
+import { decimalToNumber, centimes, arrondiCommercialLigneHt } from '../../commun/montants';
 import { nombreDecimalNonNegatif } from '../../commun/validation';
 import { estTauxTvaFrancais } from '../../commun/tva';
 import { getParametres } from '../parametres/metier';
@@ -436,9 +436,14 @@ const convertirDevis: express.RequestHandler = async (req, res) => { try {
     const budgetMaterielVendu = centimes(devis.lignes.filter(l => l.nature === 'FOURNITURE').reduce((total, l) => total + Number(l.totalHt), 0));
     const budgetMainOeuvreVendu = centimes(devis.totalHt.toNumber() - budgetMaterielVendu);
     const heuresVendues = devis.lignes.filter(l => l.nature === 'MAIN_OEUVRE').reduce((total, l) => total + Number(l.quantite), 0);
+    // Coût d'achat prévu (point 15) : chaque ligne à son prix d'achat prévu × quantité, arrondie au centime
+    // comme une ligne ; une fourniture sans prix d'achat compte pour zéro (réponse « Zéro » du 30-10-2026), et
+    // une ligne de main-d'œuvre qui en porte un s'y ajoute (réponse « Ajouté au coût prévu », même jour).
+    const coutMaterielPrevu = centimes(devis.lignes
+      .reduce((total, l) => total + (l.prixAchatUnitaireHt === null ? 0 : arrondiCommercialLigneHt(l.quantite.toString(), l.prixAchatUnitaireHt.toString())), 0));
     const chantier = await tx.chantier.create({ data: {
       nom: devis.objet, client: devis.client.raisonSociale, clientId: devis.clientId, numeroDevis: devis.numero,
-      dateDebut: ouverture.dateDebut ?? debutParDefaut, budgetGlobalVendu: devis.totalHt, budgetMaterielVendu, budgetMainOeuvreVendu, heuresVendues,
+      dateDebut: ouverture.dateDebut ?? debutParDefaut, budgetGlobalVendu: devis.totalHt, budgetMaterielVendu, budgetMainOeuvreVendu, heuresVendues, coutMaterielPrevu,
       responsableId: ouverture.responsableId, commercialId: ouverture.commercialId, types: ouverture.types,
     } });
     await tx.devisConversion.create({ data: { ...conversion, cibleType: 'CHANTIER', cibleId: chantier.id } });
@@ -446,7 +451,9 @@ const convertirDevis: express.RequestHandler = async (req, res) => { try {
     await rattacherInterventionDuDevis(tx, req as AuthRequest, devis, chantier.id);
     return chantier;
   });
-  res.status(201).json(decimalToNumber(resultat));
+  // Le coût matériel prévu d'un chantier ouvert se lit comme le prix d'achat prévu des devis dont il vient.
+  const lu = decimalToNumber(resultat) as Record<string, unknown>;
+  res.status(201).json('coutMaterielPrevu' in lu && !voitPrixAchatDevis(req) ? { ...lu, coutMaterielPrevu: null } : lu);
 } catch (error) {
   // Défense en profondeur : les contraintes uniques de DevisConversion (un type par dossier et par
   // devis, rang 1 ou 2 unique par dossier). Les verrous du devis (conversion, révision, annulation)

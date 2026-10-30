@@ -4,7 +4,7 @@ import { Prisma } from '@prisma/client';
 import { prisma, transactionVerifiee } from '../../db';
 import { ROLE_TECHNICIEN, ROLE_RESPONSABLE, ROLE_DIRECTEUR, isAdminRole } from '../../droits/roles';
 import { perimetreChantiers } from '../../droits/perimetres';
-import { voitMontantsChantier, voitCoutMainOeuvre, saisieSelonDroits } from '../../droits/visibilite';
+import { voitMontantsChantier, voitCoutMainOeuvre, voitPrixAchatDevis, saisieSelonDroits } from '../../droits/visibilite';
 import { type AuthRequest, requireAuth } from '../../http/auth';
 import { blockCommercial, requireAdmin } from '../../http/gardes';
 import { paramId } from '../../http/requete';
@@ -66,7 +66,8 @@ const listerChantiers: express.RequestHandler = async (req, res) => {
     const montantsVisibles = voitMontantsChantier(req);
     const user = (req as AuthRequest).user;
     const coutMainOeuvreVisible = voitCoutMainOeuvre(req);
-    res.json(chantiers.map((c: any, i) => serializeChantier(avecDroitDeCloture(user, c), params, visibles[i], contexte, montantsVisibles, coutMainOeuvreVisible)));
+    const prixAchatVisible = voitPrixAchatDevis(req);
+    res.json(chantiers.map((c: any, i) => serializeChantier(avecDroitDeCloture(user, c), params, visibles[i], contexte, montantsVisibles, coutMainOeuvreVisible, prixAchatVisible)));
   } catch (error) {
     res.status(500).json({ error: 'Error fetching chantiers' });
   }
@@ -134,7 +135,7 @@ export function enregistrerRoutesChantiers(app: Express): void {
       const { factures, ...chantierSansFactures } = chantier;
       const [chantierAvecSuites] = await avecCoutsSuites([chantierSansFactures]);
       const contexte = await contexteSuivi(canSeeMarge && params.margeCommercialeActive);
-      const detail = serializeChantier(avecDroitDeCloture(authUser, chantierAvecSuites), params, canSeeMarge, contexte, voitMontantsChantier(req), voitCoutMainOeuvre(req)) as Record<string, unknown>;
+      const detail = serializeChantier(avecDroitDeCloture(authUser, chantierAvecSuites), params, canSeeMarge, contexte, voitMontantsChantier(req), voitCoutMainOeuvre(req), voitPrixAchatDevis(req)) as Record<string, unknown>;
       if (canSeeMarge) {
         // Les montants sont positifs en base : seul le type AVOIR en inverse le sens. Une
         // facture annulée est visible mais ne contribue plus, son avoir la neutralise.

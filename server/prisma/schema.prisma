@@ -116,6 +116,14 @@ model Chantier {
   budgetMaterielVendu   Decimal @default(0) @db.Decimal(12, 2)
   budgetMainOeuvreVendu Decimal @default(0) @db.Decimal(12, 2)
   heuresVendues         Decimal @default(0) @db.Decimal(10, 2)
+  // Coût d'achat prévu du matériel, figé à la conversion du devis en chantier (lot « budget et heures
+  // prévues du chantier », décision de Nelson de la nuit du 26 au 27-10-2026, point 15) : prix d'achat
+  // prévu × quantité, arrondi au centime, de chaque ligne du devis qui en porte un, fourniture ou
+  // main-d'œuvre (sous-traitance), une fourniture sans prix d'achat comptant pour zéro (réponses de
+  // Nelson du 30-10-2026). Vide pour un chantier créé à la main ou converti avant le lot : sa
+  // marge estimée garde le ratio des chantiers terminés. Lu par qui lit le prix d'achat prévu des devis
+  // ou reçoit la rentabilité du chantier (réponse de Nelson du 30-10-2026, « Ouvrir la lecture »).
+  coutMaterielPrevu     Decimal? @db.Decimal(12, 2)
 
   // Rémunération commerciale : bascule vers le barème réduit au lieu du barème standard
   // (cf. ParametresRemuneration.baremeReduit et son libellé configurable). Sans effet sur
