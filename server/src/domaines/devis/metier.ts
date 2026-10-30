@@ -134,13 +134,16 @@ export const NATURE_DEVIS_PAR_FAMILLE: Record<CatalogueFamily, 'MAIN_OEUVRE' | '
 // compte jamais. Le total, exact puis arrondi au centième d'heure comme les heures vendues du chantier,
 // est celui que la conversion reprend et que l'écran du devis affiche ; ni le PDF ni le contenu signé ne
 // le portent (« Écran seulement »).
+// La somme se fait en minutes, exacte (quantité au millième × minutes au centième), puis se divise une seule
+// fois par 60 : diviser chaque ligne arrondirait chaque quotient à 20 chiffres significatifs, et un total qui
+// tombe au demi-centième d'heure passerait juste en dessous (0,1 × 5, 20 et 20 minutes : 0,075 h, 0,08 h).
 export const PLAFOND_HEURES_PREVUES = new Prisma.Decimal('99999999.99'); // Chantier.heuresVendues, Decimal(10, 2)
 export function heuresPrevuesLignes(lignes: { nature: string; quantite: Prisma.Decimal.Value; minutesPrevuesUnite?: Prisma.Decimal.Value | null }[]): Prisma.Decimal {
-  const total = lignes.filter((ligne) => ligne.nature === 'MAIN_OEUVRE').reduce((somme, ligne) => {
+  const minutes = lignes.filter((ligne) => ligne.nature === 'MAIN_OEUVRE').reduce((somme, ligne) => {
     const quantite = new Prisma.Decimal(ligne.quantite);
-    return somme.plus(ligne.minutesPrevuesUnite === null || ligne.minutesPrevuesUnite === undefined ? quantite : quantite.times(ligne.minutesPrevuesUnite).dividedBy(60));
+    return somme.plus(quantite.times(ligne.minutesPrevuesUnite === null || ligne.minutesPrevuesUnite === undefined ? 60 : ligne.minutesPrevuesUnite));
   }, new Prisma.Decimal(0));
-  return total.toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+  return minutes.dividedBy(60).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
 }
 
 // Retire le prix d'achat prévu de toutes les lignes d'un devis, ou d'une liste de devis, et y ajoute

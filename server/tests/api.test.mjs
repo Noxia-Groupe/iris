@@ -25066,5 +25066,60 @@ if (!TEST_DATABASE_URL) {
       assert.equal(await prisma.chantier.count({ where: { numeroDevis: devis.numero } }), 0);
       assert.equal(await prisma.devisConversion.count({ where: { devisId: devis.id } }), 0);
     });
+
+    // Audit n° 1 de #376 (R1) : la somme des minutes est exacte avant l'unique division par 60 et l'arrondi.
+    test('trois lignes de 0,1 × 5, 20 et 20 minutes font 4,5 minutes : 0,08 h, au devis comme au chantier', async () => {
+      await prestation('cinq', { unite: 'forfait', prixVenteHt: '10', dureeIndicativeMin: 5 });
+      await prestation('vingt', { unite: 'forfait', prixVenteHt: '10', dureeIndicativeMin: 20 });
+      const devis = await creerDevis('minutes exactes', [
+        duCatalogue(fiches.cinq, 'prestations', { quantite: '0.1' }),
+        duCatalogue(fiches.vingt, 'prestations', { quantite: '0.1' }),
+        duCatalogue(fiches.vingt, 'prestations', { quantite: '0.1' }),
+      ]);
+      assert.deepEqual([minutes(devis), devis.heuresPrevues], [[5, 20, 20], 0.08]);
+      await signer(devis.id);
+      assert.equal(await heuresVenduesEnBase((await convertir(devis.id)).id), '0.08');
+    });
+
+    // Audit n° 1 de #376 (C1, montants) : le total s'arrondit une seule fois, au demi supérieur, et une ligne sans
+    // minutes (saisie à la main, main d'œuvre à l'heure, ligne antérieure au lot) garde sa quantité en modification,
+    // en révision et en duplication, jusqu'aux heures vendues du chantier.
+    test('le total s’arrondit une fois, au demi supérieur ; une ligne sans minutes garde sa quantité en modification, révision et duplication, jusqu’au chantier', async () => {
+      // Deux réglages de 50 minutes : 100 minutes, 1,67 h, et non 0,83 + 0,83 = 1,66 h (arrondi par ligne).
+      const deux = await creerDevis('arrondi du total', [duCatalogue(fiches.reglage, 'prestations'), duCatalogue(fiches.reglage, 'prestations')]);
+      assert.equal(deux.heuresPrevues, 1.67);
+      await signer(deux.id);
+      assert.equal(await heuresVenduesEnBase((await convertir(deux.id)).id), '1.67');
+      // 1,005 h saisies à la main et 2 h de main d'œuvre à l'heure : 3,005 h, soit 3,01 h au demi supérieur.
+      const devis = await creerDevis('sans minutes', [
+        { designation: 'TEST Main-d’œuvre au millième', nature: 'MAIN_OEUVRE', quantite: '1.005', prixUnitaireHt: 50, tauxTva: 20 },
+        duCatalogue(fiches.mo, 'prestations', { quantite: 2 }),
+      ]);
+      assert.deepEqual([minutes(devis), devis.heuresPrevues], [[null, null], 3.01]);
+      const garde = devis.lignes.map((l) => ({ ligneId: l.id, designation: l.designation, nature: l.nature, quantite: l.quantite, prixUnitaireHt: l.prixUnitaireHt, tauxTva: l.tauxTva }));
+      const modifie = await envoyer('patch', `/api/devis/${devis.id}`, { clientId: client.id, objet: devis.objet, lignes: garde });
+      assert.equal(modifie.status, 200, JSON.stringify(modifie.body));
+      assert.deepEqual([minutes(modifie.body), modifie.body.heuresPrevues], [[null, null], 3.01]);
+      const duplicata = await envoyer('post', `/api/devis/${devis.id}/duplication`);
+      assert.equal(duplicata.status, 201, JSON.stringify(duplicata.body));
+      assert.deepEqual([minutes(duplicata.body), duplicata.body.heuresPrevues], [[null, null], 3.01]);
+      await signer(devis.id);
+      const revision = await envoyer('post', `/api/devis/${devis.id}/revisions`);
+      assert.equal(revision.status, 201, JSON.stringify(revision.body));
+      assert.deepEqual([minutes(revision.body), revision.body.heuresPrevues], [[null, null], 3.01]);
+      await signer(revision.body.id);
+      assert.equal(await heuresVenduesEnBase((await convertir(revision.body.id)).id), '3.01');
+    });
+
+    // Audit n° 1 de #376 (T1) : le total se lit comme le devis, sans le droit au prix d'achat prévu.
+    test('le total des heures prévues se lit sans le prix d’achat prévu : clé d’intégration avec devis:read seul', async () => {
+      const devis = await creerDevis('lecture', [duCatalogue(fiches.mes, 'prestations', { quantite: 2 })]);
+      const cle = await envoyer('post', '/api/admin/api-keys', { nom: `TEST heures prévues lecteur ${suffixe}`, scopes: ['devis:read'] });
+      assert.ok(cle.body.apiKey, JSON.stringify(cle.body));
+      const lu = await request(app).get('/api/v1/devis').set('Authorization', `Bearer ${cle.body.apiKey}`);
+      assert.equal(lu.status, 200, JSON.stringify(lu.body));
+      const vu = lu.body.find((d) => d.id === devis.id);
+      assert.deepEqual([vu.heuresPrevues, minutes(vu), vu.lignes.some((l) => 'prixAchatUnitaireHt' in l)], [3, [90], false]);
+    });
   });
 }
