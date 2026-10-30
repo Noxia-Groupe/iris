@@ -24153,6 +24153,26 @@ if (!TEST_DATABASE_URL) {
       // Validées, la création et l'émission libèrent l'origine.
       assert.deepEqual([await verrouLibre('ContratMaintenance', contrat.body.id), await verrouLibre('Chantier', chantier.id)], ['ContratMaintenance libre', 'Chantier libre']);
     });
+
+    // Audit n° 3 de #361, T5 (hors montants) : ordre des seuls messages, refus inchangé. Une visite non réalisée, annulée
+    // avec son contrat, est refusée pour sa propre annulation (le statut de l'intervention se lit avant son contrat,
+    // refuserOrigineAnnulee) ; une facture déjà émise dont l'origine est annulée ensuite reste refusée comme pièce qui
+    // n'est plus un brouillon (passation, section 4 : le refus d'une origine annulée passe « après le contrôle du
+    // brouillon »). Tue les mutants O3 (contrat lu avant le statut de l'intervention) et O5 (refus avant ce contrôle).
+    test('messages : une visite annulée avec son contrat est refusée pour son annulation ; une facture émise ne se réémet pas', async () => {
+      await assurerFacturation();
+      const { devis, CONTRAT: contrat } = await devisConverti('ordre des messages', ['CONTRAT']);
+      const visite = await envoyer('post', `/api/contrats-maintenance/${contrat.id}/generer-intervention`, {});
+      assert.equal(visite.status, 201, JSON.stringify(visite.body));
+      const facture = await brouillon('CONTRAT', { contratMaintenanceId: contrat.id });
+      assert.equal((await emettre(facture.id)).status, 200);
+      await annulerDevis(devis.id);
+      assert.deepEqual([(await prisma.intervention.findUniqueOrThrow({ where: { id: visite.body.id } })).statut, (await prisma.contratMaintenance.findUniqueOrThrow({ where: { id: contrat.id } })).statut], ['ANNULEE', 'ANNULE']);
+      const surVisite = await creerFacture('INTERVENTION', { interventionId: visite.body.id });
+      assert.deepEqual([surVisite.status, surVisite.body.error], [409, 'Une intervention annulée ne peut pas être facturée.']);
+      const reemission = await emettre(facture.id);
+      assert.deepEqual([reemission.status, reemission.body.error], [409, 'Seul un brouillon peut être émis.']);
+    });
   });
   // TVA française (décision de Nelson de la nuit du 26 au 27-10-2026, point 13 : « Il faut les tva francaise que ce soit
   // l’autoliquidation a 0%, 5,5%, ou 10% ou 20% » ; « Catalogue, devis, factures ») : seuls ces quatre taux se saisissent.
