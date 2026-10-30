@@ -24527,5 +24527,55 @@ if (!TEST_DATABASE_URL) {
       assert.deepEqual([refusCreationTp.status, refusCreationTp.body.error], [409, messageTempsPasse]);
       assert.equal(await prisma.facture.count({ where: { interventionId: tempsPasse7.intervention.id } }), 0);
     });
+
+    // Audit n° 3 de #364, T1 (hors montants) : « Un taux s'y compare par sa valeur (« 5,5 », « 5.5 » et « 5.50 » se
+    // valent) » (passation, section 4, bloc « TVA française »). Une saisie écrite avec des zéros après la virgule vaut le
+    // taux de la liste, à une ligne de devis ou de facture comme à une fiche du catalogue, ventilation et totaux compris.
+    // Témoin d'un refus de trop : une comparaison de la saisie en chaîne (M26, M27, M28) refuserait ces formes.
+    test('saisie : « 5.50 », « 5,50 », « 10.0 », « 20.00 » et « 0.00 » valent les taux de la liste, au devis, à la facture et au catalogue', async () => {
+      const formes = [['5.50', 5.5], ['5,50', 5.5], ['10.0', 10], ['20.00', 20], ['0.00', 0]];
+      const devis = await envoyer('post', '/api/devis', { clientId: client.id, objet: `TEST Devis formes TVA ${suffixe}`, lignes: formes.map(([forme]) => ligneDevis(forme)) });
+      assert.equal(devis.status, 201, JSON.stringify(devis.body));
+      assert.deepEqual(devis.body.lignes.map((l) => Number(l.tauxTva)), formes.map(([, taux]) => taux));
+      assert.deepEqual([devis.body.totalHt, devis.body.totalTva, devis.body.totalTtc], [500, 41, 541]);
+      const facture = await creerFacture(formes.map(([forme]) => ligneFacture(forme)));
+      assert.equal(facture.status, 201, JSON.stringify(facture.body));
+      assert.deepEqual(facture.body.ventilationTva.map((v) => [Number(v.tauxTva), Number(v.totalHt), Number(v.totalTva)]), [[0, 100, 0], [5.5, 200, 11], [10, 100, 10], [20, 100, 20]]);
+      assert.deepEqual([facture.body.totalHt, facture.body.totalTva, facture.body.totalTtc], [500, 41, 541]);
+      for (const [forme, taux] of [['5.50', 5.5], ['20.00', 20]]) {
+        const fiche = await envoyer('post', '/api/catalogue/articles', { reference: `TEST-TVA-FORME-${forme.replace(/[^0-9]/g, '')}-${suffixe}`, nom: `TEST TVA forme ${forme} ${suffixe}`, prixVenteHt: '10', tauxTva: forme });
+        assert.equal(fiche.status, 201, `${forme} : ${JSON.stringify(fiche.body)}`);
+        assert.equal(Number(fiche.body.tauxTva), taux, forme);
+      }
+    });
+
+    // Audit n° 3 de #364, T2 (hors montants) : l'autoliquidation à 0 %, l'un des quatre taux, se facture aussi au temps
+    // passé. Un devis au temps passé dont la main d'œuvre et la fourniture sont à 0 % donne un aperçu, puis un brouillon, à
+    // 0 %. Témoin d'un refus de trop : un contrôle de la facture au temps passé qui refuserait le 0 % (M09g) survit sinon.
+    test('facture au temps passé : un devis à 0 % (autoliquidation) se facture, aperçu et brouillon à 0 %', async () => {
+      const mo = await envoyer('post', '/api/catalogue/prestations', {
+        estMainOeuvre: true, reference: `TEST-TVA-MO-ZERO-${suffixe}`, nom: `TEST Main d’œuvre TVA 0 % ${suffixe}`, tauxTva: '0',
+        prixVenteHt: '45.50', prixJourHorsContratHt: '320', prixHeureSousContratHt: '40', prixJourSousContratHt: '280', heuresParJour: '7',
+      });
+      assert.equal(mo.status, 201, JSON.stringify(mo.body));
+      const devis = await envoyer('post', '/api/devis', { clientId: client.id, objet: `TEST Devis temps passé TVA 0 % ${suffixe}`, auTempsPasse: true, lignes: [
+        { tempsPasse: true, designation: 'TEST Main d’œuvre au temps passé', quantite: 1, tarifTempsPasse: 'HORS_CONTRAT', catalogueFamille: 'prestations', catalogueId: mo.body.id },
+        { designation: 'TEST Fourniture', nature: 'FOURNITURE', quantite: 1, prixUnitaireHt: 10, tauxTva: 0 },
+      ] });
+      assert.equal(devis.status, 201, JSON.stringify(devis.body));
+      assert.deepEqual(devis.body.lignes.map((l) => Number(l.tauxTva)), [0, 0]);
+      assert.equal((await envoyer('post', `/api/devis/${devis.body.id}/signature`, { signataire: 'TEST Signataire TVA', confirme: true })).status, 201);
+      const conversion = await envoyer('post', `/api/devis/${devis.body.id}/convertir`, { cible: 'INTERVENTION' });
+      assert.equal(conversion.status, 201, JSON.stringify(conversion.body));
+      await prisma.intervention.update({ where: { id: conversion.body.id }, data: { statut: 'TERMINEE' } });
+      await prisma.coutInterventionHeure.create({ data: { interventionId: conversion.body.id, intervenantId: fiche.id, date: new Date('2026-10-01T00:00:00Z'), nbrHeures: 1, tauxHoraireApplique: 40, createdById: adminId } });
+      const apercu = await request(app).get(`/api/interventions/${conversion.body.id}/facture-temps-passe`).set(admin);
+      assert.equal(apercu.status, 200, JSON.stringify(apercu.body));
+      assert.deepEqual([apercu.body.lignes.map((l) => l.tauxTva), apercu.body.ventilationTva.map((v) => [v.tauxTva, v.totalHt, v.totalTva]), apercu.body.totalHt, apercu.body.totalTva, apercu.body.totalTtc], [[0, 0], [[0, 55.5, 0]], 55.5, 0, 55.5]);
+      const jour = await aujourdhui();
+      const creee = await envoyer('post', `/api/interventions/${conversion.body.id}/facture-temps-passe`, { dateEmission: jour, dateEcheance: jour, totalHtAttendu: 55.5 });
+      assert.equal(creee.status, 201, JSON.stringify(creee.body));
+      assert.deepEqual([creee.body.statut, creee.body.lignes.map((l) => Number(l.tauxTva)), Number(creee.body.totalHt), Number(creee.body.totalTva), Number(creee.body.totalTtc)], ['BROUILLON', [0, 0], 55.5, 0, 55.5]);
+    });
   });
 }
