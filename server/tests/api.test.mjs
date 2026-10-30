@@ -24528,4 +24528,125 @@ if (!TEST_DATABASE_URL) {
       assert.equal(await prisma.facture.count({ where: { interventionId: tempsPasse7.intervention.id } }), 0);
     });
   });
+  // Lot « budget et heures prévues du chantier », PR 1 (décision de Nelson de la nuit du 26 au 27-10-2026, point 15 :
+  // « oui ca alimente forcément le budget » ; réponse du 30-10-2026 : une fourniture sans prix d'achat prévu compte pour
+  // « Zéro ») : le coût d'achat prévu des fournitures du devis est figé à la conversion en chantier et remplace, dans la
+  // marge estimée, le ratio des chantiers terminés. Il se lit comme le prix d'achat prévu des devis : par l'administration.
+  describe('Coût matériel prévu du chantier : prix d’achat prévus des fournitures du devis', () => {
+    let admin = {};
+    let adminId = '';
+    const comptes = {};
+    const suffixe = `${Date.now()}`;
+    let client = null;
+    let categorie = null;
+    let fournisseur = null;
+    const jeton = (cle) => ({ Authorization: `Bearer ${jwt.sign({ id: comptes[cle].id }, process.env.JWT_SECRET)}` });
+    const envoyer = (methode, chemin, auth, corps) => request(app)[methode](chemin).set(auth).send(corps);
+    const fourniture = (designation, quantite, prixUnitaireHt, prixAchatUnitaireHt) => ({
+      designation, nature: 'FOURNITURE', quantite, prixUnitaireHt, tauxTva: 20, ...(prixAchatUnitaireHt === undefined ? {} : { prixAchatUnitaireHt }),
+    });
+    const devisSigne = async (objet, lignes, auteur = admin) => {
+      const devis = await envoyer('post', '/api/devis', auteur, { clientId: client.id, objet: `TEST Coût prévu ${objet} ${suffixe}`, lignes });
+      assert.equal(devis.status, 201, JSON.stringify(devis.body));
+      const signature = await envoyer('post', `/api/devis/${devis.body.id}/signature`, auteur, { signataire: 'TEST Signataire coût prévu', confirme: true });
+      assert.equal(signature.status, 201, JSON.stringify(signature.body));
+      return devis.body;
+    };
+    const convertir = async (devisId, auteur = admin, corps = {}) => {
+      const res = await envoyer('post', `/api/devis/${devisId}/convertir`, auteur, { cible: 'CHANTIER', ...corps });
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      return res.body;
+    };
+    const lireChantier = async (id, auth = admin) => {
+      const res = await request(app).get(`/api/chantiers/${id}`).set(auth);
+      assert.equal(res.status, 200, JSON.stringify(res.body));
+      return res.body;
+    };
+    const enBase = async (id) => (await prisma.chantier.findUniqueOrThrow({ where: { id } })).coutMaterielPrevu?.toString() ?? null;
+    const achat = (chantierId, montantHT) => prisma.achatReel.create({ data: {
+      chantierId, montantHT, date: new Date(), description: 'TEST Achat coût prévu', categorieId: categorie.id, fournisseurId: fournisseur.id, createdById: adminId, updatedById: adminId,
+    } });
+
+    before(async () => {
+      const secours = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
+      assert.equal(secours.status, 200);
+      admin = { Authorization: `Bearer ${secours.body.token}` };
+      adminId = secours.body.user.id;
+      for (const [cle, role] of [['commercial', 'COMMERCIAL'], ['conducteur', 'CONDUCTEUR_TRAVAUX']]) {
+        const email = `cout-prevu.${cle}@iris.test`;
+        comptes[cle] = await prisma.user.upsert({ where: { email }, update: { role, actif: true, permissions: [] }, create: { email, name: `TEST Coût prévu ${cle}`, role } });
+      }
+      const cree = await envoyer('post', '/api/clients', admin, { raisonSociale: `TEST Client coût prévu ${suffixe}`, siren: await sirenLibre() });
+      assert.equal(cree.status, 201, JSON.stringify(cree.body));
+      client = cree.body;
+      const site = await envoyer('post', `/api/clients/${client.id}/sites`, admin, { nom: 'TEST Facturation coût prévu', adresse: '7 rue des Achats', codePostal: '14000', ville: 'Caen', estSiteFacturation: true });
+      assert.equal(site.status, 201, JSON.stringify(site.body));
+      categorie = await prisma.categorie.create({ data: { nom: `TEST Coût prévu catégorie ${suffixe}` } });
+      fournisseur = await prisma.fournisseur.create({ data: { nom: `TEST Coût prévu fournisseur ${suffixe}` } });
+    });
+
+    test('conversion : chaque fourniture à son prix d’achat prévu × quantité, arrondie au centime ; sans prix d’achat, zéro ; la main-d’œuvre n’y entre pas', async () => {
+      const devis = await devisSigne('calcul', [
+        fourniture('TEST Caméra', '3', '50', '30.40'), // 91,20
+        fourniture('TEST Câble', '0.333', '2', '10.01'), // 3,33333 → 3,33
+        fourniture('TEST Visserie', '1.5', '20'), // sans prix d'achat : 0
+        { designation: 'TEST Pose', nature: 'MAIN_OEUVRE', quantite: '4', prixUnitaireHt: '45', tauxTva: 20, prixAchatUnitaireHt: '25' },
+      ]);
+      const chantier = await convertir(devis.id, admin, { responsableId: comptes.conducteur.id });
+      assert.equal(chantier.coutMaterielPrevu, 94.53, 'réponse de la conversion, lue par l’administration');
+      assert.equal(await enBase(chantier.id), '94.53');
+      assert.equal(chantier.budgetMaterielVendu, 180.67, 'le matériel vendu reste le prix de vente des fournitures');
+      // Marge estimée : le coût prévu remplace le ratio des chantiers terminés, jamais sous le réel engagé.
+      const vu = await lireChantier(chantier.id);
+      assert.equal(vu.coutMaterielPrevu, 94.53);
+      const e = vu.metrics.estimation;
+      assert.deepEqual([e.sourceMateriel, e.ratioMateriel, e.coutMaterielAttendu], ['DEVIS', null, 94.53]);
+      assert.ok(Math.abs(vu.metrics.margeEstimee - (vu.budgetGlobalVendu - e.coutMainOeuvreAttendu - e.coutMaterielAttendu)) < 1e-9, JSON.stringify(e));
+      await achat(chantier.id, 120);
+      const depasse = (await lireChantier(chantier.id)).metrics.estimation;
+      assert.deepEqual([depasse.sourceMateriel, depasse.coutMaterielAttendu], ['DEVIS', 120], 'un poste n’est jamais estimé sous le réel');
+      // Le conducteur, titulaire du chantier, ne lit pas les prix d'achat prévus : le coût prévu lui est masqué.
+      const conducteur = await lireChantier(chantier.id, jeton('conducteur'));
+      assert.equal(conducteur.coutMaterielPrevu, null);
+      if (conducteur.metrics?.estimation) assert.equal(conducteur.metrics.estimation.sourceMateriel, 'DEVIS');
+      const liste = await request(app).get('/api/chantiers').set(jeton('conducteur'));
+      assert.equal(liste.status, 200, JSON.stringify(liste.body));
+      assert.equal(liste.body.find((c) => c.id === chantier.id).coutMaterielPrevu, null, 'liste : masqué');
+      assert.equal((await request(app).get('/api/chantiers').set(admin)).body.find((c) => c.id === chantier.id).coutMaterielPrevu, 94.53, 'liste : lu par l’administration');
+    });
+
+    test('un devis sans aucun prix d’achat donne un coût prévu nul ; un chantier sans coût prévu (créé à la main ou avant le lot) garde l’estimation par les chantiers terminés', async () => {
+      const devis = await devisSigne('sans achat', [fourniture('TEST Détecteur', '2', '80')]);
+      const chantier = await convertir(devis.id);
+      assert.equal(await enBase(chantier.id), '0');
+      const e = (await lireChantier(chantier.id)).metrics.estimation;
+      assert.deepEqual([e.sourceMateriel, e.coutMaterielAttendu], ['DEVIS', 0]);
+      await achat(chantier.id, 40);
+      assert.equal((await lireChantier(chantier.id)).metrics.estimation.coutMaterielAttendu, 40);
+      // Chantier antérieur au lot : coût prévu vide, estimation inchangée.
+      await prisma.chantier.update({ where: { id: chantier.id }, data: { coutMaterielPrevu: null } });
+      const ancien = await lireChantier(chantier.id);
+      assert.equal(ancien.coutMaterielPrevu, null);
+      assert.ok(['HISTORIQUE', 'VENDU'].includes(ancien.metrics.estimation.sourceMateriel), ancien.metrics.estimation.sourceMateriel);
+      assert.ok(Math.abs(ancien.metrics.estimation.coutMaterielAttendu - Math.max(40, 160 * (ancien.metrics.estimation.ratioMateriel ?? 1))) < 0.01, JSON.stringify(ancien.metrics.estimation));
+    });
+
+    test('ouvert par un commercial : la réponse de la conversion lui masque le coût prévu, figé en base ; il ne se modifie pas depuis la fiche', async () => {
+      const devis = await envoyer('post', '/api/devis', jeton('commercial'), { clientId: client.id, objet: `TEST Coût prévu commercial ${suffixe}`, lignes: [fourniture('TEST Badge', '10', '9')] });
+      assert.equal(devis.status, 201, JSON.stringify(devis.body));
+      // Le prix d'achat prévu s'écrit par l'administration seule.
+      const ajout = await envoyer('patch', `/api/devis/${devis.body.id}`, admin, { clientId: client.id, objet: `TEST Coût prévu commercial ${suffixe}`, lignes: [{ ...fourniture('TEST Badge', '10', '9', '4.25'), ligneId: devis.body.lignes[0].id }] });
+      assert.equal(ajout.status, 200, JSON.stringify(ajout.body));
+      assert.equal((await envoyer('post', `/api/devis/${devis.body.id}/signature`, jeton('commercial'), { signataire: 'TEST Signataire commercial', confirme: true })).status, 201);
+      const chantier = await convertir(devis.body.id, jeton('commercial'));
+      assert.equal(chantier.coutMaterielPrevu, null, 'masqué au commercial');
+      assert.equal(await enBase(chantier.id), '42.5');
+      // Une écriture de la fiche ne le touche pas, et la base refuse un coût négatif.
+      const modification = await envoyer('patch', `/api/chantiers/${chantier.id}`, admin, { nom: `TEST Coût prévu renommé ${suffixe}`, coutMaterielPrevu: 1 });
+      assert.equal(modification.status, 200, JSON.stringify(modification.body));
+      assert.equal(Number(modification.body.coutMaterielPrevu), 42.5, 'lu par l’administration dans la réponse');
+      assert.equal(await enBase(chantier.id), '42.5');
+      await assert.rejects(prisma.chantier.update({ where: { id: chantier.id }, data: { coutMaterielPrevu: -1 } }));
+    });
+  });
 }

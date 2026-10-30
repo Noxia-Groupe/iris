@@ -45,7 +45,7 @@ export interface EstimationMarge {
   coutHoraireReference: number | null;
   sourceCoutHoraire: 'CHANTIER' | 'SOCIETE' | 'VENDU' | 'REEL';
   ratioMateriel: number | null;
-  sourceMateriel: 'HISTORIQUE' | 'VENDU' | 'REEL';
+  sourceMateriel: 'DEVIS' | 'HISTORIQUE' | 'VENDU' | 'REEL';
 }
 
 export interface ChantierSuivi {
@@ -214,10 +214,13 @@ export function hypotheseCoutHoraire(e: EstimationMarge, heuresSuites = 0): stri
   }
 }
 
-/** Libellé de l'hypothèse retenue pour le matériel ; celui des suites SAV, non vendu, s'y ajoute. */
-export function hypotheseMateriel(e: EstimationMarge, materielSuites?: number | null): string {
+/** Libellé de l'hypothèse retenue pour le matériel ; celui des suites SAV, non vendu, s'y ajoute. Le coût
+ * d'achat prévu au devis n'est transmis qu'à qui lit les prix d'achat prévus : sans lui, l'hypothèse est
+ * décrite sans montant. */
+export function hypotheseMateriel(e: EstimationMarge, materielSuites?: number | null, coutMaterielPrevu?: number | null): string {
   const suites = materielSuites ? ', plus le matériel des suites SAV' : '';
   switch (e.sourceMateriel) {
+    case 'DEVIS': return `coût d’achat prévu au devis${coutMaterielPrevu != null ? ` (${nombre(coutMaterielPrevu, 2)} € HT)` : ''}, une fourniture sans prix d’achat prévu comptant pour zéro${suites}`;
     case 'HISTORIQUE': return `matériel vendu × ${nombre((e.ratioMateriel ?? 1) * 100, 0)} %, ratio d’achat observé sur les chantiers terminés${suites}`;
     case 'VENDU': return `matériel restant compté à son prix de vente (aucun chantier terminé pour l’instant)${suites}`;
     case 'REEL': return 'achats réels (chantier terminé)';

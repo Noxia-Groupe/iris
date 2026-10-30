@@ -1,7 +1,7 @@
 import express from 'express';
 import { ROLE_TECHNICIEN, ROLE_RESPONSABLE, ROLE_DIRECTEUR, isAdminRole, isSuperAdminRole } from '../../droits/roles';
 import { requirePermission } from '../../droits/permissions';
-import { voitMontantsChantier, sansMontantsSaisie, sansTauxHoraire } from '../../droits/visibilite';
+import { voitMontantsChantier, voitPrixAchatDevis, sansMontantsSaisie, sansTauxHoraire } from '../../droits/visibilite';
 import type { AuthRequest } from '../../http/auth';
 import type { ApiRequest } from '../../http/cles-api';
 import { type Parametres, getParametres } from '../parametres/metier';
@@ -92,8 +92,9 @@ export function peutCloturerChantier(user: AuthRequest['user'], chantier: { resp
 // Réponse d'une écriture sur un chantier : même masquage qu'en lecture (montant vendu selon
 // voitRentabilite, budgets par poste selon voitMontantsChantier), pour qu'un enregistrement
 // renvoyé tel quel ne contourne pas ces règles.
-export async function chantierSelonRentabilite<T extends { responsableId: string | null; budgetGlobalVendu: unknown; budgetMaterielVendu: unknown; budgetMainOeuvreVendu: unknown }>(req: express.Request, chantier: T) {
-  const sansVendu = voitRentabilite(req, chantier, await getParametres()) ? chantier : { ...chantier, budgetGlobalVendu: null };
+export async function chantierSelonRentabilite<T extends { responsableId: string | null; budgetGlobalVendu: unknown; budgetMaterielVendu: unknown; budgetMainOeuvreVendu: unknown; coutMaterielPrevu?: unknown }>(req: express.Request, chantier: T) {
+  const lu = voitPrixAchatDevis(req) ? chantier : { ...chantier, coutMaterielPrevu: null };
+  const sansVendu = voitRentabilite(req, lu, await getParametres()) ? lu : { ...lu, budgetGlobalVendu: null };
   return voitMontantsChantier(req) ? sansVendu : { ...sansVendu, budgetMaterielVendu: null, budgetMainOeuvreVendu: null };
 }
 

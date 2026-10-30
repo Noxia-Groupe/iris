@@ -159,10 +159,11 @@ export function computeChantierMetrics(chantier: any, params: Parametres, canSee
   //  - main-d'œuvre : heures vendues × coût horaire de référence (celui réellement
   //    appliqué sur ce chantier ; à défaut, la moyenne de la société ; à défaut, le
   //    budget main-d'œuvre vendu), plus le coût réel des suites ;
-  //  - matériel : matériel vendu × ce que coûte en moyenne un euro de matériel vendu sur
-  //    les chantiers terminés ; sans historique, le matériel restant est compté à son prix
-  //    de vente — hypothèse prudente. Le prix d'achat prévu des lignes de devis (lot pilote 2)
-  //    n'est pas encore repris par le chantier : à décider (question ouverte de la passation).
+  //  - matériel : le coût d'achat prévu au devis, figé à la conversion (lot « budget et heures
+  //    prévues du chantier », point 15) ; à défaut (chantier créé à la main ou converti avant le
+  //    lot), matériel vendu × ce que coûte en moyenne un euro de matériel vendu sur les chantiers
+  //    terminés ; sans historique, le matériel restant est compté à son prix de vente — hypothèse
+  //    prudente.
   // Un chantier clos n'a plus de reste à faire : son estimation est son réel.
   let estimation: Record<string, unknown> | null = null;
   let margeEstimee: number | null = null;
@@ -189,10 +190,15 @@ export function computeChantierMetrics(chantier: any, params: Parametres, canSee
         ? regleDeTroisExacte(chantier.heuresVendues, moChantier, heuresRealisees)
         : coutHoraireReference != null ? chantier.heuresVendues * coutHoraireReference : chantier.budgetMainOeuvreVendu;
       coutMainOeuvreAttendu = sommeExacte(Math.max(moChantier, mainOeuvrePrevue), coutsSuites.coutMainOeuvre);
-      ratioMateriel = contexte.ratioMaterielHistorique ?? 1;
-      sourceMateriel = contexte.ratioMaterielHistorique != null ? 'HISTORIQUE' : 'VENDU';
       // Même lecture pour le matériel : celui des suites, non vendu, s'ajoute au matériel attendu.
-      coutMaterielAttendu = Math.max(materielReel, sommeExacte(chantier.budgetMaterielVendu * ratioMateriel, coutsSuites.materiel));
+      if (chantier.coutMaterielPrevu != null) {
+        sourceMateriel = 'DEVIS';
+        coutMaterielAttendu = Math.max(materielReel, sommeExacte(chantier.coutMaterielPrevu, coutsSuites.materiel));
+      } else {
+        ratioMateriel = contexte.ratioMaterielHistorique ?? 1;
+        sourceMateriel = contexte.ratioMaterielHistorique != null ? 'HISTORIQUE' : 'VENDU';
+        coutMaterielAttendu = Math.max(materielReel, sommeExacte(chantier.budgetMaterielVendu * ratioMateriel, coutsSuites.materiel));
+      }
     }
     const coutEstime = sommeExacte(coutMainOeuvreAttendu, coutMaterielAttendu);
     margeEstimee = differenceExacte(chantier.budgetGlobalVendu, coutEstime);
@@ -213,8 +219,10 @@ export function computeChantierMetrics(chantier: any, params: Parametres, canSee
 // ils en donnent la somme, donc avec les dépenses la marge du jour.
 // Exception : au technicien, ni budgets par poste, ni coûts, ni taux, ni alertes de
 // dépassement (cf. voitMontantsChantier et chantierSansMontants) ; aux autres comptes non
-// administrateurs, ni taux ni coût de main-d'œuvre (cf. voitCoutMainOeuvre).
-export function serializeChantier(chantier: any, params: Parametres, canSeeMarge: boolean, contexte?: ContexteSuivi, montantsVisibles = true, coutMainOeuvreVisible = true) {
+// administrateurs, ni taux ni coût de main-d'œuvre (cf. voitCoutMainOeuvre). Le coût matériel prévu,
+// somme des prix d'achat prévus du devis, ne sort que pour qui lit ces prix (cf. voitPrixAchatDevis) ;
+// la marge estimée qui en découle suit, elle, la règle de la marge.
+export function serializeChantier(chantier: any, params: Parametres, canSeeMarge: boolean, contexte?: ContexteSuivi, montantsVisibles = true, coutMainOeuvreVisible = true, prixAchatVisible = false) {
   const c = decimalToNumber(chantier);
   // Les lignes de coûts des suites ne servent qu'au calcul : seuls leurs totaux sortent, dans
   // metrics.coutsSuites, masqués comme les autres montants.
@@ -222,6 +230,7 @@ export function serializeChantier(chantier: any, params: Parametres, canSeeMarge
   const serialise = {
     ...chantierSansCoutsSuites,
     budgetGlobalVendu: canSeeMarge ? c.budgetGlobalVendu : null,
+    coutMaterielPrevu: prixAchatVisible && montantsVisibles ? c.coutMaterielPrevu ?? null : null,
     metrics: computeChantierMetrics(c, params, canSeeMarge, contexte),
   };
   if (!montantsVisibles) return chantierSansMontants(serialise);
