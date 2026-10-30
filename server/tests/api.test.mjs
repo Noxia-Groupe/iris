@@ -24812,4 +24812,107 @@ if (!TEST_DATABASE_URL) {
       assert.equal(await enBase(chantier.id), '3.02');
     });
   });
+  // Audit n° 3 de #368 : lecture du coût prévu par chaque profil (réponse de Nelson du 30-10-2026, « Ouvrir la lecture » :
+  // qui reçoit la rentabilité du chantier le lit, en total seulement), et les deux choix par défaut déclarés, à confirmer :
+  // la lecture ne dépend pas de l'activation de la marge commerciale ; la réponse de la conversion d'un devis ne le renvoie
+  // qu'à qui lit les prix d'achat prévus (une clé d'intégration avec finances:read le lit donc).
+  describe('Coût matériel prévu du chantier : lecture par profil et choix par défaut déclarés', () => {
+    let admin = {};
+    const comptes = {};
+    const suffixe = `${Date.now()}`;
+    let client = null;
+    const jeton = (cle) => ({ Authorization: `Bearer ${jwt.sign({ id: comptes[cle].id }, process.env.JWT_SECRET)}` });
+    const envoyer = (methode, chemin, auth, corps) => request(app)[methode](chemin).set(auth).send(corps);
+    const devisSigne = async (objet) => {
+      const devis = await envoyer('post', '/api/devis', admin, { clientId: client.id, objet: `TEST Coût prévu profils ${objet} ${suffixe}`, lignes: [
+        { designation: 'TEST Détecteur profils', nature: 'FOURNITURE', quantite: '4', prixUnitaireHt: '35', tauxTva: 20, prixAchatUnitaireHt: '12.35' }, // 49,40
+      ] });
+      assert.equal(devis.status, 201, JSON.stringify(devis.body));
+      const signature = await envoyer('post', `/api/devis/${devis.body.id}/signature`, admin, { signataire: 'TEST Signataire profils', confirme: true });
+      assert.equal(signature.status, 201, JSON.stringify(signature.body));
+      return devis.body;
+    };
+    const convertir = async (devisId, corps) => {
+      const res = await envoyer('post', `/api/devis/${devisId}/convertir`, admin, { cible: 'CHANTIER', ...corps });
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      return res.body;
+    };
+    // Coût prévu lu par un compte : dans la fiche, puis dans la liste.
+    const lu = async (auth, id) => {
+      const fiche = await request(app).get(`/api/chantiers/${id}`).set(auth);
+      assert.equal(fiche.status, 200, JSON.stringify(fiche.body));
+      const liste = await request(app).get('/api/chantiers').set(auth);
+      assert.equal(liste.status, 200, JSON.stringify(liste.body));
+      const ligne = liste.body.find((c) => c.id === id);
+      assert.ok(ligne, 'chantier absent de la liste');
+      return [fiche.body.coutMaterielPrevu, ligne.coutMaterielPrevu];
+    };
+    const regler = async (reglages) => assert.equal((await envoyer('put', '/api/parametres', admin, reglages)).status, 200);
+
+    before(async () => {
+      const secours = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
+      assert.equal(secours.status, 200);
+      admin = { Authorization: `Bearer ${secours.body.token}` };
+      for (const [cle, role] of [['responsable', 'RESPONSABLE'], ['conducteur', 'CONDUCTEUR_TRAVAUX'], ['technicien', 'TECHNICIEN'], ['directeur', 'DIRECTEUR'], ['commercial', 'COMMERCIAL']]) {
+        const email = `cout-prevu-profils.${cle}@iris.test`;
+        comptes[cle] = await prisma.user.upsert({ where: { email }, update: { role, actif: true, permissions: [] }, create: { email, name: `TEST Coût prévu profils ${cle}`, role } });
+      }
+      // Branche du responsable : le conducteur et le technicien.
+      await prisma.user.updateMany({ where: { id: { in: [comptes.conducteur.id, comptes.technicien.id] } }, data: { responsableHierarchiqueId: comptes.responsable.id } });
+      const cree = await envoyer('post', '/api/clients', admin, { raisonSociale: `TEST Client coût prévu profils ${suffixe}`, siren: await sirenLibre() });
+      assert.equal(cree.status, 201, JSON.stringify(cree.body));
+      client = cree.body;
+      const site = await envoyer('post', `/api/clients/${client.id}/sites`, admin, { nom: 'TEST Facturation profils', adresse: '9 rue des Profils', codePostal: '14000', ville: 'Caen', estSiteFacturation: true });
+      assert.equal(site.status, 201, JSON.stringify(site.body));
+    });
+
+    test('chaque profil lit le coût prévu selon la rentabilité du chantier, marge commerciale active ou non ; le technicien et le commercial jamais', async () => {
+      const chantier = await convertir((await devisSigne('conducteur')).id, { responsableId: comptes.conducteur.id, commercialId: comptes.commercial.id });
+      const chantierTechnicien = await convertir((await devisSigne('technicien')).id, { responsableId: comptes.technicien.id });
+      const avant = await prisma.parametres.findUnique({ where: { id: 'singleton' } });
+      try {
+        await regler({ rentabiliteConducteur: true, rentabiliteHierarchie: true, rentabiliteDirecteurs: true, margeCommercialeActive: true });
+        assert.deepEqual(await lu(admin, chantier.id), [49.4, 49.4], 'administration');
+        assert.deepEqual(await lu(jeton('conducteur'), chantier.id), [49.4, 49.4], 'conducteur titulaire');
+        assert.deepEqual(await lu(jeton('responsable'), chantier.id), [49.4, 49.4], 'responsable de branche');
+        assert.deepEqual(await lu(jeton('directeur'), chantier.id), [49.4, 49.4], 'directeur');
+        assert.deepEqual(await lu(jeton('commercial'), chantier.id), [null, null], 'commercial du chantier');
+        assert.deepEqual(await lu(jeton('technicien'), chantierTechnicien.id), [null, null], 'technicien titulaire');
+        assert.deepEqual(await lu(jeton('responsable'), chantierTechnicien.id), [49.4, 49.4], 'responsable de la branche du technicien');
+        // Réglages coupés : ni le responsable de branche ni le directeur ne le lisent plus, en lecture comme en écriture.
+        await regler({ rentabiliteHierarchie: false, rentabiliteDirecteurs: false });
+        assert.deepEqual(await lu(jeton('responsable'), chantier.id), [null, null], 'responsable de branche sans la rentabilité');
+        assert.deepEqual(await lu(jeton('directeur'), chantier.id), [null, null], 'directeur sans la rentabilité');
+        assert.deepEqual(await lu(jeton('conducteur'), chantier.id), [49.4, 49.4], 'conducteur titulaire, réglage inchangé');
+        // Marge commerciale coupée : la lecture suit toujours la rentabilité (choix par défaut, à confirmer), sans marge estimée.
+        await regler({ margeCommercialeActive: false });
+        const fiche = await request(app).get(`/api/chantiers/${chantier.id}`).set(jeton('conducteur'));
+        assert.deepEqual([fiche.body.coutMaterielPrevu, fiche.body.metrics.estimation, fiche.body.metrics.margeEstimee], [49.4, null, null]);
+        const renomme = await envoyer('patch', `/api/chantiers/${chantier.id}`, jeton('conducteur'), { nom: `TEST Coût prévu profils renommé ${suffixe}` });
+        assert.equal(renomme.status, 200, JSON.stringify(renomme.body));
+        assert.equal(Number(renomme.body.coutMaterielPrevu), 49.4, 'réponse d’écriture du conducteur, marge commerciale coupée');
+        const clos = await envoyer('patch', `/api/chantiers/${chantier.id}/statut`, jeton('directeur'), { statut: 'TERMINE' });
+        assert.equal(clos.status, 200, JSON.stringify(clos.body));
+        assert.equal(clos.body.coutMaterielPrevu, null, 'réponse de clôture du directeur sans la rentabilité');
+      } finally {
+        await regler({ rentabiliteConducteur: avant.rentabiliteConducteur, rentabiliteHierarchie: avant.rentabiliteHierarchie, rentabiliteDirecteurs: avant.rentabiliteDirecteurs, margeCommercialeActive: avant.margeCommercialeActive });
+      }
+    });
+
+    test('conversion par une clé d’intégration : la réponse donne le coût prévu avec finances:read, vide sans', async () => {
+      const creer = async (nom, scopes) => {
+        const cle = await envoyer('post', '/api/admin/api-keys', admin, { nom, scopes });
+        assert.equal(cle.status, 201, JSON.stringify(cle.body));
+        return { Authorization: `Bearer ${cle.body.apiKey}` };
+      };
+      const sansFinances = await creer(`TEST coût prévu conversion sans finances ${suffixe}`, ['devis:write']);
+      const avecFinances = await creer(`TEST coût prévu conversion avec finances ${suffixe}`, ['devis:write', 'finances:read']);
+      const sans = await request(app).post(`/api/v1/devis/${(await devisSigne('clé sans finances')).id}/convertir`).set(sansFinances).send({ cible: 'CHANTIER' });
+      assert.equal(sans.status, 201, JSON.stringify(sans.body));
+      assert.equal(sans.body.coutMaterielPrevu, null);
+      const avec = await request(app).post(`/api/v1/devis/${(await devisSigne('clé avec finances')).id}/convertir`).set(avecFinances).send({ cible: 'CHANTIER' });
+      assert.equal(avec.status, 201, JSON.stringify(avec.body));
+      assert.equal(avec.body.coutMaterielPrevu, 49.4);
+    });
+  });
 }
