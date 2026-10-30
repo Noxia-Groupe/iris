@@ -436,9 +436,10 @@ const convertirDevis: express.RequestHandler = async (req, res) => { try {
     const budgetMaterielVendu = centimes(devis.lignes.filter(l => l.nature === 'FOURNITURE').reduce((total, l) => total + Number(l.totalHt), 0));
     const budgetMainOeuvreVendu = centimes(devis.totalHt.toNumber() - budgetMaterielVendu);
     const heuresVendues = devis.lignes.filter(l => l.nature === 'MAIN_OEUVRE').reduce((total, l) => total + Number(l.quantite), 0);
-    // Coût d'achat prévu du matériel (point 15) : chaque fourniture à son prix d'achat prévu × quantité,
-    // arrondie au centime comme une ligne ; sans prix d'achat, elle compte pour zéro (réponse du 30-10-2026).
-    const coutMaterielPrevu = centimes(devis.lignes.filter(l => l.nature === 'FOURNITURE')
+    // Coût d'achat prévu (point 15) : chaque ligne à son prix d'achat prévu × quantité, arrondie au centime
+    // comme une ligne ; une fourniture sans prix d'achat compte pour zéro (réponse « Zéro » du 30-10-2026), et
+    // une ligne de main-d'œuvre qui en porte un s'y ajoute (réponse « Ajouté au coût prévu », même jour).
+    const coutMaterielPrevu = centimes(devis.lignes
       .reduce((total, l) => total + (l.prixAchatUnitaireHt === null ? 0 : arrondiCommercialLigneHt(l.quantite.toString(), l.prixAchatUnitaireHt.toString())), 0));
     const chantier = await tx.chantier.create({ data: {
       nom: devis.objet, client: devis.client.raisonSociale, clientId: devis.clientId, numeroDevis: devis.numero,

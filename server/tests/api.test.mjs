@@ -24582,7 +24582,7 @@ if (!TEST_DATABASE_URL) {
   // « oui ca alimente forcément le budget » ; réponse du 30-10-2026 : une fourniture sans prix d'achat prévu compte pour
   // « Zéro ») : le coût d'achat prévu des fournitures du devis est figé à la conversion en chantier et remplace, dans la
   // marge estimée, le ratio des chantiers terminés. Il se lit comme le prix d'achat prévu des devis : par l'administration.
-  describe('Coût matériel prévu du chantier : prix d’achat prévus des fournitures du devis', () => {
+  describe('Coût matériel prévu du chantier : prix d’achat prévus des lignes du devis', () => {
     let admin = {};
     let adminId = '';
     const comptes = {};
@@ -24635,26 +24635,28 @@ if (!TEST_DATABASE_URL) {
       fournisseur = await prisma.fournisseur.create({ data: { nom: `TEST Coût prévu fournisseur ${suffixe}` } });
     });
 
-    test('conversion : chaque fourniture à son prix d’achat prévu × quantité, arrondie au centime ; sans prix d’achat, zéro ; la main-d’œuvre n’y entre pas', async () => {
+    test('conversion : chaque ligne à son prix d’achat prévu × quantité, arrondie au centime, main-d’œuvre comprise ; sans prix d’achat, zéro', async () => {
       const devis = await devisSigne('calcul', [
         fourniture('TEST Caméra', '3', '50', '30.40'), // 91,20
         fourniture('TEST Câble', '0.333', '2', '10.01'), // 3,33333 → 3,33
         fourniture('TEST Visserie', '1.5', '20'), // sans prix d'achat : 0
-        { designation: 'TEST Pose', nature: 'MAIN_OEUVRE', quantite: '4', prixUnitaireHt: '45', tauxTva: 20, prixAchatUnitaireHt: '25' },
+        // Main-d'œuvre à prix d'achat prévu (une prestation sous-traitée) : elle s'ajoute au coût prévu (réponse du 30-10-2026, 13:12 UTC).
+        { designation: 'TEST Pose', nature: 'MAIN_OEUVRE', quantite: '4', prixUnitaireHt: '45', tauxTva: 20, prixAchatUnitaireHt: '25' }, // 100,00
+        { designation: 'TEST Réglage', nature: 'MAIN_OEUVRE', quantite: '2', prixUnitaireHt: '45', tauxTva: 20 }, // sans prix d'achat : 0
       ]);
       const chantier = await convertir(devis.id, admin, { responsableId: comptes.conducteur.id });
-      assert.equal(chantier.coutMaterielPrevu, 94.53, 'réponse de la conversion, lue par l’administration');
-      assert.equal(await enBase(chantier.id), '94.53');
+      assert.equal(chantier.coutMaterielPrevu, 194.53, 'réponse de la conversion, lue par l’administration');
+      assert.equal(await enBase(chantier.id), '194.53');
       assert.equal(chantier.budgetMaterielVendu, 180.67, 'le matériel vendu reste le prix de vente des fournitures');
       // Marge estimée : le coût prévu remplace le ratio des chantiers terminés, jamais sous le réel engagé.
       const vu = await lireChantier(chantier.id);
-      assert.equal(vu.coutMaterielPrevu, 94.53);
+      assert.equal(vu.coutMaterielPrevu, 194.53);
       const e = vu.metrics.estimation;
-      assert.deepEqual([e.sourceMateriel, e.ratioMateriel, e.coutMaterielAttendu], ['DEVIS', null, 94.53]);
+      assert.deepEqual([e.sourceMateriel, e.ratioMateriel, e.coutMaterielAttendu], ['DEVIS', null, 194.53]);
       assert.ok(Math.abs(vu.metrics.margeEstimee - (vu.budgetGlobalVendu - e.coutMainOeuvreAttendu - e.coutMaterielAttendu)) < 1e-9, JSON.stringify(e));
-      await achat(chantier.id, 120);
+      await achat(chantier.id, 250);
       const depasse = (await lireChantier(chantier.id)).metrics.estimation;
-      assert.deepEqual([depasse.sourceMateriel, depasse.coutMaterielAttendu], ['DEVIS', 120], 'un poste n’est jamais estimé sous le réel');
+      assert.deepEqual([depasse.sourceMateriel, depasse.coutMaterielAttendu], ['DEVIS', 250], 'un poste n’est jamais estimé sous le réel');
       // Le conducteur, titulaire du chantier, ne lit pas les prix d'achat prévus : le coût prévu lui est masqué.
       const conducteur = await lireChantier(chantier.id, jeton('conducteur'));
       assert.equal(conducteur.coutMaterielPrevu, null);
@@ -24662,7 +24664,7 @@ if (!TEST_DATABASE_URL) {
       const liste = await request(app).get('/api/chantiers').set(jeton('conducteur'));
       assert.equal(liste.status, 200, JSON.stringify(liste.body));
       assert.equal(liste.body.find((c) => c.id === chantier.id).coutMaterielPrevu, null, 'liste : masqué');
-      assert.equal((await request(app).get('/api/chantiers').set(admin)).body.find((c) => c.id === chantier.id).coutMaterielPrevu, 94.53, 'liste : lu par l’administration');
+      assert.equal((await request(app).get('/api/chantiers').set(admin)).body.find((c) => c.id === chantier.id).coutMaterielPrevu, 194.53, 'liste : lu par l’administration');
     });
 
     test('destinataire de la marge qui ne lit pas les prix d’achat (conducteur titulaire) : le matériel attendu tiré du coût prévu lui est vide, comme le coût prévu', async () => {
