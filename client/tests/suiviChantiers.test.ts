@@ -130,7 +130,7 @@ test('marge estimée : le coût réel et le matériel des suites SAV, non vendus
   assert.equal(hypotheseMateriel(estimation('CHANTIER', 40), null), 'matériel vendu × 80 %, ratio d’achat observé sur les chantiers terminés');
 });
 
-test('marge estimée : le coût d’achat prévu au devis, avec son montant pour qui lit les prix d’achat (lot « budget et heures prévues du chantier »)', () => {
+test('marge estimée : le coût d’achat prévu au devis, avec son montant pour qui lit les prix d’achat prévus ou reçoit la rentabilité du chantier (lot « budget et heures prévues du chantier »)', () => {
   const estimation: EstimationMarge = {
     coutEstime: null, coutMainOeuvreAttendu: null, coutMaterielAttendu: 94.53, coutHoraireReference: null, sourceCoutHoraire: 'CHANTIER', ratioMateriel: null, sourceMateriel: 'DEVIS',
   };
