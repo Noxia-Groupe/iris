@@ -25054,7 +25054,7 @@ if (!TEST_DATABASE_URL) {
       // Les libellés de test contiennent « heures prévues » : c'est le total de l'écran (« Heures prévues : 3 h ») qui ne doit pas y être.
       assert.match(text, new RegExp(fiches.mes.nom));
       assert.doesNotMatch(text, /heures? prévues?\s*:/i);
-      assert.doesNotMatch(text, /\b3 h\b/);
+      assert.doesNotMatch(text, /\b3(,0+)? ?h\b|durée|minutes/i);
     });
 
     test('des heures prévues au-delà de ce que porte un chantier : conversion refusée, rien n’est créé', async () => {
