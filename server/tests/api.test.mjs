@@ -24580,8 +24580,10 @@ if (!TEST_DATABASE_URL) {
   });
   // Lot « budget et heures prévues du chantier », PR 1 (décision de Nelson de la nuit du 26 au 27-10-2026, point 15 :
   // « oui ca alimente forcément le budget » ; réponse du 30-10-2026 : une fourniture sans prix d'achat prévu compte pour
-  // « Zéro ») : le coût d'achat prévu des fournitures du devis est figé à la conversion en chantier et remplace, dans la
-  // marge estimée, le ratio des chantiers terminés. Il se lit comme le prix d'achat prévu des devis : par l'administration.
+  // « Zéro ») : le coût d'achat prévu des lignes du devis, fournitures et main-d'œuvre qui porte un prix d'achat prévu
+  // (réponse du 30-10-2026, 13:12 UTC : « Ajouté au coût prévu »), est figé à la conversion en chantier et remplace, dans
+  // la marge estimée, le ratio des chantiers terminés. Il se lit comme le prix d'achat prévu des devis : par
+  // l'administration, ou une clé d'intégration avec finances:read.
   describe('Coût matériel prévu du chantier : prix d’achat prévus des lignes du devis', () => {
     let admin = {};
     let adminId = '';
@@ -24768,6 +24770,34 @@ if (!TEST_DATABASE_URL) {
       };
       assert.equal((await lire(await creer(`TEST coût prévu sans finances ${suffixe}`, ['chantiers:read']))).coutMaterielPrevu, null);
       assert.equal((await lire(await creer(`TEST coût prévu avec finances ${suffixe}`, ['chantiers:read', 'finances:read']))).coutMaterielPrevu, 63);
+    });
+
+    // Audit n° 2 de #368, T1 : une ligne de main-d'œuvre à prix d'achat prévu (sous-traitée) garde ses heures dans les
+    // heures vendues, donc dans la main-d'œuvre attendue (réponse « Ajouté au coût prévu » du 30-10-2026, 13:12 UTC,
+    // préférée à « Remplace son coût d'heures ») ; son prix d'achat s'ajoute au coût prévu.
+    test('main-d’œuvre à prix d’achat prévu : ses heures restent dans les heures vendues et la main-d’œuvre attendue, son achat dans le coût prévu', async () => {
+      const devis = await devisSigne('heures sous-traitées', [
+        { designation: 'TEST Pose sous-traitée', nature: 'MAIN_OEUVRE', quantite: '4', prixUnitaireHt: '45', tauxTva: 20, prixAchatUnitaireHt: '25' }, // 100,00
+        { designation: 'TEST Réglage', nature: 'MAIN_OEUVRE', quantite: '2', prixUnitaireHt: '45', tauxTva: 20 },
+        fourniture('TEST Centrale', '1', '50', '30'), // 30,00
+      ]);
+      const chantier = await convertir(devis.id, admin, { responsableId: comptes.conducteur.id });
+      assert.deepEqual([chantier.budgetGlobalVendu, chantier.budgetMaterielVendu, chantier.budgetMainOeuvreVendu, chantier.heuresVendues, chantier.coutMaterielPrevu], [320, 50, 270, 6, 130]);
+      // Une heure saisie à 30 €/h fixe le coût horaire du chantier : 6 h vendues × 30 € = 180 € de main-d'œuvre attendue.
+      const intervenant = await prisma.intervenant.create({ data: { nom: `TEST Coût prévu intervenant ${suffixe}`, role: 'Technicien', tauxHoraireCharge: 30 } });
+      await prisma.pointageHeure.create({ data: { date: new Date(), intervenantId: intervenant.id, chantierId: chantier.id, nbrHeures: 1, tauxHoraireApplique: 30, createdById: adminId, updatedById: adminId } });
+      const vu = await lireChantier(chantier.id);
+      const e = vu.metrics.estimation;
+      assert.deepEqual([e.sourceCoutHoraire, e.coutHoraireReference, e.coutMainOeuvreAttendu, e.sourceMateriel, e.coutMaterielAttendu, e.coutEstime, vu.metrics.margeEstimee], ['CHANTIER', 30, 180, 'DEVIS', 130, 310, 10]);
+    });
+
+    // Audit n° 2 de #368, T2 : l'arrondi de chaque ligne est l'arrondi commercial exact du total HT d'une ligne, et non un
+    // arrondi de nombre à virgule : 1,5 × 2,01 € = 3,015 €, soit 3,02 € (un arrondi flottant donne 3,01 €).
+    test('chaque ligne est arrondie comme le total HT d’une ligne, au demi-centime supérieur exact : 1,5 × 2,01 € font 3,02 €', async () => {
+      const devis = await devisSigne('arrondi exact', [fourniture('TEST Gaine', '1.5', '3', '2.01')]);
+      const chantier = await convertir(devis.id);
+      assert.equal(chantier.coutMaterielPrevu, 3.02);
+      assert.equal(await enBase(chantier.id), '3.02');
     });
   });
 }
