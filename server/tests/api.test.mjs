@@ -24915,4 +24915,156 @@ if (!TEST_DATABASE_URL) {
       assert.equal(avec.body.coutMaterielPrevu, 49.4);
     });
   });
+  // Lot « budget et heures prévues du chantier », seconde partie : heures prévues des lignes du devis (réponses de
+  // Nelson du 30-10-2026 : « Durée indicative », « Sa quantité », « Écran seulement » ; un devis antérieur garde la
+  // règle d'avant, choix par défaut à confirmer).
+  describe('Heures prévues du devis : durée indicative, ligne saisie à la main, conversion en chantier', () => {
+    let admin = {};
+    const suffixe = `${Date.now()}`;
+    let client = null;
+    const fiches = {};
+    const envoyer = (methode, chemin, corps) => request(app)[methode](chemin).set(admin).send(corps);
+    const prestation = async (cle, corps) => {
+      const res = await envoyer('post', '/api/catalogue/prestations', { reference: `TEST-HP-${cle}-${suffixe}`, nom: `TEST Heures prévues ${cle}`, tauxTva: '20', ...corps });
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      fiches[cle] = res.body;
+    };
+    const duCatalogue = (fiche, famille, extra = {}) => ({ designation: fiche.nom, nature: famille === 'prestations' ? 'MAIN_OEUVRE' : 'FOURNITURE', quantite: 1, prixUnitaireHt: Number(fiche.prixVenteHt), tauxTva: 20, unite: fiche.unite ?? null, catalogueFamille: famille, catalogueId: fiche.id, ...extra });
+    const creerDevis = async (objet, lignes, extra = {}) => {
+      const res = await envoyer('post', '/api/devis', { clientId: client.id, objet: `TEST Heures prévues ${objet} ${suffixe}`, lignes, ...extra });
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      return res.body;
+    };
+    const signer = async (devisId) => {
+      const res = await envoyer('post', `/api/devis/${devisId}/signature`, { signataire: 'TEST Signataire heures prévues', confirme: true });
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      return res.body;
+    };
+    const convertir = async (devisId) => {
+      const res = await envoyer('post', `/api/devis/${devisId}/convertir`, { cible: 'CHANTIER' });
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      return res.body;
+    };
+    const minutes = (devis) => devis.lignes.map((l) => l.minutesPrevuesUnite);
+    const heuresVenduesEnBase = async (chantierId) => (await prisma.chantier.findUniqueOrThrow({ where: { id: chantierId }, select: { heuresVendues: true } })).heuresVendues.toFixed(2);
+
+    before(async () => {
+      const secours = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
+      assert.equal(secours.status, 200);
+      admin = { Authorization: `Bearer ${secours.body.token}` };
+      const cree = await envoyer('post', '/api/clients', { raisonSociale: `TEST Client heures prévues ${suffixe}`, siren: await sirenLibre() });
+      assert.equal(cree.status, 201, JSON.stringify(cree.body));
+      client = cree.body;
+      const site = await envoyer('post', `/api/clients/${client.id}/sites`, { nom: 'TEST Facturation heures prévues', adresse: '3 rue des Heures', codePostal: '14000', ville: 'Caen', estSiteFacturation: true });
+      assert.equal(site.status, 201, JSON.stringify(site.body));
+      await prestation('mes', { unite: 'forfait', prixVenteHt: '250', dureeIndicativeMin: 90 }); // 1,5 h par mise en service
+      await prestation('reglage', { unite: 'forfait', prixVenteHt: '60', dureeIndicativeMin: 50 }); // 50 min, pas un nombre d'heures décimal fini
+      await prestation('sansduree', { unite: 'forfait', prixVenteHt: '80' });
+      await prestation('mo', { estMainOeuvre: true, prixVenteHt: '45', prixJourHorsContratHt: '300', prixHeureSousContratHt: '40', prixJourSousContratHt: '280', heuresParJour: '7' });
+      const article = await envoyer('post', '/api/catalogue/articles', { reference: `TEST-HP-art-${suffixe}`, nom: 'TEST Heures prévues câble', unite: 'm', prixVenteHt: '10', tauxTva: '20' });
+      assert.equal(article.status, 201, JSON.stringify(article.body));
+      fiches.article = article.body;
+    });
+
+    test('chaque ligne compte ses heures : durée × quantité, 0 sans durée, la quantité à la main ou à l’heure, rien pour une fourniture ; la conversion les reprend', async () => {
+      const devis = await creerDevis('lignes', [
+        duCatalogue(fiches.mes, 'prestations', { quantite: 2 }), // 2 × 90 min = 3 h
+        duCatalogue(fiches.reglage, 'prestations', { quantite: 3 }), // 3 × 50 min = 2,5 h, exactement
+        duCatalogue(fiches.sansduree, 'prestations', { quantite: 5 }), // pas de durée : 0 h
+        duCatalogue(fiches.mo, 'prestations', { quantite: 2 }), // main d'œuvre à l'heure : 2 h
+        { designation: 'TEST Main-d’œuvre saisie à la main', nature: 'MAIN_OEUVRE', quantite: '1.5', prixUnitaireHt: 50, tauxTva: 20 }, // 1,5 h
+        duCatalogue(fiches.article, 'articles', { quantite: 4 }), // fourniture : 0 h
+        duCatalogue(fiches.mes, 'prestations', { nature: 'FOURNITURE' }), // durée, mais fourniture : 0 h
+        { designation: 'TEST Fourniture saisie à la main', nature: 'FOURNITURE', quantite: 2, prixUnitaireHt: 5, tauxTva: 20 },
+      ]);
+      assert.deepEqual(minutes(devis), [90, 50, 0, null, null, 0, 90, null]);
+      assert.equal(devis.heuresPrevues, 9);
+      const lu = await request(app).get('/api/devis').set(admin);
+      assert.equal(lu.status, 200, JSON.stringify(lu.body));
+      assert.equal(lu.body.find((d) => d.id === devis.id).heuresPrevues, 9);
+      await signer(devis.id);
+      const chantier = await convertir(devis.id);
+      assert.equal(chantier.heuresVendues, 9);
+      assert.equal(await heuresVenduesEnBase(chantier.id), '9.00');
+    });
+
+    test('les minutes prévues sont copiées à l’ajout puis figées : ni la fiche modifiée ni une valeur envoyée ne changent la ligne gardée, la révision ou la duplication', async () => {
+      const devis = await creerDevis('figées', [duCatalogue(fiches.reglage, 'prestations', { minutesPrevuesUnite: 999 })]);
+      assert.deepEqual([minutes(devis), devis.heuresPrevues], [[50], 0.83]);
+      const maj = await envoyer('put', `/api/catalogue/prestations/${fiches.reglage.id}`, { ...fiches.reglage, dureeIndicativeMin: 30 });
+      assert.equal(maj.status, 200, JSON.stringify(maj.body));
+      try {
+        const garde = { ligneId: devis.lignes[0].id, designation: devis.lignes[0].designation, nature: 'MAIN_OEUVRE', quantite: 6, prixUnitaireHt: 60, tauxTva: 20, minutesPrevuesUnite: 1 };
+        const modifie = await envoyer('patch', `/api/devis/${devis.id}`, { clientId: client.id, objet: devis.objet, lignes: [garde, duCatalogue(fiches.reglage, 'prestations', { quantite: 2 })] });
+        assert.equal(modifie.status, 200, JSON.stringify(modifie.body));
+        // Ligne gardée : 6 × 50 min = 5 h ; nouvelle ligne, à la durée du jour : 2 × 30 min = 1 h.
+        assert.deepEqual([minutes(modifie.body), modifie.body.heuresPrevues], [[50, 30], 6]);
+        const duplicata = await envoyer('post', `/api/devis/${devis.id}/duplication`);
+        assert.equal(duplicata.status, 201, JSON.stringify(duplicata.body));
+        assert.deepEqual([minutes(duplicata.body), duplicata.body.heuresPrevues], [[50, 30], 6]);
+        await signer(devis.id);
+        const revision = await envoyer('post', `/api/devis/${devis.id}/revisions`);
+        assert.equal(revision.status, 201, JSON.stringify(revision.body));
+        assert.deepEqual([minutes(revision.body), revision.body.heuresPrevues], [[50, 30], 6]);
+      } finally {
+        assert.equal((await envoyer('put', `/api/catalogue/prestations/${fiches.reglage.id}`, { ...fiches.reglage, dureeIndicativeMin: 50 })).status, 200);
+      }
+    });
+
+    test('une ligne enregistrée avant ce lot, sans minutes prévues, compte sa quantité, comme une main d’œuvre au temps passé', async () => {
+      const devis = await creerDevis('avant le lot', [duCatalogue(fiches.sansduree, 'prestations', { quantite: 4 })]);
+      assert.equal(devis.heuresPrevues, 0);
+      // Ligne ajoutée avant le lot : la colonne est vide.
+      await prisma.devisLigne.update({ where: { id: devis.lignes[0].id }, data: { minutesPrevuesUnite: null } });
+      const lu = await request(app).get('/api/devis').set(admin);
+      assert.equal(lu.status, 200, JSON.stringify(lu.body));
+      assert.equal(lu.body.find((d) => d.id === devis.id).heuresPrevues, 4);
+      await signer(devis.id);
+      const chantier = await convertir(devis.id);
+      assert.equal(await heuresVenduesEnBase(chantier.id), '4.00');
+      // Devis au temps passé : le pas de la société doit être réglé ; il est remis tel quel ensuite.
+      const avant = await prisma.parametres.findUniqueOrThrow({ where: { id: 'singleton' } });
+      try {
+        assert.equal((await envoyer('put', '/api/parametres', { pasTempsPasseMinutes: 15 })).status, 200);
+        const auTempsPasse = await creerDevis('temps passé', [
+          { tempsPasse: true, designation: 'TEST Main d’œuvre au temps passé', quantite: 2, tarifTempsPasse: 'HORS_CONTRAT', catalogueFamille: 'prestations', catalogueId: fiches.mo.id },
+          duCatalogue(fiches.mes, 'prestations'),
+        ], { auTempsPasse: true });
+        assert.deepEqual([minutes(auTempsPasse), auTempsPasse.heuresPrevues], [[null, 90], 3.5]);
+      } finally {
+        assert.equal((await envoyer('put', '/api/parametres', { pasTempsPasseMinutes: avant.pasTempsPasseMinutes ?? '' })).status, 200);
+      }
+    });
+
+    test('les heures prévues ne s’impriment ni ne se signent : PDF et empreinte du contenu signé inchangés', async () => {
+      const devis = await creerDevis('contenu signé', [duCatalogue(fiches.mes, 'prestations', { quantite: 2 })]);
+      const signature = await signer(devis.id);
+      const contenu = {
+        devisId: devis.id, dossierId: devis.dossierId, numero: devis.numero, version: 1, clientId: client.id, objet: devis.objet,
+        acompteExige: false, tauxAcompte: null, totalHt: '500.00', totalTva: '100.00', totalTtc: '600.00',
+        lignes: [{ ordre: 0, designation: fiches.mes.nom, nature: 'MAIN_OEUVRE', reference: fiches.mes.reference, unite: 'forfait', quantite: '2.000', prixUnitaireHt: '250.00', tauxTva: '20.00', totalHt: '500.00', totalTtc: '600.00' }],
+      };
+      assert.equal(signature.empreinte, createHash('sha256').update(JSON.stringify(contenu), 'utf8').digest('hex'));
+      const pdf = await request(app).get(`/api/devis/${devis.id}/document.pdf`).set(admin).buffer(true)
+        .parse((reponse, fin) => { const morceaux = []; reponse.on('data', (m) => morceaux.push(m)); reponse.on('end', () => fin(null, Buffer.concat(morceaux))); });
+      assert.equal(pdf.status, 200, String(pdf.body));
+      const lecteur = new PDFParse({ data: pdf.body });
+      const { text } = await lecteur.getText();
+      await lecteur.destroy();
+      // Les libellés de test contiennent « heures prévues » : c'est le total de l'écran (« Heures prévues : 3 h ») qui ne doit pas y être.
+      assert.match(text, new RegExp(fiches.mes.nom));
+      assert.doesNotMatch(text, /heures? prévues?\s*:/i);
+      assert.doesNotMatch(text, /\b3 h\b/);
+    });
+
+    test('des heures prévues au-delà de ce que porte un chantier : conversion refusée, rien n’est créé', async () => {
+      const devis = await creerDevis('hors limites', [{ designation: 'TEST Main-d’œuvre démesurée', nature: 'MAIN_OEUVRE', quantite: '100000000', prixUnitaireHt: 0, tauxTva: 20 }]);
+      assert.equal(devis.heuresPrevues, 100000000);
+      await signer(devis.id);
+      const refus = await envoyer('post', `/api/devis/${devis.id}/convertir`, { cible: 'CHANTIER' });
+      assert.deepEqual([refus.status, refus.body.error], [400, 'Heures prévues du devis hors des limites acceptées : le chantier ne peut pas les porter.']);
+      assert.equal(await prisma.chantier.count({ where: { numeroDevis: devis.numero } }), 0);
+      assert.equal(await prisma.devisConversion.count({ where: { devisId: devis.id } }), 0);
+    });
+  });
 }

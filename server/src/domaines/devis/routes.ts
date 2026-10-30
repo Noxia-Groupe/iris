@@ -26,6 +26,7 @@ import { SaisieContratInvalide, creerContratMaintenance, lireSaisieContrat } fro
 import {
   DevisSaisieError, DevisConflitError, DevisDroitError, devisPayload, NATURE_DEVIS_PAR_FAMILLE, devisPourLecteur, resoudreLignesDevis,
   devisInclude, contenuDevisSigne, copieLigneDevis, verrouillerDevis, acompteDevisPayload, nouveauNumeroDevis, totauxDevis,
+  heuresPrevuesLignes, PLAFOND_HEURES_PREVUES,
 } from './metier';
 import {
   TempsPasseConflitError, TempsPasseSaisieError, exigerCoherenceTempsPasse, exigerQuantiteTempsPasse, reglagesTempsPasseDeLaSociete, reglagesTempsPasseDuDevis,
@@ -435,7 +436,9 @@ const convertirDevis: express.RequestHandler = async (req, res) => { try {
     }
     const budgetMaterielVendu = centimes(devis.lignes.filter(l => l.nature === 'FOURNITURE').reduce((total, l) => total + Number(l.totalHt), 0));
     const budgetMainOeuvreVendu = centimes(devis.totalHt.toNumber() - budgetMaterielVendu);
-    const heuresVendues = devis.lignes.filter(l => l.nature === 'MAIN_OEUVRE').reduce((total, l) => total + Number(l.quantite), 0);
+    // Heures vendues : les heures prévues du devis (./metier.ts, heuresPrevuesLignes), celles que son écran affiche.
+    const heuresVendues = heuresPrevuesLignes(devis.lignes);
+    if (heuresVendues.greaterThan(PLAFOND_HEURES_PREVUES)) throw new DevisSaisieError('Heures prévues du devis hors des limites acceptées : le chantier ne peut pas les porter.');
     // Coût d'achat prévu (point 15) : chaque ligne à son prix d'achat prévu × quantité, arrondie au centime
     // comme une ligne ; une fourniture sans prix d'achat compte pour zéro (réponse « Zéro » du 30-10-2026), et
     // une ligne de main-d'œuvre qui en porte un s'y ajoute (réponse « Ajouté au coût prévu », même jour).

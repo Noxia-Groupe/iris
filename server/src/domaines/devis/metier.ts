@@ -128,19 +128,37 @@ export function devisPayload(body: Record<string, unknown>) {
 // prestation est de la main-d'œuvre, un article ou un équipement une fourniture.
 export const NATURE_DEVIS_PAR_FAMILLE: Record<CatalogueFamily, 'MAIN_OEUVRE' | 'FOURNITURE'> = { prestations: 'MAIN_OEUVRE', articles: 'FOURNITURE', equipements: 'FOURNITURE' };
 
-// Retire le prix d'achat prévu de toutes les lignes d'un devis, ou d'une liste de devis.
+// --- Heures prévues (lot « budget et heures prévues du chantier », réponses de Nelson du 30-10-2026) ---
+// Une ligne de main-d'œuvre compte sa quantité × ses minutes prévues par unité ÷ 60, ou sa quantité en
+// heures quand elle n'en porte pas (schema.prisma, DevisLigne.minutesPrevuesUnite) ; une fourniture n'en
+// compte jamais. Le total, exact puis arrondi au centième d'heure comme les heures vendues du chantier,
+// est celui que la conversion reprend et que l'écran du devis affiche ; ni le PDF ni le contenu signé ne
+// le portent (« Écran seulement »).
+export const PLAFOND_HEURES_PREVUES = new Prisma.Decimal('99999999.99'); // Chantier.heuresVendues, Decimal(10, 2)
+export function heuresPrevuesLignes(lignes: { nature: string; quantite: Prisma.Decimal.Value; minutesPrevuesUnite?: Prisma.Decimal.Value | null }[]): Prisma.Decimal {
+  const total = lignes.filter((ligne) => ligne.nature === 'MAIN_OEUVRE').reduce((somme, ligne) => {
+    const quantite = new Prisma.Decimal(ligne.quantite);
+    return somme.plus(ligne.minutesPrevuesUnite === null || ligne.minutesPrevuesUnite === undefined ? quantite : quantite.times(ligne.minutesPrevuesUnite).dividedBy(60));
+  }, new Prisma.Decimal(0));
+  return total.toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+}
+
+// Retire le prix d'achat prévu de toutes les lignes d'un devis, ou d'une liste de devis, et y ajoute
+// le total de ses heures prévues.
 export function devisPourLecteur<T>(req: express.Request, valeur: T): T {
-  if (voitPrixAchatDevis(req)) return valeur;
-  const masquer = (devis: unknown): unknown => {
+  const voitPrixAchat = voitPrixAchatDevis(req);
+  const lire = (devis: unknown): unknown => {
     if (!devis || typeof devis !== 'object' || !Array.isArray((devis as { lignes?: unknown }).lignes)) return devis;
-    return { ...(devis as object), lignes: (devis as { lignes: Record<string, unknown>[] }).lignes.map(({ prixAchatUnitaireHt: _masque, ...ligne }) => ligne) };
+    const lignes = (devis as { lignes: Record<string, unknown>[] }).lignes;
+    const heuresPrevues = heuresPrevuesLignes(lignes as { nature: string; quantite: number; minutesPrevuesUnite?: number | null }[]).toNumber();
+    return { ...(devis as object), heuresPrevues, ...(voitPrixAchat ? {} : { lignes: lignes.map(({ prixAchatUnitaireHt: _masque, ...ligne }) => ligne) }) };
   };
-  return (Array.isArray(valeur) ? valeur.map(masquer) : masquer(valeur)) as T;
+  return (Array.isArray(valeur) ? valeur.map(lire) : lire(valeur)) as T;
 }
 
 type LigneDevisExistante = {
   id: string; reference: string | null; catalogueFamille: string | null; catalogueId: string | null; prixAchatUnitaireHt: Prisma.Decimal | null;
-  tempsPasse: boolean; tarifTempsPasse: string | null; prixUnitaireHt: Prisma.Decimal; tauxTva: Prisma.Decimal;
+  tempsPasse: boolean; tarifTempsPasse: string | null; prixUnitaireHt: Prisma.Decimal; tauxTva: Prisma.Decimal; minutesPrevuesUnite: Prisma.Decimal | null;
 };
 // Résout la copie du catalogue et le prix d'achat prévu de chaque ligne saisie :
 //  - une ligne existante du devis (`ligneId`) garde sa fiche d'origine et sa référence, copiées
@@ -150,7 +168,12 @@ type LigneDevisExistante = {
 //  - le prix d'achat prévu n'est écrit que par un administrateur. Sinon, une ligne existante
 //    garde le sien, et une nouvelle ligne du catalogue reprend celui de la fiche ;
 //  - la ligne au temps passé prend le prix, la TVA et la référence de sa main d'œuvre à son ajout,
-//    puis les garde (./tempsPasse.ts) ; une ligne existante ne change pas de nature.
+//    puis les garde (./tempsPasse.ts) ; une ligne existante ne change pas de nature ;
+//  - les minutes prévues par unité sont copiées comme la référence, jamais saisies : la durée
+//    indicative d'une prestation qui n'est pas une main d'œuvre, 0 sans durée (« Durée indicative ») ;
+//    vides pour une main d'œuvre à l'heure et une ligne saisie à la main (« Sa quantité »). Un article
+//    ou un équipement n'a pas de durée : 0 (choix par défaut, à confirmer ; seule une ligne de
+//    main-d'œuvre compte des heures).
 // Les lignes rendues sont toutes chiffrées : les totaux du devis se calculent dessus (totauxDevis).
 export async function resoudreLignesDevis(
   db: Prisma.TransactionClient | typeof prisma,
@@ -177,18 +200,20 @@ export async function resoudreLignesDevis(
       lignes.push(await resoudreLigneTempsPasse(db, ligne, reference.tempsPasse, reference.catalogue, existante));
       continue;
     }
-    let copie: { reference: string | null; catalogueFamille: string | null; catalogueId: string | null; prixAchatUnitaireHt: Prisma.Decimal | number | null };
+    let copie: { reference: string | null; catalogueFamille: string | null; catalogueId: string | null; prixAchatUnitaireHt: Prisma.Decimal | number | null; minutesPrevuesUnite: Prisma.Decimal | number | null };
     if (existante) {
-      copie = { reference: existante.reference, catalogueFamille: existante.catalogueFamille, catalogueId: existante.catalogueId, prixAchatUnitaireHt: existante.prixAchatUnitaireHt };
+      copie = { reference: existante.reference, catalogueFamille: existante.catalogueFamille, catalogueId: existante.catalogueId, prixAchatUnitaireHt: existante.prixAchatUnitaireHt, minutesPrevuesUnite: existante.minutesPrevuesUnite };
     } else if (reference.catalogue) {
       // Lue par `db`, donc dans la transaction verrouillée de la modification, et non par le client global.
       const delegues = { prestations: db.cataloguePrestation, articles: db.catalogueArticle, equipements: db.catalogueEquipement };
-      const fiche = await (delegues[reference.catalogue.famille] as unknown as { findUnique: (args: unknown) => Promise<{ reference: string; actif: boolean; prixAchatHt: Prisma.Decimal | null } | null> })
-        .findUnique({ where: { id: reference.catalogue.id }, select: { reference: true, actif: true, prixAchatHt: true } });
+      const prestation = reference.catalogue.famille === 'prestations';
+      const fiche = await (delegues[reference.catalogue.famille] as unknown as { findUnique: (args: unknown) => Promise<{ reference: string; actif: boolean; prixAchatHt: Prisma.Decimal | null; estMainOeuvre?: boolean; dureeIndicativeMin?: number | null } | null> })
+        .findUnique({ where: { id: reference.catalogue.id }, select: { reference: true, actif: true, prixAchatHt: true, ...(prestation ? { estMainOeuvre: true, dureeIndicativeMin: true } : {}) } });
       if (!fiche || !fiche.actif) throw new DevisSaisieError('Fiche catalogue introuvable ou désactivée.');
-      copie = { reference: fiche.reference, catalogueFamille: reference.catalogue.famille, catalogueId: reference.catalogue.id, prixAchatUnitaireHt: fiche.prixAchatHt };
+      const minutesPrevuesUnite = prestation && fiche.estMainOeuvre ? null : fiche.dureeIndicativeMin ?? 0;
+      copie = { reference: fiche.reference, catalogueFamille: reference.catalogue.famille, catalogueId: reference.catalogue.id, prixAchatUnitaireHt: fiche.prixAchatHt, minutesPrevuesUnite };
     } else {
-      copie = { reference: null, catalogueFamille: null, catalogueId: null, prixAchatUnitaireHt: null };
+      copie = { reference: null, catalogueFamille: null, catalogueId: null, prixAchatUnitaireHt: null, minutesPrevuesUnite: null };
     }
     if (ecritPrixAchat && reference.prixAchatUnitaireHt !== undefined) copie.prixAchatUnitaireHt = reference.prixAchatUnitaireHt;
     // Une ligne ordinaire est déjà chiffrée par devisPayload.
@@ -234,13 +259,14 @@ export function contenuDevisSigne(devis: {
   };
 }
 // Copie à l'identique d'une ligne (révision, duplication) : la copie du catalogue, le prix
-// d'achat prévu et la ligne au temps passé (son tarif et son prix figés) suivent, comme les montants.
-export function copieLigneDevis({ ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc, unite, reference, catalogueFamille, catalogueId, prixAchatUnitaireHt, tempsPasse, tarifTempsPasse }: {
+// d'achat prévu, les minutes prévues et la ligne au temps passé (son tarif et son prix figés)
+// suivent, comme les montants.
+export function copieLigneDevis({ ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc, unite, reference, catalogueFamille, catalogueId, prixAchatUnitaireHt, tempsPasse, tarifTempsPasse, minutesPrevuesUnite }: {
   ordre: number; designation: string; nature: string; quantite: Prisma.Decimal; prixUnitaireHt: Prisma.Decimal; tauxTva: Prisma.Decimal; totalHt: Prisma.Decimal; totalTtc: Prisma.Decimal;
   unite: string | null; reference: string | null; catalogueFamille: string | null; catalogueId: string | null; prixAchatUnitaireHt: Prisma.Decimal | null;
-  tempsPasse: boolean; tarifTempsPasse: string | null;
+  tempsPasse: boolean; tarifTempsPasse: string | null; minutesPrevuesUnite: Prisma.Decimal | null;
 }) {
-  return { ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc, unite, reference, catalogueFamille, catalogueId, prixAchatUnitaireHt, tempsPasse, tarifTempsPasse };
+  return { ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc, unite, reference, catalogueFamille, catalogueId, prixAchatUnitaireHt, tempsPasse, tarifTempsPasse, minutesPrevuesUnite };
 }
 export async function verrouillerDevis(tx: Prisma.TransactionClient, id: string): Promise<boolean> {
   const lignes = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`SELECT "id" FROM "Devis" WHERE "id" = ${id} FOR UPDATE`);
