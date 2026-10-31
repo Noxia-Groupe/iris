@@ -78,6 +78,7 @@ POST /api/interventions requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 
 GET /api/interventions requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#3367306260fa
 GET /api/interventions/journee requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#c20552bc49ac
 GET /api/interventions/:id requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#4d7dee0b11a1
+GET /api/interventions/:id/document.pdf requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#45611a4924f0
 GET /api/interventions/:id/couts requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#cf770672fe56
 POST /api/interventions/:id/couts/heures requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#857c638bde3f
 POST /api/interventions/:id/couts/achats requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#ecb2f2a84911

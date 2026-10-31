@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Plus, Wrench } from 'lucide-react';
+import { FileDown, Plus, Wrench } from 'lucide-react';
 import { apiFetch } from '../api';
+import { telechargerPdf } from '../lib/documentPdf';
 import { SelecteurClient } from '../components/SelecteurClient';
 import { CoordonneesIntervention } from '../components/CoordonneesIntervention';
 import { FormulaireCloture, FormulaireCompteRendu, FormulaireSignature } from '../components/FormulairesIntervention';
@@ -203,6 +204,18 @@ export default function Interventions({ interventionId }: { interventionId?: str
     await load(true);
   };
 
+  // PDF du compte rendu (lot 6a-4a) : depuis la fiche, hors technicien, quand l'intervention porte au
+  // moins un compte rendu. Le refus du serveur s'affiche en tête de l'écran, comme pour le devis.
+  const telechargerCompteRendu = async (item: Intervention) => {
+    setError('');
+    try {
+      await telechargerPdf(`/interventions/${item.id}/document.pdf`, `Compte-rendu-${item.reference}.pdf`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Document indisponible.');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
   // Après un enregistrement, le formulaire se ferme et la liste est relue.
   const apresEnregistrement = async () => {
     setFormulaire(null);
@@ -297,7 +310,7 @@ export default function Interventions({ interventionId }: { interventionId?: str
         {/* Matériel saisi par l'encadrement, sous contrat comme hors contrat (lot « matériel d'une intervention curative »). */}
         {estEncadrement && fournisseurs !== null && item.statut !== 'ANNULEE' && <form onSubmit={(event) => void enregistrerAchat(event, item.id)} className="mt-3 grid gap-2 sm:grid-cols-2"><input required name="date" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" placeholder="Date (JJ-MM-AAAA)" className="form-input" /><select required name="fournisseurId" defaultValue="" className="form-input"><option value="" disabled>Fournisseur</option>{fournisseurs.map((fournisseur) => <option key={fournisseur.id} value={fournisseur.id}>{fournisseur.nom}</option>)}</select><input required name="description" maxLength={500} placeholder="Description du matériel" className="form-input sm:col-span-2" /><input required name="montantHT" inputMode="decimal" placeholder="Montant HT" className="form-input" /><input name="motif" maxLength={500} placeholder="Motif (obligatoire si 0)" className="form-input" /><button type="submit" className="btn btn-secondary">Enregistrer l’achat matériel</button></form>}
       </div>}
-      {(item.rapports || []).length > 0 && <div className="mt-3 rounded-lg bg-gray-50 p-3 text-sm"><p className="mb-1 font-medium text-gray-700">Comptes rendus terrain</p>{item.rapports!.map((rapport) => <div key={rapport.id} className="mb-2 last:mb-0 text-gray-600"><p className="whitespace-pre-line">{rapport.contenu} <span className="text-gray-400">— {rapport.auteur.name}, {formatCompanyDateOrEmpty(rapport.createdAt)}</span></p>{rapport.signature ? <div className="text-xs text-emerald-700"><p>Signé par {rapport.signature.signataire} le {formatCompanyDateOrEmpty(rapport.signature.accepteLe)}{rapport.signature.enregistrePar ? ` · enregistré par ${rapport.signature.enregistrePar.name}` : ''} · empreinte enregistrée</p>{rapport.signature.trace && <TraceSignature trace={rapport.signature.trace} signataire={rapport.signature.signataire} />}</div> : item.statut !== 'ANNULEE' && !formulaire ? <button type="button" onClick={() => setFormulaire({ type: 'signature', interventionId: item.id, rapportId: rapport.id })} className="mt-1 text-xs font-medium text-blue-700">Faire signer ce compte rendu</button> : null}</div>)}</div>}
+      {(item.rapports || []).length > 0 && <div className="mt-3 rounded-lg bg-gray-50 p-3 text-sm"><div className="mb-1 flex flex-wrap items-center justify-between gap-2"><p className="font-medium text-gray-700">Comptes rendus terrain</p>{interventionId && !estTechnicien && <button type="button" data-testid="pdf-compte-rendu" aria-label={`PDF du compte rendu de l’intervention ${item.reference}`} onClick={() => void telechargerCompteRendu(item)} className="btn btn-secondary flex items-center gap-2"><FileDown size={16} /> PDF</button>}</div>{item.rapports!.map((rapport) => <div key={rapport.id} className="mb-2 last:mb-0 text-gray-600"><p className="whitespace-pre-line">{rapport.contenu} <span className="text-gray-400">— {rapport.auteur.name}, {formatCompanyDateOrEmpty(rapport.createdAt)}</span></p>{rapport.signature ? <div className="text-xs text-emerald-700"><p>Signé par {rapport.signature.signataire} le {formatCompanyDateOrEmpty(rapport.signature.accepteLe)}{rapport.signature.enregistrePar ? ` · enregistré par ${rapport.signature.enregistrePar.name}` : ''} · empreinte enregistrée</p>{rapport.signature.trace && <TraceSignature trace={rapport.signature.trace} signataire={rapport.signature.signataire} />}</div> : item.statut !== 'ANNULEE' && !formulaire ? <button type="button" onClick={() => setFormulaire({ type: 'signature', interventionId: item.id, rapportId: rapport.id })} className="mt-1 text-xs font-medium text-blue-700">Faire signer ce compte rendu</button> : null}</div>)}</div>}
       {formulaire?.interventionId === item.id && formulaire.type === 'compteRendu' && <FormulaireCompteRendu interventionId={item.id} onEnregistre={apresEnregistrement} onRelire={() => load(true)} onAnnuler={() => setFormulaire(null)} />}
       {formulaire?.interventionId === item.id && formulaire.type === 'signature' && (() => { const rapport = (item.rapports || []).find((candidat) => candidat.id === formulaire.rapportId); return rapport && <FormulaireSignature rapport={rapport} enregistrePar={user?.name || 'Session interne active'} onEnregistre={apresEnregistrement} onRelire={() => load(true)} onAnnuler={() => setFormulaire(null)} />; })()}
       {formulaire?.interventionId === item.id && formulaire.type === 'cloture' && item.statut === 'EN_COURS' && <FormulaireCloture interventionId={item.id} nombreComptesRendus={(item.rapports || []).length} signe={(item.rapports || []).some((rapport) => rapport.signature)} onTermine={apresEnregistrement} onRelire={() => load(true)} onAjouterCompteRendu={() => setFormulaire({ type: 'compteRendu', interventionId: item.id })} onAnnuler={() => setFormulaire(null)} />}
