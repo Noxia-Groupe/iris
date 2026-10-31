@@ -60,7 +60,8 @@ server/
                               motifs de clôture, verrou et périmètre relu, journal),
                               remiseAPlanifier.ts (remise « à planifier » d'une intervention planifiée)
     domaines/contrats/        routes.ts, metier.ts (couverture, échéances, visites, verrou),
-                              generation.ts (passage quotidien des visites, alerte, minuteur)
+                              generation.ts (passage quotidien des visites, alerte, minuteur),
+                              document.ts (PDF du contrat)
     domaines/planning/        routes.ts (événements, types, partage, lien public), metier.ts
                               (module actif, validation des événements)
     domaines/factures/        routes.ts, metier.ts (sélection, adresse, avoirs), pdf.ts, tempsPasse.ts et
