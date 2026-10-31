@@ -25864,8 +25864,11 @@ if (!TEST_DATABASE_URL) {
         ['unité d’un jour différente', forfait(fiches.mo, 'JOUR', 'HORS_CONTRAT', { unite: 'heure' }), 'L’unité de la ligne au jour est « jour ».'],
         ['unité d’une demi-journée différente', forfait(fiches.mo, 'DEMI_JOURNEE', 'HORS_CONTRAT', { unite: 'jour' }), 'L’unité de la ligne à la demi-journée est « demi-journée ».'],
         ['nature fourniture', forfait(fiches.mo, 'JOUR', 'HORS_CONTRAT', { nature: 'FOURNITURE' }), 'Une ligne au jour ou à la demi-journée est de la main-d’œuvre.'],
-        ['quantité nulle', forfait(fiches.mo, 'JOUR', 'HORS_CONTRAT', { quantite: 0 }), 'Ligne au jour ou à la demi-journée : la quantité, en jours ou en demi-journées, est positive, au millième au plus.'],
-        ['quantité au dix-millième', forfait(fiches.mo, 'JOUR', 'HORS_CONTRAT', { quantite: '1.0001' }), 'Ligne au jour ou à la demi-journée : la quantité, en jours ou en demi-journées, est positive, au millième au plus.'],
+        ['quantité nulle', forfait(fiches.mo, 'JOUR', 'HORS_CONTRAT', { quantite: 0 }), 'La quantité d’une ligne au jour ou à la demi-journée est un nombre entier de jours ou de demi-journées, au moins 1 : pour une demi-journée, ajoutez une ligne à la demi-journée.'],
+        ['quantité au dix-millième', forfait(fiches.mo, 'JOUR', 'HORS_CONTRAT', { quantite: '1.0001' }), 'La quantité d’une ligne au jour ou à la demi-journée est un nombre entier de jours ou de demi-journées, au moins 1 : pour une demi-journée, ajoutez une ligne à la demi-journée.'],
+        ['0,5 jour', forfait(fiches.mo, 'JOUR', 'HORS_CONTRAT', { quantite: 0.5 }), 'La quantité d’une ligne au jour ou à la demi-journée est un nombre entier de jours ou de demi-journées, au moins 1 : pour une demi-journée, ajoutez une ligne à la demi-journée.'],
+        ['1,5 demi-journée', forfait(fiches.mo, 'DEMI_JOURNEE', 'HORS_CONTRAT', { quantite: '1,5' }), 'La quantité d’une ligne au jour ou à la demi-journée est un nombre entier de jours ou de demi-journées, au moins 1 : pour une demi-journée, ajoutez une ligne à la demi-journée.'],
+        ['2,001 jours', forfait(fiches.mo, 'JOUR', 'SOUS_CONTRAT', { quantite: '2.001' }), 'La quantité d’une ligne au jour ou à la demi-journée est un nombre entier de jours ou de demi-journées, au moins 1 : pour une demi-journée, ajoutez une ligne à la demi-journée.'],
         ['aussi au temps passé', forfait(fiches.mo, 'JOUR', 'HORS_CONTRAT', { tempsPasse: true }), 'Une ligne au temps passé n’est pas au jour ou à la demi-journée.'],
       ];
       for (const [quoi, ligne, message] of cas) {
@@ -25873,6 +25876,37 @@ if (!TEST_DATABASE_URL) {
         assert.deepEqual([res.status, res.body.error], [400, message], quoi);
       }
       assert.equal(await nbDevis(), avant, 'aucun devis créé');
+    });
+
+    // Quantité entière, au moins 1 (choix par défaut, le plus restrictif, à confirmer : lecture de « Prix à part » et de
+    // « Un forfait compte pour un forfait ») : une ligne au jour de 0,5 vendrait une demi-journée à la moitié du prix du jour.
+    test('quantité entière, au moins 1 : 2 jours et 3 demi-journées acceptés ; 0,5 jour et 1,5 demi-journée refusés, à la modification aussi, et par la base', async () => {
+      const REFUS = 'La quantité d’une ligne au jour ou à la demi-journée est un nombre entier de jours ou de demi-journées, au moins 1 : pour une demi-journée, ajoutez une ligne à la demi-journée.';
+      const devis = await creerDevis('quantité entière', [
+        forfait(fiches.mo, 'JOUR', 'HORS_CONTRAT', { quantite: 2 }), // 600 €
+        forfait(fiches.mo, 'DEMI_JOURNEE', 'HORS_CONTRAT', { quantite: '3.000' }), // 480 €
+      ]);
+      assert.deepEqual([champs(devis, 'quantite', 'totalHt'), devis.totalHt, devis.heuresPrevues], [[[2, 600], [3, 480]], 1080, 26.25]);
+      // À la modification, une ligne gardée ne passe pas à 0,5 jour ni à 1,5 demi-journée ; rien n'est écrit.
+      const avant = JSON.stringify(await prisma.devisLigne.findMany({ where: { devisId: devis.id }, orderBy: { ordre: 'asc' } }));
+      const [jour, demi] = lignesGardees(devis);
+      for (const lignes of [[{ ...jour, quantite: 0.5 }, demi], [jour, { ...demi, quantite: 1.5 }]]) {
+        const res = await envoyer('patch', `/api/devis/${devis.id}`, corpsDevis('quantité entière', lignes));
+        assert.deepEqual([res.status, res.body.error], [400, REFUS], JSON.stringify(lignes.map((l) => l.quantite)));
+      }
+      assert.equal(JSON.stringify(await prisma.devisLigne.findMany({ where: { devisId: devis.id }, orderBy: { ordre: 'asc' } })), avant);
+      // La base refuse une quantité non entière ou nulle, totaux pourtant exacts ; elle accepte une quantité entière.
+      const [ligneJour, ligneDemi] = devis.lignes;
+      for (const [id, data] of [
+        [ligneJour.id, { quantite: 0.5, totalHt: 150, totalTtc: 180 }],
+        [ligneJour.id, { quantite: 2.5, totalHt: 750, totalTtc: 900 }],
+        [ligneDemi.id, { quantite: 1.5, totalHt: 240, totalTtc: 288 }],
+        [ligneDemi.id, { quantite: 0, totalHt: 0, totalTtc: 0 }],
+      ]) {
+        await assert.rejects(prisma.devisLigne.update({ where: { id }, data }), /DevisLigne_forfait_main_oeuvre_check/, JSON.stringify(data));
+      }
+      await prisma.devisLigne.update({ where: { id: ligneJour.id }, data: { quantite: 3, totalHt: 900, totalTtc: 1080 } });
+      assert.equal((await prisma.devisLigne.findUniqueOrThrow({ where: { id: ligneJour.id } })).quantite.toString(), '3');
     });
 
     test('pas de ligne au forfait sur un devis au temps passé, à la création comme au passage au temps passé', async () => {

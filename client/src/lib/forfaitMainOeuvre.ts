@@ -18,6 +18,9 @@ export const UNITES_FORFAIT: Record<ForfaitMainOeuvre, string> = { JOUR: 'jour',
 // Libellé de la quantité, au pluriel : la ligne se compte en jours ou en demi-journées.
 export const LIBELLES_QUANTITE_FORFAIT: Record<ForfaitMainOeuvre, string> = { JOUR: 'Jours', DEMI_JOURNEE: 'Demi-journées' };
 export const REFUS_FORFAIT_TEMPS_PASSE = 'Un devis au temps passé ne porte pas de ligne au jour ou à la demi-journée : retirez-la, ou décochez « Devis au temps passé ».';
+// Quantité entière, au moins 1 (choix par défaut, le plus restrictif, à confirmer : lecture de « Prix à part »
+// et de « Un forfait compte pour un forfait ») ; même message que le serveur, qui refuse les mêmes cas.
+export const REFUS_QUANTITE_FORFAIT = 'La quantité d’une ligne au jour ou à la demi-journée est un nombre entier de jours ou de demi-journées, au moins 1 : pour une demi-journée, ajoutez une ligne à la demi-journée.';
 
 // Prix de vente de la fiche pour ce forfait et ce tarif : forfait jour, ou prix de la demi-journée. Null si la
 // fiche n'est pas une main d'œuvre, ou si ce prix n'est pas réglé (une demi-journée sans prix ne se vend pas).
@@ -41,7 +44,10 @@ export function ligneForfait(fiche: FicheCatalogueDevis, forfait: ForfaitMainOeu
   };
 }
 
-// Pas de ligne au forfait sur un devis au temps passé (le serveur refuse le même cas).
+// Pas de ligne au forfait sur un devis au temps passé, et une quantité entière, au moins 1, sur chaque ligne au
+// forfait (le serveur refuse les mêmes cas).
 export function erreurForfait(auTempsPasse: boolean, lignes: LigneDevisSaisie[]): string | null {
-  return auTempsPasse && lignes.some((ligne) => ligne.forfaitMainOeuvre) ? REFUS_FORFAIT_TEMPS_PASSE : null;
+  const forfaits = lignes.filter((ligne) => ligne.forfaitMainOeuvre);
+  if (auTempsPasse && forfaits.length) return REFUS_FORFAIT_TEMPS_PASSE;
+  return forfaits.some((ligne) => !Number.isInteger(Number(ligne.quantite)) || Number(ligne.quantite) < 1) ? REFUS_QUANTITE_FORFAIT : null;
 }

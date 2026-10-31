@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { formatHeuresPrevues, ligneAEnvoyer, ligneDepuisCatalogue, ligneEnEdition, ligneVierge, type FicheCatalogueDevis } from '../src/lib/catalogueDevis.ts';
-import { FORFAITS, LIBELLES_QUANTITE_FORFAIT, REFUS_FORFAIT_TEMPS_PASSE, TARIFS_FORFAIT, UNITES_FORFAIT, erreurForfait, ligneForfait, prixDuForfait } from '../src/lib/forfaitMainOeuvre.ts';
+import { FORFAITS, LIBELLES_QUANTITE_FORFAIT, REFUS_FORFAIT_TEMPS_PASSE, REFUS_QUANTITE_FORFAIT, TARIFS_FORFAIT, UNITES_FORFAIT, erreurForfait, ligneForfait, prixDuForfait } from '../src/lib/forfaitMainOeuvre.ts';
 
 const fiche: FicheCatalogueDevis = { famille: 'articles', id: 'fiche-1', reference: 'CAB-01', nom: 'Câble', unite: 'm', nature: 'FOURNITURE', prixVenteHt: 2.5, tauxTva: 20, prixAchatHt: 0.8 };
 
@@ -100,4 +100,17 @@ test('forfait : refusé avant l’envoi sur un devis au temps passé', () => {
   assert.equal(erreurForfait(false, [ligne]), null);
   assert.equal(erreurForfait(true, [{ designation: 'Câble', nature: 'FOURNITURE', quantite: 1, prixUnitaireHt: 2, tauxTva: 20 }]), null);
   assert.deepEqual([UNITES_FORFAIT.JOUR, UNITES_FORFAIT.DEMI_JOURNEE, LIBELLES_QUANTITE_FORFAIT.JOUR, LIBELLES_QUANTITE_FORFAIT.DEMI_JOURNEE], ['jour', 'demi-journée', 'Jours', 'Demi-journées']);
+});
+
+test('forfait : une quantité entière, au moins 1, refusée avant l’envoi sinon (0,5 jour, 1,5 demi-journée, 0)', () => {
+  const jour = ligneForfait(mainOeuvre, 'JOUR', 'HORS_CONTRAT')!;
+  const demi = ligneForfait(mainOeuvre, 'DEMI_JOURNEE', 'HORS_CONTRAT')!;
+  assert.equal(erreurForfait(false, [{ ...jour, quantite: 2 }, { ...demi, quantite: 3 }]), null);
+  for (const ligne of [{ ...jour, quantite: 0.5 }, { ...demi, quantite: 1.5 }, { ...jour, quantite: 0 }, { ...demi, quantite: Number('') }]) {
+    assert.equal(erreurForfait(false, [ligne]), REFUS_QUANTITE_FORFAIT, String(ligne.quantite));
+  }
+  // Une ligne ordinaire garde sa quantité au millième.
+  assert.equal(erreurForfait(false, [{ designation: 'Câble', nature: 'FOURNITURE', quantite: 0.5, prixUnitaireHt: 2, tauxTva: 20 }]), null);
+  // Sur un devis au temps passé, le refus de la ligne au forfait passe en premier.
+  assert.equal(erreurForfait(true, [{ ...jour, quantite: 0.5 }]), REFUS_FORFAIT_TEMPS_PASSE);
 });

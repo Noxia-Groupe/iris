@@ -22,7 +22,10 @@ import { REFUS_MAIN_OEUVRE_INACTIVE, REFUS_TVA_MAIN_OEUVRE } from './tempsPasse'
 // fiche, à l'ajout, puis figé ; un prix ou une TVA envoyés et différents des siens sont refusés (400), pour
 // que personne ne croie avoir imposé un prix. Choix par défaut, à confirmer (passation, section 4) : pas de
 // prix d'achat prévu sur la ligne (une main d'œuvre n'en a pas) ; pas de ligne au forfait sur un devis au
-// temps passé ; une main d'œuvre sans prix de la demi-journée ne se vend pas à la demi-journée.
+// temps passé ; une main d'œuvre sans prix de la demi-journée ne se vend pas à la demi-journée ; la quantité
+// est un nombre entier de jours ou de demi-journées, au moins 1 (le plus restrictif) : lecture de « Prix à
+// part » (une demi-journée a son prix, et non la moitié du forfait jour) et de « Un forfait compte pour un
+// forfait ». Une ligne au jour de 0,5 vendrait une demi-journée à la moitié du prix du jour.
 
 export type ForfaitMainOeuvre = 'JOUR' | 'DEMI_JOURNEE';
 export type TarifForfait = 'HORS_CONTRAT' | 'SOUS_CONTRAT';
@@ -43,7 +46,7 @@ export const REFUS_TARIF_FORFAIT = 'Tarif de la ligne au jour ou à la demi-jour
 export const REFUS_FICHE_FORFAIT = 'Une ligne au jour ou à la demi-journée reprend une main d’œuvre du catalogue (prestation marquée main d’œuvre).';
 export const REFUS_NATURE_FORFAIT = 'Une ligne au jour ou à la demi-journée est de la main-d’œuvre.';
 export const REFUS_PRIX_ACHAT_FORFAIT = 'Une ligne au jour ou à la demi-journée n’a pas de prix d’achat prévu : une main d’œuvre n’en a pas, son coût est celui des heures des intervenants.';
-export const REFUS_QUANTITE_FORFAIT = 'Ligne au jour ou à la demi-journée : la quantité, en jours ou en demi-journées, est positive, au millième au plus.';
+export const REFUS_QUANTITE_FORFAIT = 'La quantité d’une ligne au jour ou à la demi-journée est un nombre entier de jours ou de demi-journées, au moins 1 : pour une demi-journée, ajoutez une ligne à la demi-journée.';
 export const REFUS_CHANGEMENT_FORFAIT = 'La ligne au jour ou à la demi-journée garde sa main d’œuvre, son forfait, son tarif et son prix : pour en changer, retirez-la et ajoutez-en une nouvelle.';
 export const REFUS_NATURE_LIGNE_FORFAIT = 'Une ligne existante garde sa nature : une ligne ordinaire ne devient pas une ligne au jour ou à la demi-journée, ni l’inverse. Retirez-la et ajoutez-en une nouvelle.';
 export const REFUS_FORFAIT_TEMPS_PASSE = 'Un devis au temps passé ne porte pas de ligne au jour ou à la demi-journée : sa main d’œuvre est la ligne au temps passé.';
@@ -77,9 +80,10 @@ export function lireLigneForfait(
     tarif = item.tarifForfait as TarifForfait;
   } else if (!ligneId) throw new ForfaitSaisieError(REFUS_TARIF_FORFAIT);
   if (catalogue ? catalogue.famille !== 'prestations' : !ligneId) throw new ForfaitSaisieError(REFUS_FICHE_FORFAIT);
-  // Au millième, comme les autres lignes ; strictement positive.
+  // Un nombre entier, au moins 1 (« 2 » ou « 2.000 ») : un forfait compte pour un forfait, et la demi-journée
+  // a son prix à part. La base le vérifie aussi (DevisLigne_forfait_main_oeuvre_check).
   const quantite = nombreDecimalNonNegatif(item.quantite, 9, false, 3);
-  if (quantite === null) throw new ForfaitSaisieError(REFUS_QUANTITE_FORFAIT);
+  if (quantite === null || !Number.isInteger(quantite) || quantite < 1) throw new ForfaitSaisieError(REFUS_QUANTITE_FORFAIT);
   if (renseigne(item.nature) && item.nature !== 'MAIN_OEUVRE') throw new ForfaitSaisieError(REFUS_NATURE_FORFAIT);
   if (renseigne(item.unite) && String(item.unite).trim() !== UNITES_FORFAIT[forfait]) throw new ForfaitSaisieError(refusUniteForfait(forfait));
   const prixUnitaireHt = renseigne(item.prixUnitaireHt) ? nombreDecimalNonNegatif(item.prixUnitaireHt, 10, true) : null;

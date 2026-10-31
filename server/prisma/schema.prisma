@@ -624,8 +624,9 @@ model DevisLigne {
   // 30-10-2026, « Option de la main d'œuvre ») : reprise d'une main d'œuvre active du catalogue au forfait
   // (forfaitMainOeuvre : JOUR | DEMI_JOURNEE) et au tarif choisis (tarifForfait : HORS_CONTRAT |
   // SOUS_CONTRAT), au prix fixé par le serveur depuis la fiche (forfait jour, ou prix de la demi-journée,
-  // « Prix à part ») puis figé, l'unité « jour » ou « demi-journée », et pour minutes prévues par unité les
-  // heures par jour de la main d'œuvre × 60, ou × 30 (point 16 de la nuit du 26 au 27-10-2026). Tous deux
+  // « Prix à part ») puis figé, l'unité « jour » ou « demi-journée », une quantité entière, au moins 1 (choix
+  // par défaut, à confirmer), et pour minutes prévues par unité les heures par jour de la main d'œuvre × 60,
+  // ou × 30 (point 16 de la nuit du 26 au 27-10-2026). Tous deux
   // vides sur une autre ligne ; une contrainte CHECK les lie. Le PDF n'en imprime que l'unité ; le contenu
   // signé les porte quand ils sont renseignés.
   forfaitMainOeuvre   String?

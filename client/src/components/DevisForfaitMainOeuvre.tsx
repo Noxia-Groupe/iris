@@ -46,7 +46,7 @@ export function ChoixForfaitMainOeuvre({ onAjouter }: { onAjouter: (ligne: Ligne
 
   return <fieldset className="border rounded-lg p-3 space-y-2 bg-sky-50/40" aria-labelledby="titre-forfait-main-oeuvre">
     <legend id="titre-forfait-main-oeuvre" className="text-sm font-medium flex items-center gap-2 px-1"><CalendarDays size={16} aria-hidden="true"/>Main d’œuvre au jour ou à la demi-journée</legend>
-    <p className="text-xs text-gray-600">Le prix est celui de la main d’œuvre au catalogue (forfait jour ou prix de la demi-journée), figé sur la ligne ; la quantité se compte en jours ou en demi-journées.</p>
+    <p className="text-xs text-gray-600">Le prix est celui de la main d’œuvre au catalogue (forfait jour ou prix de la demi-journée), figé sur la ligne ; la quantité se compte en jours ou en demi-journées entiers : une demi-journée s’ajoute en ligne à la demi-journée.</p>
     {erreur && <p role="alert" className="text-sm text-red-600">{erreur}</p>}
     {mainsOeuvre && mainsOeuvre.length === 0 && <p role="status" className="text-sm text-gray-600">Aucune main d’œuvre active au catalogue : l’administration la crée dans Catalogue &gt; Main d’œuvre.</p>}
     <div className="grid gap-2 sm:grid-cols-3">
@@ -79,7 +79,8 @@ export function ChoixForfaitMainOeuvre({ onAjouter }: { onAjouter: (ligne: Ligne
 }
 
 // Ligne au jour ou à la demi-journée dans le formulaire : désignation et quantité modifiables, prix, TVA et
-// unité fixés par la main d'œuvre, affichés sans être saisis, comme la ligne au temps passé.
+// unité fixés par la main d'œuvre, affichés sans être saisis, comme la ligne au temps passé. La quantité est un
+// nombre entier de jours ou de demi-journées, au moins 1 : une demi-journée s'ajoute en ligne à la demi-journée.
 export function LigneForfaitMainOeuvre({ ligne, onDesignation, onQuantite, onRetirer }: {
   ligne: LigneDevisSaisie;
   onDesignation: (valeur: string) => void;
@@ -93,7 +94,7 @@ export function LigneForfaitMainOeuvre({ ligne, onDesignation, onQuantite, onRet
       <span className="block text-xs text-gray-500 mt-0.5">Main d’œuvre {forfait === 'JOUR' ? 'au jour' : 'à la demi-journée'}, {tarif}{ligne.reference ? ` · Réf. ${ligne.reference}` : ''}</span>
     </label>
     <div className="grid gap-2 items-end grid-cols-2 md:grid-cols-[150px_1fr_1fr_1fr_auto]">
-      <label className="text-sm">{LIBELLES_QUANTITE_FORFAIT[forfait]}<input required min="0.001" step="0.001" type="number" inputMode="decimal" className="mt-1 w-full border rounded px-2 py-2" value={ligne.quantite} onChange={(e) => onQuantite(e.target.value)}/></label>
+      <label className="text-sm">{LIBELLES_QUANTITE_FORFAIT[forfait]}<input required min="1" step="1" type="number" inputMode="numeric" className="mt-1 w-full border rounded px-2 py-2" value={ligne.quantite} onChange={(e) => onQuantite(e.target.value)}/></label>
       <p className="text-sm"><span className="block text-gray-600">{forfait === 'JOUR' ? 'Prix du jour' : 'Prix de la demi-journée'}</span><strong data-testid="prix-forfait">{formatPrix(ligne.prixUnitaireHt)} HT</strong></p>
       <p className="text-sm"><span className="block text-gray-600">TVA</span>{String(ligne.tauxTva).replace('.', ',')} %</p>
       <p className="text-sm"><span className="block text-gray-600">Unité</span>{ligne.unite}</p>

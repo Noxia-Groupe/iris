@@ -27,7 +27,10 @@ ALTER TABLE "CataloguePrestation" ADD CONSTRAINT "CataloguePrestation_demi_journ
 -- du catalogue (prestation), de la main-d'œuvre, jamais au temps passé, avec son unité (« jour » ou
 -- « demi-journée »), ses minutes prévues par unité (les heures par jour de la main d'œuvre × 60, ou × 30,
 -- strictement positives), sans prix d'achat prévu (choix par défaut, à confirmer : une main d'œuvre n'a pas
--- de prix d'achat), et des totaux exacts, calculés comme ceux de la ligne au temps passé : HT = quantité ×
+-- de prix d'achat), d'une quantité entière, au moins 1 (choix par défaut, le plus restrictif, à confirmer :
+-- lecture de « Prix à part » et de « Un forfait compte pour un forfait » ; une ligne au jour de 0,5 vendrait
+-- une demi-journée à la moitié du prix du jour), et des totaux exacts, calculés comme ceux de la ligne au
+-- temps passé : HT = quantité ×
 -- prix unitaire et TTC = HT × (100 + TVA) / 100, chacun arrondi au centime, moitié vers le haut. Chaque terme
 -- est écrit pour ne jamais valoir NULL, qu'une contrainte CHECK laisserait passer.
 ALTER TABLE "DevisLigne" ADD COLUMN "forfaitMainOeuvre" TEXT,
@@ -41,7 +44,7 @@ ALTER TABLE "DevisLigne" ADD CONSTRAINT "DevisLigne_forfait_main_oeuvre_check" C
     AND "catalogueId" IS NOT NULL AND "reference" IS NOT NULL
     AND "unite" IS NOT NULL AND "unite" = CASE "forfaitMainOeuvre" WHEN 'JOUR' THEN 'jour' ELSE 'demi-journée' END
     AND "minutesPrevuesUnite" IS NOT NULL AND "minutesPrevuesUnite" > 0
-    AND "prixAchatUnitaireHt" IS NULL AND "quantite" > 0
+    AND "prixAchatUnitaireHt" IS NULL AND "quantite" >= 1 AND "quantite" = trunc("quantite")
     AND "totalHt" = round("quantite" * "prixUnitaireHt", 2)
     AND "totalTtc" = round("totalHt" * (100 + "tauxTva") / 100, 2)
   ELSE false
