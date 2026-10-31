@@ -13,7 +13,7 @@ import { raisonSocialeActuelleImprimee } from './identite';
 // Documents concernés : ceux qui ont leur PDF. Le devis (lot 6a-2) et la facture ou l'avoir émis
 // (lot 6a-1), depuis le lot 6a-3 ; le compte rendu d'une intervention (lot 6a-4a) et le contrat de
 // maintenance (lot 6a-4b), depuis le lot 6a-4d (migration 20261031120000). L'envoi du rapport de
-// chantier viendra avec le lot 6a-4c.
+// chantier viendra avec le lot 6a-4e, après son PDF (lot 6a-4c).
 
 export const CANAL_MESSAGERIE = 'MESSAGERIE';
 

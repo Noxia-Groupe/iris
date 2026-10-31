@@ -14,7 +14,7 @@ ALTER TABLE "EnvoiDocument" ADD COLUMN "contratMaintenanceId" TEXT;
 
 -- Exactement un document : un devis, une facture (un avoir est une facture de type AVOIR), une
 -- intervention (son compte rendu) ou un contrat de maintenance. Même nom que celle du lot 6a-3.
--- L'envoi du rapport de chantier viendra avec le lot 6a-4c et sa propre migration.
+-- L'envoi du rapport de chantier viendra avec le lot 6a-4e et sa propre migration.
 ALTER TABLE "EnvoiDocument" DROP CONSTRAINT "EnvoiDocument_un_document";
 ALTER TABLE "EnvoiDocument" ADD CONSTRAINT "EnvoiDocument_un_document" CHECK (num_nonnulls("devisId", "factureId", "interventionId", "contratMaintenanceId") = 1);
 
