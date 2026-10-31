@@ -25525,5 +25525,131 @@ if (!TEST_DATABASE_URL) {
       await signer(devis.id);
       assert.equal(await heuresVenduesEnBase((await convertir(devis.id)).id), '6.00');
     });
+
+    // Audit n° 10 de #376 (montants) : copie figée d'une ligne gardée dont la nature fait l'aller-retour. Le test des lignes
+    // qui passent de fourniture à main-d'œuvre (audit n° 7) ne change la nature que dans ce sens. L'écran laisse aussi passer
+    // une ligne de main-d'œuvre en fourniture, puis la ramener. Ici, les lignes d'un devis antérieur complété après le lot
+    // passent en fourniture, puis reviennent en main-d'œuvre : chacune garde la copie de son ajout, au devis comme au
+    // chantier.
+    test('des lignes gardées passées en fourniture puis revenues en main-d’œuvre gardent la copie de leur ajout : ligne antérieure sa quantité, prestation sa durée, prestation sans durée et article 0, jusqu’au chantier', async () => {
+      // Devis enregistré avant le lot : une mise en service, colonne vide, date antérieure à la migration.
+      const devis = await creerDevis('aller-retour', [duCatalogue(fiches.mes, 'prestations', { quantite: 2 })]); // antérieure : 2 h
+      await prisma.devisLigne.updateMany({ where: { devisId: devis.id }, data: { minutesPrevuesUnite: null } });
+      await prisma.devis.update({ where: { id: devis.id }, data: { createdAt: new Date('2026-10-15T08:00:00.000Z') } });
+      const garder = (lignes, modifier = () => ({})) => lignes.map((l, i) => ({ ligneId: l.id, designation: l.designation, nature: l.nature, quantite: l.quantite, prixUnitaireHt: l.prixUnitaireHt, tauxTva: l.tauxTva, unite: l.unite, catalogueFamille: l.catalogueFamille, catalogueId: l.catalogueId, ...modifier(l, i) }));
+      const complete = await envoyer('patch', `/api/devis/${devis.id}`, { clientId: client.id, objet: devis.objet, lignes: [
+        ...garder(devis.lignes),
+        duCatalogue(fiches.mes, 'prestations', { quantite: 2 }), // 2 × 90 min = 3 h
+        duCatalogue(fiches.sansduree, 'prestations', { quantite: 3 }), // sans durée : 0 h
+        duCatalogue(fiches.article, 'articles', { nature: 'MAIN_OEUVRE', quantite: 4 }), // article : 0 h
+        duCatalogue(fiches.mes, 'prestations', { nature: 'FOURNITURE', quantite: 1 }), // 90 min, en fourniture : 0 h
+      ] });
+      assert.equal(complete.status, 200, JSON.stringify(complete.body));
+      assert.deepEqual([minutes(complete.body), complete.body.heuresPrevues], [[null, 90, 0, 0, 90], 5]);
+      // Aller : les cinq lignes, gardées, en fourniture ; la dernière, déjà en fourniture, change de quantité.
+      const aller = await envoyer('patch', `/api/devis/${devis.id}`, { clientId: client.id, objet: devis.objet, lignes: garder(complete.body.lignes, (l, i) => ({ nature: 'FOURNITURE', ...(i === 4 ? { quantite: 2 } : {}) })) });
+      assert.equal(aller.status, 200, JSON.stringify(aller.body));
+      assert.deepEqual([minutes(aller.body), aller.body.heuresPrevues], [[null, 90, 0, 0, 90], 0]);
+      // Retour : les cinq en main-d'œuvre. 2 h (antérieure) + 2 × 90 min + 0 + 0 + 2 × 90 min = 8 h. On aurait 14 h si le
+      // passage en fourniture vidait les minutes, 13 h si toute ligne gardée en fourniture les perdait, et 3 h s'il les
+      // mettait à 0.
+      const retour = await envoyer('patch', `/api/devis/${devis.id}`, { clientId: client.id, objet: devis.objet, lignes: garder(aller.body.lignes, () => ({ nature: 'MAIN_OEUVRE' })) });
+      assert.equal(retour.status, 200, JSON.stringify(retour.body));
+      assert.deepEqual([minutes(retour.body), retour.body.heuresPrevues], [[null, 90, 0, 0, 90], 8]);
+      await signer(devis.id);
+      assert.equal(await heuresVenduesEnBase((await convertir(devis.id)).id), '8.00');
+    });
+
+    // Audit n° 10 de #376 (montants) : copie figée quand la fiche change de nature. Les tests précédents ne modifient que la
+    // durée des fiches. Or le catalogue fait passer une prestation en main d'œuvre, ce qui efface sa durée, et ramène une
+    // main d'œuvre en prestation ordinaire, avec une durée. Une ligne déjà au devis garde la copie de son ajout (90 minutes,
+    // ou vide : sa quantité), en modification, duplication et révision, jusqu'au chantier ; seule une ligne ajoutée ensuite
+    // suit la nouvelle nature de sa fiche.
+    test('une fiche passée en main d’œuvre, ou ramenée en prestation ordinaire, ne change pas les lignes déjà au devis : modification, duplication, révision, jusqu’au chantier', async () => {
+      await prestation('vers-mo', { unite: 'forfait', prixVenteHt: '250', dureeIndicativeMin: 90 });
+      await prestation('depuis-mo', { estMainOeuvre: true, prixVenteHt: '45', prixJourHorsContratHt: '300', prixHeureSousContratHt: '40', prixJourSousContratHt: '280', heuresParJour: '7' });
+      const versMo = fiches['vers-mo'], depuisMo = fiches['depuis-mo'];
+      const devis = await creerDevis('nature de la fiche', [
+        duCatalogue(versMo, 'prestations', { quantite: 2 }), // 2 × 90 min = 3 h
+        duCatalogue(depuisMo, 'prestations', { quantite: 3 }), // main d'œuvre à l'heure : 3 h
+      ]);
+      assert.deepEqual([minutes(devis), devis.heuresPrevues], [[90, null], 6]);
+      const passage = await envoyer('put', `/api/catalogue/prestations/${versMo.id}`, { estMainOeuvre: true, reference: versMo.reference, nom: versMo.nom, tauxTva: '20', prixVenteHt: '45', prixJourHorsContratHt: '300', prixHeureSousContratHt: '40', prixJourSousContratHt: '280', heuresParJour: '7' });
+      assert.equal(passage.status, 200, JSON.stringify(passage.body));
+      const retour = await envoyer('put', `/api/catalogue/prestations/${depuisMo.id}`, { estMainOeuvre: false, reference: depuisMo.reference, nom: depuisMo.nom, tauxTva: '20', unite: 'forfait', prixVenteHt: '45', dureeIndicativeMin: 45 });
+      assert.equal(retour.status, 200, JSON.stringify(retour.body));
+      assert.deepEqual([passage.body.estMainOeuvre, passage.body.dureeIndicativeMin, retour.body.estMainOeuvre, retour.body.dureeIndicativeMin], [true, null, false, 45]);
+      // Les deux lignes, gardées, renvoyées avec leur fiche et une nouvelle quantité, comme à l'écran ; deux lignes ajoutées.
+      const garde = devis.lignes.map((l, i) => ({ ligneId: l.id, designation: l.designation, nature: l.nature, quantite: [4, 2][i], prixUnitaireHt: l.prixUnitaireHt, tauxTva: l.tauxTva, unite: l.unite, catalogueFamille: l.catalogueFamille, catalogueId: l.catalogueId }));
+      const modifie = await envoyer('patch', `/api/devis/${devis.id}`, { clientId: client.id, objet: devis.objet, lignes: [
+        ...garde,
+        duCatalogue(passage.body, 'prestations', { quantite: 1 }), // désormais main d'œuvre : 1 h
+        duCatalogue(retour.body, 'prestations', { quantite: 2 }), // désormais 45 min : 1,5 h
+      ] });
+      assert.equal(modifie.status, 200, JSON.stringify(modifie.body));
+      // 4 × 90 min + 2 h (gardées) + 1 h + 2 × 45 min (ajoutées) = 10,5 h. On aurait 8,5 h si la ligne gardée d'une fiche
+      // devenue main d'œuvre comptait sa quantité, et 10 h si celle d'une fiche ramenée en prestation prenait sa durée.
+      assert.deepEqual([minutes(modifie.body), modifie.body.heuresPrevues], [[90, null, null, 45], 10.5]);
+      const duplicata = await envoyer('post', `/api/devis/${devis.id}/duplication`);
+      assert.equal(duplicata.status, 201, JSON.stringify(duplicata.body));
+      assert.deepEqual([minutes(duplicata.body), duplicata.body.heuresPrevues], [[90, null, null, 45], 10.5]);
+      await signer(devis.id);
+      const revision = await envoyer('post', `/api/devis/${devis.id}/revisions`);
+      assert.equal(revision.status, 201, JSON.stringify(revision.body));
+      assert.deepEqual([minutes(revision.body), revision.body.heuresPrevues], [[90, null, null, 45], 10.5]);
+      await signer(revision.body.id);
+      assert.equal(await heuresVenduesEnBase((await convertir(revision.body.id)).id), '10.50');
+    });
+
+    // Audit n° 10 de #376 (montants) : conséquence documentée de la lecture de « Durée indicative » (passation, section 4 ;
+    // corps de la PR) : une prestation sans durée compte 0 heure vendue, et un chantier qui n'a que de telles lignes en
+    // reçoit 0 (l'alerte « heures dépassées » s'allume alors dès la première heure saisie). Les tests précédents ne
+    // convertissent que des devis qui comptent des heures par ailleurs. Ici, un devis dont les lignes de main-d'œuvre ne
+    // comptent aucune heure (prestations sans durée, vendues à l'heure ou au forfait, article passé en main-d'œuvre) ouvre
+    // son chantier à 0 heure vendue, et non à la somme de leurs quantités (11 h), ni sur un refus.
+    test('un devis dont aucune ligne de main-d’œuvre ne compte d’heure ouvre son chantier à 0 heure vendue, et non à la somme des quantités', async () => {
+      await prestation('heure-sans-duree', { unite: 'heure', prixVenteHt: '55' });
+      const devis = await creerDevis('aucune heure', [
+        duCatalogue(fiches['heure-sans-duree'], 'prestations', { quantite: 4 }), // vendue à l'heure, sans durée : 0 h (4 h avant ce lot)
+        duCatalogue(fiches.sansduree, 'prestations', { quantite: 5 }), // au forfait, sans durée : 0 h (5 h avant ce lot)
+        duCatalogue(fiches.article, 'articles', { nature: 'MAIN_OEUVRE', quantite: 2 }), // article : 0 h (2 h avant ce lot)
+        duCatalogue(fiches.article, 'articles', { quantite: 3 }), // fourniture : 0 h
+      ]);
+      assert.deepEqual([minutes(devis), devis.heuresPrevues], [[0, 0, 0, 0], 0]);
+      await signer(devis.id);
+      const chantier = await convertir(devis.id);
+      assert.equal(chantier.heuresVendues, 0);
+      assert.equal(await heuresVenduesEnBase(chantier.id), '0.00');
+    });
+
+    // Audit n° 10 de #376 (montants) : « une valeur envoyée par l'écran ou une clé d'intégration est ignorée » (passation,
+    // section 4). Les tests précédents n'envoient des minutes qu'en session. Une clé d'intégration de portée devis:write crée
+    // et modifie un devis par /api/v1 : ses minutes envoyées sont ignorées sur chaque nature de ligne. Des heures envoyées à
+    // la conversion le sont aussi : le nombre d'heures n'est pas saisi (point 16, option écartée
+    // « Nombre d'heures saisi sur le devis »). C'est vrai au devis comme au chantier.
+    test('des minutes envoyées par une clé d’intégration, et des heures envoyées à la conversion, sont ignorées, jusqu’au chantier', async () => {
+      const cle = await envoyer('post', '/api/admin/api-keys', { nom: `TEST heures prévues écriture ${suffixe}`, scopes: ['devis:read', 'devis:write'] });
+      assert.ok(cle.body.apiKey, JSON.stringify(cle.body));
+      const parCle = (methode, chemin, corps) => request(app)[methode](chemin).set('Authorization', `Bearer ${cle.body.apiKey}`).send(corps);
+      const cree = await parCle('post', '/api/v1/devis', { clientId: client.id, objet: `TEST Heures prévues par clé ${suffixe}`, lignes: [
+        duCatalogue(fiches.mes, 'prestations', { quantite: 2, minutesPrevuesUnite: 10 }), // 2 × 90 min = 3 h, et non 20 min
+        duCatalogue(fiches.sansduree, 'prestations', { quantite: 2, minutesPrevuesUnite: 45 }), // 0 h, et non 1,5 h
+        duCatalogue(fiches.mo, 'prestations', { quantite: 1, minutesPrevuesUnite: 30 }), // 1 h, et non 0,5 h
+        { designation: 'TEST Main-d’œuvre saisie à la main par une clé', nature: 'MAIN_OEUVRE', quantite: 2, prixUnitaireHt: 50, tauxTva: 20, minutesPrevuesUnite: 30 }, // 2 h, et non 1 h
+        duCatalogue(fiches.article, 'articles', { nature: 'MAIN_OEUVRE', quantite: 3, minutesPrevuesUnite: 60 }), // 0 h, et non 3 h
+      ] });
+      assert.equal(cree.status, 201, JSON.stringify(cree.body));
+      assert.deepEqual([minutes(cree.body), cree.body.heuresPrevues], [[90, 0, null, null, 0], 6]);
+      // Les cinq lignes, gardées, renvoyées par la clé avec 15 minutes : toujours 6 h.
+      const garde = cree.body.lignes.map((l) => ({ ligneId: l.id, designation: l.designation, nature: l.nature, quantite: l.quantite, prixUnitaireHt: l.prixUnitaireHt, tauxTva: l.tauxTva, unite: l.unite, catalogueFamille: l.catalogueFamille, catalogueId: l.catalogueId, minutesPrevuesUnite: 15 }));
+      const modifie = await parCle('patch', `/api/v1/devis/${cree.body.id}`, { clientId: client.id, objet: cree.body.objet, lignes: garde });
+      assert.equal(modifie.status, 200, JSON.stringify(modifie.body));
+      assert.deepEqual([minutes(modifie.body), modifie.body.heuresPrevues], [[90, 0, null, null, 0], 6]);
+      await signer(cree.body.id);
+      const converti = await parCle('post', `/api/v1/devis/${cree.body.id}/convertir`, { cible: 'CHANTIER', heuresVendues: 999, heuresPrevues: 999 });
+      assert.equal(converti.status, 201, JSON.stringify(converti.body));
+      assert.equal(converti.body.heuresVendues, 6);
+      assert.equal(await heuresVenduesEnBase(converti.body.id), '6.00');
+    });
   });
 }
