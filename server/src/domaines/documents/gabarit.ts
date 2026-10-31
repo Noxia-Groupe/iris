@@ -107,6 +107,16 @@ export function replierTexte(texte: string, largeur: number) {
   if (courante || !lignes.length) lignes.push(courante); return lignes;
 }
 
+// Nom du fichier d'un document dont l'intitulé est saisi librement (contrat de maintenance, lot 6a-4b ;
+// rapport de chantier, lot 6a-4c) : `<préfixe>-<intitulé>.pdf`, l'intitulé réduit aux lettres sans
+// accent, aux chiffres, au tiret et au tiret bas, toute autre suite de caractères devenant un tiret,
+// sans tiret en tête ni en fin ; l'identifiant du document si rien n'en reste. Le même calcul nomme le
+// fichier téléchargé à l'écran (nomFichierPdf de client/src/lib/documentPdf.ts).
+export function nomFichierPdf(prefixe: string, intitule: string, id: string) {
+  const reduit = intitule.normalize('NFD').replace(/\p{M}/gu, '').replace(/[^A-Za-z0-9_-]+/g, '-').replace(/-{2,}/g, '-').replace(/^-+|-+$/g, '');
+  return `${prefixe}-${reduit || id}.pdf`;
+}
+
 function lignesIdentite(identite: IdentiteImprimee) {
   const localite = [identite.codePostal, identite.ville].filter(Boolean).join(' ');
   return [

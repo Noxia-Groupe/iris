@@ -18,6 +18,7 @@ import { archivagesRestaurables } from '../lib/archivesRestaurables';
 import { changementAffaire, titreEntreeJournal } from '../lib/journalChantier';
 import { AlertesChantier } from '../components/AlertesChantier';
 import { CoutsSuitesChantier } from '../components/CoutsSuitesChantier';
+import { RapportClientChantier } from '../components/RapportClientChantier';
 import { ancienneteSaisie, hypotheseCoutHoraire, hypotheseMateriel, type EstimationMarge } from '../lib/suiviChantiers';
 import { sommeExacte, differenceExacte, arrondiEuro, arrondiCentime } from '../lib/montants';
 
@@ -442,7 +443,7 @@ const ChantierDetail = () => {
     if (!printRef.current || !chantier) return;
     const opt = {
       margin: 0.5,
-      filename: `Rapport_${chantier.nom}.pdf`,
+      filename: `Rapport-interne_${chantier.nom}.pdf`,
       image: { type: 'jpeg' as const, quality: 0.98 },
       html2canvas: { scale: 2, useCORS: true },
       // Format A4, le format papier attendu en France (lot P0, B-61), et non le format américain.
@@ -683,9 +684,9 @@ const ChantierDetail = () => {
         {/* Zone exportable en PDF */}
         <div ref={printRef} className="bg-white p-6 sm:p-8 rounded-2xl shadow-md border border-gray-100 relative">
 
-          {/* Barre d'actions : dans le flux sur téléphone, au-dessus du titre ; en haut à droite au-delà,
-              où le titre lui laisse sa place (sm:pr-56, ou sm:pr-28 pour le seul bouton PDF). */}
-          <div className="mb-4 flex flex-wrap justify-end gap-2 sm:absolute sm:top-6 sm:right-6 sm:mb-0">
+          {/* Barre d'actions : dans le flux à toute largeur, au-dessus du titre. Le « Rapport interne (PDF) » met la fiche en page sur
+              la largeur d'une page A4 (environ 700 px) avec les règles de la largeur de l'écran : un retrait du titre l'y écraserait. */}
+          <div className="mb-4 flex flex-wrap justify-end gap-2">
             {canEditChantier && (
               <button
                 onClick={startEditChantier}
@@ -695,11 +696,12 @@ const ChantierDetail = () => {
               </button>
             )}
             <button onClick={handleExportPDF} className="flex items-center gap-2 bg-gray-800 text-white px-4 py-2 rounded-lg font-semibold hover:bg-gray-700 transition-colors shadow-sm text-sm">
-              <FileDown size={16} /> PDF
+              <FileDown size={16} /> Rapport interne (PDF)
             </button>
+            <RapportClientChantier chantier={chantier} />
           </div>
 
-          <div className={`mb-8 ${canEditChantier ? 'sm:pr-56' : 'sm:pr-28'}`}>
+          <div className="mb-8">
             <div className="flex items-center gap-3 flex-wrap mb-2">
               <h2 className="text-3xl font-extrabold text-primary-dark tracking-tight m-0">{chantier.nom}</h2>
               <span className={`text-xs font-bold uppercase tracking-wide px-2.5 py-1 rounded-full ${isTermine ? 'bg-gray-100 text-gray-500' : 'bg-blue-100 text-accent'}`}>

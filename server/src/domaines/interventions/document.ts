@@ -1,9 +1,26 @@
 import type { Prisma } from '@prisma/client';
 import { dateSeuleEnJourCivil } from '../../commun/dates';
 import { formaterAdresseFacturation } from '../factures/metier';
-import { ouvrirDocumentPdf, type IdentiteImprimee } from '../documents/gabarit';
+import { ouvrirDocumentPdf, type DocumentPdf, type IdentiteImprimee } from '../documents/gabarit';
 import { traceSignatureValide, type TraceSignature } from './comptesRendus';
 import { dateHeureFrancaiseEntreprise, jourFrancaisEntreprise } from './dateHeure';
+
+// Comptes rendus d'une intervention tels qu'ils s'impriment, dans l'ordre de leur enregistrement :
+// le texte, la date, l'auteur et la signature, rien d'autre. Sélection commune au PDF du compte rendu
+// (lot 6a-4a) et au rapport de chantier remis au client (lot 6a-4c), qui la reprend telle quelle.
+export const RAPPORTS_IMPRIMES = {
+  select: {
+    contenu: true, createdAt: true, auteur: { select: { name: true } },
+    signature: { select: { signataire: true, accepteLe: true, trace: true, empreinte: true } },
+  },
+  orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+} satisfies Prisma.Intervention$rapportsArgs;
+
+export type RapportImprime = Prisma.InterventionRapportGetPayload<{ select: typeof RAPPORTS_IMPRIMES.select }>;
+
+// Statut d'une intervention imprimé en toutes lettres : visites du PDF du contrat (lot 6a-4b) et
+// interventions du rapport de chantier (lot 6a-4c).
+export const STATUT_INTERVENTION: Record<string, string> = { A_PLANIFIER: 'à planifier', PLANIFIEE: 'planifiée', EN_COURS: 'en cours', TERMINEE: 'terminée', ANNULEE: 'annulée' };
 
 // PDF du compte rendu d'intervention (lot 6a-4a), sur le modèle commun du lot 6a-1. Un seul PDF par
 // intervention, avec tous ses comptes rendus, dans l'ordre de leur enregistrement. L'appelant fournit
@@ -19,13 +36,7 @@ export const INTERVENTION_IMPRIMEE = {
   // Le contact par son seul nom, sans téléphone ni courriel (choix le plus restrictif).
   contact: { select: { prenom: true, nom: true } },
   affectations: { select: { intervenant: { select: { nom: true } } } },
-  rapports: {
-    select: {
-      contenu: true, createdAt: true, auteur: { select: { name: true } },
-      signature: { select: { signataire: true, accepteLe: true, trace: true, empreinte: true } },
-    },
-    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-  },
+  rapports: RAPPORTS_IMPRIMES,
 } satisfies Prisma.InterventionSelect;
 
 export type InterventionImprimee = Prisma.InterventionGetPayload<{ select: typeof INTERVENTION_IMPRIMEE }>;
@@ -99,7 +110,23 @@ export async function rendreCompteRenduPdf({ intervention, identite, fuseau }: {
   pdf.fillColor(couleur);
   ligne('Comptes rendus', { taille: 13 });
   pdf.fillColor('#000000');
-  for (const rapport of intervention.rapports) {
+  rendreComptesRendus({ pdf, ligne, rapports: intervention.rapports, statut: intervention.statut, fuseau });
+  return document.terminer();
+}
+
+// Comptes rendus d'une intervention, dans l'ordre reçu : date et heure au fuseau de la société,
+// auteur, texte, et signature (signataire, date d'acceptation, tracé vectoriel, empreinte) ; puis,
+// pour une intervention terminée dont aucun compte rendu n'est signé, « Non signé par le client ».
+// Rendu commun au PDF du compte rendu (lot 6a-4a) et au rapport de chantier (lot 6a-4c) : chacun
+// imprime son propre titre avant.
+export function rendreComptesRendus({ pdf, ligne, rapports, statut, fuseau }: {
+  pdf: PDFKit.PDFDocument;
+  ligne: DocumentPdf['ligne'];
+  rapports: RapportImprime[];
+  statut: string;
+  fuseau: string;
+}): void {
+  for (const rapport of rapports) {
     pdf.moveDown(0.5);
     pdf.font('Helvetica-Bold');
     ligne(`${dateHeureFrancaiseEntreprise(rapport.createdAt, fuseau)} — ${rapport.auteur.name}`, { taille: 10 });
@@ -121,9 +148,8 @@ export async function rendreCompteRenduPdf({ intervention, identite, fuseau }: {
   }
   // Au niveau de l'intervention, et non de chaque compte rendu ; le motif de la clôture sans
   // signature, texte libre du journal SAV, n'est pas imprimé.
-  if (intervention.statut === 'TERMINEE' && !intervention.rapports.some((rapport) => rapport.signature)) {
+  if (statut === 'TERMINEE' && !rapports.some((rapport) => rapport.signature)) {
     pdf.moveDown();
     ligne('Non signé par le client', { taille: 11 });
   }
-  return document.terminer();
 }
