@@ -22,7 +22,7 @@ Iris est un ERP français natif pour métiers techniques, **en développement et
   - **Audit indépendant, à la demande de Nelson.** Une IA indépendante de celle qui a codé, sollicitée manuellement par Nelson qui relaie ses retours, peut auditer une PR avant ou après sa fusion. Ses remarques sont traitées comme celles de l'audit interne, au besoin dans une PR de suivi.
   - **Traitement des remarques** (règle 3 de la méthode) : une remarque bloquante, ou qui touche un parcours de la règle 2 de la méthode, est corrigée et retestée avant fusion ; une remarque non bloquante ailleurs devient une issue étiquetée `suivi-audit` et ne retarde pas la fusion. Un test manquant seul, hors montants, ne retarde pas la fusion, même sur un autre parcours de la règle 2 (lecture retenue de la décision de Nelson du 23-10-2026, règle 3 ci-dessous).
 - **Fusion** (décision de Nelson du 20-10-2026, qui remplace la délégation du 17-10-2026). Message de Nelson, mot pour mot : « Je ne fusionne aucune PR, c’est toi apres verification zt si tout est ok que tu peux fusionner les pr ».
-  - Claude Code fusionne lui-même toute PR de Claude Code, y compris celles qui changent des montants ou qui modifient ce fichier. La PR d'un autre agent suit [`.agents/AGENTS.md`](.agents/AGENTS.md). Deux conditions doivent porter sur la même SHA : la CI y est verte, et chacun de ses auditeurs l'y juge fusionnable, sans remarque restante à corriger avant fusion selon la règle 3 de la méthode (un test manquant seul, hors montants, n'en est pas une, décision du 23-10-2026).
+  - Claude Code fusionne lui-même toute PR de Claude Code, y compris celles qui changent des montants ou qui modifient ce fichier. La PR d'un autre agent suit [`.agents/AGENTS.md`](.agents/AGENTS.md). Deux conditions doivent porter sur la même SHA : la CI y est verte, et chacun de ses auditeurs l'y juge fusionnable, sans remarque restante à corriger avant fusion selon la règle 3 de la méthode (un test manquant seul, hors montants, n'en est pas une, décision du 23-10-2026). Les remarques bloquantes du passage du `controleur-coherence` avant la fusion sont traitées de même.
   - Avant de fusionner, relire la PR sur GitHub : SHA de tête, checks de cette SHA, fusion sans conflit avec le `main` courant. Fusionner par commit de fusion, en donnant la SHA de tête attendue ; jamais par la fusion automatique de GitHub.
   - Fusionner une PR qui change un montant ne vaut pas validation comptable : celle du cabinet et de Nelson reste un préalable à la mise en service ([passation](docs/ROADMAP-PASSATION.md), section 5).
   - **Seul Nelson décide de la mise en production.** Ne pas l'activer par déduction d'une CI verte ou d'une fusion.
@@ -50,7 +50,7 @@ Les sous-agents de projet sont définis dans [`.claude/agents/`](.claude/agents/
    - le lot est-il dans le périmètre gelé de la bêta ?
    - contredit-il une décision consignée, la vision ou un lot prévu, comme la refonte des droits ?
    - fait-il doublon avec l'existant ?
-2. **Code**, avec le `redacteur-tests` en parallèle, sur la même branche. Il possède les fichiers de tests du lot : le code ne les modifie pas sans passer par lui.
+2. **Code**, avec le `redacteur-tests` en parallèle.
 3. **Auditeurs en parallèle**, choisis selon ce que touche la PR :
    - l'`auditeur-montants` pour un montant ;
    - l'`auditeur-droits-securite` pour un droit, un périmètre, un journal, une donnée sensible, une dépendance ou une variable d'environnement.
@@ -60,17 +60,20 @@ Les sous-agents de projet sont définis dans [`.claude/agents/`](.claude/agents/
 5. **Fusion**, par Claude Code seul, aux conditions de la section « Fusion », plus haut.
 6. **Mise à jour de la passation et de l'historique** par le `documentaliste`, dans une PR documentaire.
 
-Chaque auditeur rend toutes ses remarques en un seul passage, classées bloquantes ou non. Dans la grille R/C/T/N, les remarques R et C sont bloquantes, tout comme un test manquant qui touche un montant. Un nouveau passage ne sert qu'à vérifier les corrections bloquantes. Les remarques du `controleur-coherence` suivent la règle 3 de la méthode.
+Chaque auditeur rend toutes ses remarques en un seul passage, classées bloquantes ou non. Un nouveau passage ne sert qu'à vérifier les corrections bloquantes. Les remarques du `controleur-coherence` suivent la règle 3 de la méthode.
 
 **Choix de mise en œuvre** (choix par défaut, à confirmer) :
 - **Lecture retenue** : le « périmètre gelé de la bêta » est le périmètre du pilote, décrit en section 2 de la passation (option 1, SAV et maintenance ; lots décidés pour le premier jour).
 - **PR sans montant ni droit** : elle est auditée par l'`auditeur-droits-securite`. Une PR uniquement documentaire l'est par le `controleur-coherence`, qui vérifie les citations, les statuts et la cohérence avec les décisions.
 - **Erreurs hors spécialité** : tout auditeur relève aussi celles qu'il constate sur le diff complet.
+- **Classement des remarques** : dans la grille R/C/T/N, les remarques R et C sont bloquantes, tout comme un test manquant qui touche un montant, classé C (T reste réservé aux tests manquants hors montants) ; T et N ne le sont pas.
+- **Rédaction des tests** : le `redacteur-tests` travaille sur la même branche que le code. Il possède les fichiers de tests du lot : le code ne les modifie pas sans passer par lui.
 - **Passage hebdomadaire** du `controleur-coherence` :
   - Claude Code le lance lors de la première session de travail de chaque semaine, sans déclencheur automatique ;
   - son rapport est publié dans une issue ;
   - une remarque bloquante devient un correctif prioritaire (voir « Ordre pendant le pilote »), une autre une issue `suivi-audit`.
-- **Lecture seule** : elle repose sur les consignes de chaque sous-agent. Après le passage d'un sous-agent en lecture seule, Claude Code vérifie que la copie de travail n'a pas changé (`git status`).
+- **Lecture seule** : Nelson dit « lecture seule » des deux auditeurs, et « lecture seule, peut lancer les tests » du `controleur-coherence`. Lecture retenue : elle vaut pour le dépôt ; les auditeurs lancent tests et mutants sur une copie extraite hors du dépôt, et livrent leurs correctifs en patchs. Elle repose sur les consignes de chaque sous-agent. Après le passage d'un sous-agent en lecture seule, Claude Code vérifie que la copie de travail n'a pas changé : `git status` vide, même tête (`git rev-parse HEAD`) et même branche.
+- **SHA rafraîchie sur `main`** : une nouvelle tête qui ne fait que fusionner `main` dans la branche, sans conflit ni autre changement, est vérifiée par un passage de vérification de l'auditeur (la fusion n'apporte que les changements de `main`), avec une CI verte sur cette tête.
 - **Commits et publication** : un sous-agent ne commite et ne pousse rien. Claude Code commite, pousse, ouvre les PR et publie les constats.
 - **Repli** : si les agents de projet ne sont pas chargés dans la session, Claude Code lance un agent général en lui donnant le fichier de l'agent voulu comme consigne.
 
@@ -93,7 +96,7 @@ Ce qui ne change pas : une PR par lot, jamais de push direct sur `main`, l'audit
 
 **Ordre pendant le pilote** (décision de Nelson du 19-10-2026) : « La prochaine PR fonctionnelle est le lot 3b. Jusqu'à la fin du pilote, un correctif ne passe avant un lot que s'il est bloquant ou s'il touche un montant. Tout le reste devient une issue, traitée après le pilote. » Le 21-10-2026, le lot 3 étant implémenté, Nelson a placé les lots pilotes 4 à 6 avant le premier jour, et #179, #181 et le lot P0 du paramétrage avant la fin du pilote ; pour P0, la lecture retenue est avant le premier jour ([historique](docs/HISTORIQUE-DECISIONS.md#décisions-du-21-10-2026)).
 
-Choix de mise en œuvre de la règle 3 (choix par défaut, à confirmer) : l'étiquette s'appelle `suivi-audit` ; l'issue reprend le constat, sa preuve et le correctif proposé, et la PR la cite. Le sous-agent d'audit classe ses remarques en R (défaut de comportement ou de sûreté), C (autre erreur à corriger avant fusion : documentation inexacte, test existant faux ou instable, procédure), T (test manquant seulement, hors montants) et N (notes) ; une PR sans remarque R ni C restante à corriger avant fusion selon la règle 3 est fusionnable, quelles que soient ses T et ses N.
+Choix de mise en œuvre de la règle 3 (choix par défaut, à confirmer) : l'étiquette s'appelle `suivi-audit` ; l'issue reprend le constat, sa preuve et le correctif proposé, et la PR la cite. Chaque auditeur classe ses remarques en R (défaut de comportement ou de sûreté), C (autre erreur à corriger avant fusion : documentation inexacte, test existant faux ou instable, procédure), T (test manquant seulement, hors montants) et N (notes) ; une PR sans remarque R ni C restante à corriger avant fusion selon la règle 3 est fusionnable, quelles que soient ses T et ses N.
 
 ## Règles permanentes de conception (décision de Nelson du 17-10-2026)
 

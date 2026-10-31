@@ -1320,8 +1320,12 @@ Lectures retenues et choix de mise en œuvre de Claude Code (choix par défaut, 
 - le « périmètre gelé de la bêta » est le périmètre du pilote (passation, section 2 : option 1, SAV et maintenance ; lots décidés pour le premier jour) ;
 - « lecture seule » vaut pour le dépôt : les auditeurs peuvent lancer des tests et des mutants sur une copie extraite hors du dépôt, et livrent leurs correctifs sous forme de patchs, que Claude Code reprend ; la lecture seule repose sur leurs consignes, et Claude Code vérifie après leur passage que la copie de travail n'a pas changé ;
 - une PR qui ne touche ni montant ni droit est auditée par l'`auditeur-droits-securite`, une PR uniquement documentaire par le `controleur-coherence` ; chaque auditeur relève aussi les erreurs hors de sa spécialité qu'il constate sur le diff complet ;
-- un auditeur classe ses remarques bloquantes ou non dans la grille R/C/T/N existante : R, C et tout test manquant qui touche un montant sont bloquants, T et N ne le sont pas ;
-- le rapport du passage hebdomadaire est publié dans une issue ; ses remarques bloquantes deviennent un correctif prioritaire, les autres des issues `suivi-audit` ;
-- aucun sous-agent ne commite ni ne pousse : Claude Code commite, pousse, ouvre les PR, publie les constats et fusionne.
+- le `redacteur-tests` travaille sur la même branche que le code et possède les fichiers de tests du lot, que le code ne modifie pas sans passer par lui ;
+- un auditeur classe ses remarques bloquantes ou non dans la grille R/C/T/N existante : R, C et tout test manquant qui touche un montant (classé C) sont bloquants, T et N ne le sont pas ;
+- une PR qui touche une variable d'environnement est auditée par l'`auditeur-droits-securite` ;
+- une nouvelle tête qui ne fait que fusionner `main` dans la branche est vérifiée par un passage de vérification de l'auditeur, avec une CI verte ;
+- le passage hebdomadaire est lancé par Claude Code lors de la première session de travail de chaque semaine ; son rapport est publié dans une issue ; ses remarques bloquantes deviennent un correctif prioritaire, les autres des issues `suivi-audit` ;
+- aucun sous-agent ne commite ni ne pousse : Claude Code commite, pousse, ouvre les PR, publie les constats et fusionne ;
+- si les agents de projet ne sont pas chargés dans une session, Claude Code lance un agent général avec le fichier de l'agent voulu comme consigne.
 
 Priorité immédiate : le prochain lot est la fin du lot 6, d'abord 6a-4 (PDF et envoi des autres documents), puis 6b (Microsoft 365), décidés pour le premier jour. La passation sera alignée par la prochaine PR documentaire, après la fusion de la troisième PR du lot « budget et heures prévues du chantier », qui la modifie.
