@@ -8,6 +8,7 @@ Iris est un ERP français natif pour métiers techniques, **en développement et
 2. [`docs/ROADMAP-PASSATION.md`](docs/ROADMAP-PASSATION.md) : état par chantier, dépendances, critères de sortie et points à arbitrer. Vérifier le code et les tests avant d'affirmer qu'un lot est absent ou achevé.
 3. [`.agents/AGENTS.md`](.agents/AGENTS.md) : règles de branches, PR et revues croisées. Consulter **les commentaires** des issues/PR ; les descriptions peuvent dater d'une version ancienne de `main`.
 4. [`docs/MODELE-DROITS-COMPTES.md`](docs/MODELE-DROITS-COMPTES.md), [`docs/CONFIGURATION-ENVIRONNEMENT.md`](docs/CONFIGURATION-ENVIRONNEMENT.md), [`server/tests/README.md`](server/tests/README.md) pour les droits, l'installation et les tests.
+5. [`.claude/agents/`](.claude/agents/) : les sous-agents de projet et leur rôle dans le circuit d'une PR (section « Circuit d'une PR et sous-agents de projet », plus bas).
 
 ## Mode de livraison
 
@@ -17,17 +18,65 @@ Iris est un ERP français natif pour métiers techniques, **en développement et
 - Pour toute écriture ou donnée sensible, droits API avant UI, périmètre hiérarchique explicite, audit/immutabilité et refus métier testés. Dates saisies/affichées en `JJ-MM-AAAA`, fuseau d'entreprise pour la date civile, stockage technique distinct. Les factures émises et leurs montants/mentions sont figés ; une correction passe par le cycle métier prévu.
 - Tests backend HTTP contre PostgreSQL **jetable**, tests Playwright dans un vrai navigateur pour les parcours critiques. Ne pas confondre un test `SKIP` sans base avec un test réussi. Rejouer les suites pertinentes deux fois sur une même base conservée lorsque des fixtures persistantes peuvent interférer. `git diff --check`, builds, lint et CI doivent être verts sur la SHA courante.
 - **Audits.** Ne jamais être son propre auditeur : le verdict vient d'un autre contexte.
-  - **Audit interne, obligatoire.** Dès qu'une PR est terminée et prête pour revue, l'agent qui l'a codée déploie au minimum un sous-agent d'audit (contexte distinct, diff complet : exactitude, droits et données sensibles, tests réellement probants, écart à la vision et aux règles de ce fichier). L'agent publie les constats du sous-agent dans la PR et les traite selon la règle 3 de la méthode ci-dessous avant de la présenter. Après chaque push correctif, le sous-agent est relancé sur la nouvelle SHA.
+  - **Audit interne, obligatoire.** Dès qu'une PR est terminée et prête pour revue, l'agent qui l'a codée déploie au minimum un des auditeurs de projet, choisis selon ce que touche la PR (section « Circuit d'une PR et sous-agents de projet », plus bas). Chacun travaille dans un contexte distinct, sur le diff complet : exactitude, droits et données sensibles, tests réellement probants, écart à la vision et aux règles de ce fichier. L'agent publie leurs constats dans la PR et les traite selon la règle 3 de la méthode ci-dessous avant de la présenter. Chaque auditeur rend toutes ses remarques en un seul passage ; après un push correctif, il repasse sur la nouvelle SHA pour vérifier les seules corrections bloquantes.
   - **Audit indépendant, à la demande de Nelson.** Une IA indépendante de celle qui a codé, sollicitée manuellement par Nelson qui relaie ses retours, peut auditer une PR avant ou après sa fusion. Ses remarques sont traitées comme celles de l'audit interne, au besoin dans une PR de suivi.
   - **Traitement des remarques** (règle 3 de la méthode) : une remarque bloquante, ou qui touche un parcours de la règle 2 de la méthode, est corrigée et retestée avant fusion ; une remarque non bloquante ailleurs devient une issue étiquetée `suivi-audit` et ne retarde pas la fusion. Un test manquant seul, hors montants, ne retarde pas la fusion, même sur un autre parcours de la règle 2 (lecture retenue de la décision de Nelson du 23-10-2026, règle 3 ci-dessous).
 - **Fusion** (décision de Nelson du 20-10-2026, qui remplace la délégation du 17-10-2026). Message de Nelson, mot pour mot : « Je ne fusionne aucune PR, c’est toi apres verification zt si tout est ok que tu peux fusionner les pr ».
-  - Claude Code fusionne lui-même toute PR de Claude Code, y compris celles qui changent des montants ou qui modifient ce fichier. La PR d'un autre agent suit [`.agents/AGENTS.md`](.agents/AGENTS.md). Deux conditions doivent porter sur la même SHA : la CI y est verte, et son sous-agent d'audit l'y juge fusionnable, sans remarque restante à corriger avant fusion selon la règle 3 de la méthode (un test manquant seul, hors montants, n'en est pas une, décision du 23-10-2026).
+  - Claude Code fusionne lui-même toute PR de Claude Code, y compris celles qui changent des montants ou qui modifient ce fichier. La PR d'un autre agent suit [`.agents/AGENTS.md`](.agents/AGENTS.md). Deux conditions doivent porter sur la même SHA : la CI y est verte, et chacun de ses auditeurs l'y juge fusionnable, sans remarque restante à corriger avant fusion selon la règle 3 de la méthode (un test manquant seul, hors montants, n'en est pas une, décision du 23-10-2026).
   - Avant de fusionner, relire la PR sur GitHub : SHA de tête, checks de cette SHA, fusion sans conflit avec le `main` courant. Fusionner par commit de fusion, en donnant la SHA de tête attendue ; jamais par la fusion automatique de GitHub.
   - Fusionner une PR qui change un montant ne vaut pas validation comptable : celle du cabinet et de Nelson reste un préalable à la mise en service ([passation](docs/ROADMAP-PASSATION.md), section 5).
   - **Seul Nelson décide de la mise en production.** Ne pas l'activer par déduction d'une CI verte ou d'une fusion.
   - **Toutes les PR, propositions comprises.** Le 20-10-2026, Nelson a confirmé la portée de sa décision, mot pour mot : « C’est toi qui fusionne TOUTES les PR » (message de la session de travail, consigné sur #182 et #183). Claude Code fusionne donc aussi les propositions 3 et 4 (#182, #183), dont la fusion vaut validation de la proposition, que Nelson s'était réservée le 17-10-2026. Les conditions sont celles de toute PR, ci-dessus : rafraîchies sur `main`, CI verte et audit interne fusionnable sur la même SHA, fusion par commit de fusion sur la SHA attendue. La PR d'un autre agent suit toujours [`.agents/AGENTS.md`](.agents/AGENTS.md).
   - La délégation du 17-10-2026 ([historique](docs/HISTORIQUE-DECISIONS.md)) excluait les PR qui changent des montants et les propositions soumises à Nelson. La décision du 20-10-2026 lève ces deux exceptions (#253, puis la confirmation ci-dessus).
 - Faire évoluer la roadmap dans une PR documentaire lorsque l'état des lots change. Distinguer systématiquement « implémenté », « partiel », « prévu » et « validé pour mise en service ».
+
+## Circuit d'une PR et sous-agents de projet (décision de Nelson du 31-10-2026)
+
+Objectif de Nelson, mot pour mot : « aller plus vite sans perdre en solidité, en répartissant le travail entre des sous-agents spécialisés » ([historique](docs/HISTORIQUE-DECISIONS.md#décision-du-31-10-2026-sur-le-circuit-des-pr-et-les-sous-agents)).
+
+Les sous-agents de projet sont définis dans [`.claude/agents/`](.claude/agents/), un fichier Markdown par agent (nom, description, outils, modèle). Un sous-agent ne reçoit que son propre fichier et la demande de Claude Code. Son fichier lui fait donc lire ce fichier, [`.agents/AGENTS.md`](.agents/AGENTS.md) et les sections utiles de la passation et de la vision avant d'agir.
+
+| Sous-agent | Rôle | Écrit | Modèle |
+|---|---|---|---|
+| `controleur-coherence` | Cohérence fonctionnelle d'Iris, et non qualité du code : avant le lot, avant la fusion, passage hebdomadaire | Rien (il peut lancer les tests) | Celui de la session |
+| `auditeur-montants` | Calculs, arrondis, TVA, factures et avoirs figés, tests de montants | Rien dans le dépôt | Celui de la session |
+| `auditeur-droits-securite` | Droits et périmètres, refus côté API, journaux, données sensibles, dépendances | Rien dans le dépôt | Celui de la session |
+| `redacteur-tests` | Tests d'API, unitaires et E2E, écrits à partir du cadrage, en parallèle du code | Fichiers de tests seulement | Celui de la session |
+| `documentaliste` | Passation et historique après chaque fusion ; passation courte, ce qui est livré archivé dans l'historique | `docs/` seulement | Sonnet |
+
+**Circuit d'une PR.**
+
+1. **Cadrage**, puis passage du `controleur-coherence` avant de coder. Il répond à trois questions :
+   - le lot est-il dans le périmètre gelé de la bêta ?
+   - contredit-il une décision consignée, la vision ou un lot prévu, comme la refonte des droits ?
+   - fait-il doublon avec l'existant ?
+2. **Code**, avec le `redacteur-tests` en parallèle, sur la même branche. Il possède les fichiers de tests du lot : le code ne les modifie pas sans passer par lui.
+3. **Auditeurs en parallèle**, choisis selon ce que touche la PR :
+   - l'`auditeur-montants` pour un montant ;
+   - l'`auditeur-droits-securite` pour un droit, un périmètre, un journal, une donnée sensible, une dépendance ou une variable d'environnement.
+
+   Ils assurent l'audit interne obligatoire : au moins un par PR. Avant la fusion, le `controleur-coherence` repasse. Il vérifie que le parcours de bout en bout reste cohérent, qu'une même notion porte partout le même nom, le même statut et le même format, et que les écrans affichent des libellés en français, des montants au format français et des dates `JJ-MM-AAAA`.
+4. **Corrections.**
+5. **Fusion**, par Claude Code seul, aux conditions de la section « Fusion », plus haut.
+6. **Mise à jour de la passation et de l'historique** par le `documentaliste`, dans une PR documentaire.
+
+Chaque auditeur rend toutes ses remarques en un seul passage, classées bloquantes ou non. Dans la grille R/C/T/N, les remarques R et C sont bloquantes, tout comme un test manquant qui touche un montant. Un nouveau passage ne sert qu'à vérifier les corrections bloquantes. Les remarques du `controleur-coherence` suivent la règle 3 de la méthode.
+
+**Choix de mise en œuvre** (choix par défaut, à confirmer) :
+- **Lecture retenue** : le « périmètre gelé de la bêta » est le périmètre du pilote, décrit en section 2 de la passation (option 1, SAV et maintenance ; lots décidés pour le premier jour).
+- **PR sans montant ni droit** : elle est auditée par l'`auditeur-droits-securite`. Une PR uniquement documentaire l'est par le `controleur-coherence`, qui vérifie les citations, les statuts et la cohérence avec les décisions.
+- **Erreurs hors spécialité** : tout auditeur relève aussi celles qu'il constate sur le diff complet.
+- **Passage hebdomadaire** du `controleur-coherence` :
+  - Claude Code le lance lors de la première session de travail de chaque semaine, sans déclencheur automatique ;
+  - son rapport est publié dans une issue ;
+  - une remarque bloquante devient un correctif prioritaire (voir « Ordre pendant le pilote »), une autre une issue `suivi-audit`.
+- **Lecture seule** : elle repose sur les consignes de chaque sous-agent. Après le passage d'un sous-agent en lecture seule, Claude Code vérifie que la copie de travail n'a pas changé (`git status`).
+- **Commits et publication** : un sous-agent ne commite et ne pousse rien. Claude Code commite, pousse, ouvre les PR et publie les constats.
+- **Repli** : si les agents de projet ne sont pas chargés dans la session, Claude Code lance un agent général en lui donnant le fichier de l'agent voulu comme consigne.
+
+**Parallélisme.** Quand deux lots touchent des domaines indépendants, Claude Code les mène en parallèle, chacun dans sa branche et sa PR, avec ses propres audits. Jamais deux lots en parallèle sur le même domaine, ni sur les montants d'un même document.
+
+**Ce qui ne change pas** : Claude Code seul fusionne. Aucun sous-agent ne fusionne ni ne pousse sur `main`. Les règles 1 à 5 de la méthode et la validation comptable des montants par Nelson restent en vigueur.
 
 ## Méthode de travail (décision de Nelson du 16-10-2026)
 
@@ -73,4 +122,4 @@ Choix de mise en œuvre de la règle 3 (choix par défaut, à confirmer) : l'ét
 
 Claude Code peut proposer et livrer de nombreux lots, un par PR. Nelson garde les arbitrages métier, la validation du cabinet comptable/juridique quand requise et le feu vert de production ; les fusions reviennent à Claude Code dans les conditions du mode de livraison (décision du 20-10-2026). Les questions encore ouvertes sont listées dans la passation ; les présenter comme questions, pas comme exigences définitivement décidées. Les micro-arbitrages de droits ou d'affichage suivent la règle 5 de la méthode (choix par défaut documenté, à confirmer).
 
-L'auditeur indépendant peut superviser les PR, audits et checks, avec vérification de la SHA et de l'écart à la vision ; il ne fusionne pas. Aucun webhook de suivi de ce dépôt n'est déclaré actif par cette documentation : sa configuration éventuelle est un travail séparé, avec authentification, filtrage des événements et tests. Ne lancer ni agent IA périodique ni fusion automatique en déduisant une autorisation de travailler par phases.
+L'auditeur indépendant peut superviser les PR, audits et checks, avec vérification de la SHA et de l'écart à la vision ; il ne fusionne pas. Aucun webhook de suivi de ce dépôt n'est déclaré actif par cette documentation : sa configuration éventuelle est un travail séparé, avec authentification, filtrage des événements et tests. Ne lancer ni agent IA périodique ni fusion automatique en déduisant une autorisation de travailler par phases. Seule exception, décidée par Nelson le 31-10-2026 : le passage hebdomadaire du `controleur-coherence` (section « Circuit d'une PR et sous-agents de projet »), que Claude Code lance lui-même dans une session de travail, sans déclencheur automatique.
