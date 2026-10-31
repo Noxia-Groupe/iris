@@ -24,6 +24,7 @@ import {
 import { contexteSuivi, serializeChantier } from './suivi';
 import { avecCoutsSuites } from './coutsSuites';
 import { CHANTIER_IMPRIME, nomFichierRapportChantier, rendreRapportChantierPdf } from './document';
+import { enregistrerEnvoisRapportChantier } from './envois';
 
 // Champs publics d'un responsable ou d'un commercial rattaché à un chantier : jamais le
 // hash de mot de passe, et jamais le rôle non plus — l'application n'en a pas l'usage ici,
@@ -217,6 +218,9 @@ export function enregistrerRoutesChantiers(app: Express): void {
 
   // Rapport de chantier remis au client (lot 6a-4c) : administration seule, en session seulement.
   app.get('/api/chantiers/:id/document.pdf', requireAuth, requireAdmin, imprimerRapportChantier);
+  // Envoi de ce rapport par la messagerie et journal de ses envois (lot 6a-4e ; cf. envois.ts) :
+  // administration seule, en session seulement, comme le PDF.
+  enregistrerEnvoisRapportChantier(app);
 
   // L'ouverture d'une affaire est contractualisée par un devis accepté : la conversion en
   // est la seule porte (cf. POST /api/devis/:id/convertir). Cette route historique ne créait

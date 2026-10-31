@@ -157,8 +157,8 @@ function dureeTemoin(heuresDecimales) {
 
 // Motifs génériques, appliqués à tout rapport imprimé par ce fichier : aucun montant ni aucune durée, sous
 // quelque forme que ce soit. Les données des tests ne portent aucun de ces motifs (aucun nombre décimal, aucun
-// « h » après un nombre, aucun de ces mots) : un motif trouvé ne peut venir que d'un montant ou d'une durée
-// ajoutés au rapport. L'horodatage JJ-MM-AAAA HH:MM des comptes rendus n'en déclenche aucun.
+// « h », « heures » ni « euros » après un nombre, aucun de ces mots) : un motif trouvé ne peut venir que d'un
+// montant ou d'une durée ajoutés au rapport. L'horodatage JJ-MM-AAAA HH:MM des comptes rendus n'en déclenche aucun.
 const MOTIFS_INTERDITS = [
   [/€/u, 'symbole euro'],
   [/(?<!\p{L})EUR(?!\p{L})/u, 'code EUR'],
@@ -167,6 +167,9 @@ const MOTIFS_INTERDITS = [
   [/\d\.\d/u, 'nombre décimal à l’anglaise'],
   [/(?<![\p{L}\d])\d+(?:[,.]\d+)?\s?h(?:\s?\d{1,2})?(?!\p{L})/u, 'durée en heures'],
   [/(?<!\p{L})min(?:utes?)?(?!\p{L})/iu, 'durée en minutes'],
+  // Un nombre suivi de l'unité en toutes lettres (« 37 heures », « 877 euros ») : un montant ou une durée arrondis
+  // n'ont ni décimale ni symbole.
+  [/(?<![\p{L}\d])\d+(?:[\s.,\u00a0\u202f]\d+)*\s?(?:heures?|euros?)(?!\p{L})/iu, 'montant ou durée en toutes lettres'],
   [/%/u, 'pourcentage (avancement)'],
   [/budget|marge|vendu|factur|co[uû]t|achat|pointag|avancement|rentabilit|réalis/iu, 'libellé d’un montant ou d’heures'],
 ];
@@ -470,6 +473,11 @@ if (!TEST_DATABASE_URL) {
       // Ni le commercial ni le conducteur du chantier, ni leur rôle.
       for (const absent of [conducteur.name, commercial.name, 'Zéphyrin', 'Anatole', conducteur.email, commercial.email]) assert.ok(!plat.includes(absent), `imprimé à tort : ${absent}\n${texte}`);
       assert.doesNotMatch(plat, /commercial|conducteur|titulaire|responsable/iu, texte);
+      // Ni le courriel de l'auteur d'un compte rendu, donnée personnelle superflue sur un document remis au client :
+      // son nom seul, comme sur le PDF du compte rendu (rendu partagé, rendreComptesRendus).
+      for (const absent of [technicien.compte.email, process.env.BREAK_GLASS_EMAIL]) {
+        assert.ok(absent && !sansBlancs(plat).includes(sansBlancs(absent)), `courriel de l’auteur imprimé : ${absent}\n${texte}`);
+      }
 
       // Identité actuelle (choix par défaut, à confirmer) : le rapport suit l'identité au moment où il s'imprime.
       try {

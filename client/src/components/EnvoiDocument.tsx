@@ -9,10 +9,11 @@ import { lienMessagerie, type EnvoiEnregistre, type EnvoiPrepare, type Propositi
 export type DocumentAEnvoyer = {
   // Désignation du document dans les libellés : « le devis A26-0001 version 1 », « la facture
   // F2026-0001 », « l’avoir A2026-0001 », « le compte rendu de l’intervention I26-0001 », « le contrat
-  // de maintenance Maintenance SSI ».
+  // de maintenance Maintenance SSI », « le rapport de chantier Résidence Les Tilleuls ».
   libelle: string;
   // Chemin du document dans l'API, sans /api : « /devis/:id », « /factures/:id » (lot 6a-3),
-  // « /interventions/:id » (compte rendu) ou « /contrats-maintenance/:id » (lot 6a-4d).
+  // « /interventions/:id » (compte rendu) ou « /contrats-maintenance/:id » (lot 6a-4d), ou
+  // « /chantiers/:id » (rapport de chantier remis au client, lot 6a-4e).
   chemin: string;
   // Nom du PDF téléchargé, le même que celui du bouton « PDF ».
   nomFichier: string;
@@ -20,7 +21,7 @@ export type DocumentAEnvoyer = {
 
 const DATE_HEURE = { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' } as const;
 
-// Envoi d'un document par la messagerie de l'utilisateur (lots 6a-3 et 6a-4d). « Préparer l'envoi »
+// Envoi d'un document par la messagerie de l'utilisateur (lots 6a-3, 6a-4d et 6a-4e). « Préparer l'envoi »
 // télécharge le PDF, puis enregistre l'envoi au journal, puis propose le lien qui ouvre la messagerie
 // avec le destinataire, l'objet et le texte remplis ; le PDF se joint à la main. Si le PDF est refusé,
 // rien n'est enregistré. Iris ne sait pas si le courriel part : le journal dit « Envoi préparé ».

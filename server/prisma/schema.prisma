@@ -153,6 +153,7 @@ model Chantier {
   planningEvents PlanningEvent[]
   interventions  Intervention[]
   factures       Facture[] @relation("FactureChantier")
+  envois         EnvoiDocument[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -813,14 +814,15 @@ model EcritureFacture {
   @@index([factureId])
 }
 
-// Journal des envois d'un document (lots 6a-3 et 6a-4d, choix par défaut, à confirmer) : chaque envoi
-// préparé depuis Iris, aujourd'hui par la messagerie de l'utilisateur (lien mailto, PDF joint à la
-// main). Iris ne sait pas si le courriel est parti : une ligne dit qu'un envoi a été préparé, à qui,
+// Journal des envois d'un document (lots 6a-3, 6a-4d et 6a-4e, choix par défaut, à confirmer) : chaque
+// envoi préparé depuis Iris, aujourd'hui par la messagerie de l'utilisateur (lien mailto, PDF joint à
+// la main). Iris ne sait pas si le courriel est parti : une ligne dit qu'un envoi a été préparé, à qui,
 // sous quel objet et par qui. En ajout seul, garanti en base (migration 20261023120000) : ni
 // modification, ni suppression, ni vidage ; horodatage imposé par la base. Exactement un document :
 // devis ou facture (avoir compris), depuis le lot 6a-3 ; compte rendu d'une intervention ou contrat
-// de maintenance, depuis le lot 6a-4d (migration 20261031120000). Le canal MICROSOFT_365 viendra avec
-// le lot 6b.
+// de maintenance, depuis le lot 6a-4d (migration 20261031120000) ; rapport de chantier remis au
+// client, depuis le lot 6a-4e (migration 20261031200000). Le canal MICROSOFT_365 viendra avec le
+// lot 6b.
 model EnvoiDocument {
   id                   String              @id @default(uuid())
   devisId              String?
@@ -832,6 +834,10 @@ model EnvoiDocument {
   intervention         Intervention?       @relation(fields: [interventionId], references: [id], onDelete: Restrict)
   contratMaintenanceId String?
   contratMaintenance   ContratMaintenance? @relation(fields: [contratMaintenanceId], references: [id], onDelete: Restrict)
+  // Rapport de chantier remis au client, sans montant ni heures (lot 6a-4c) : un seul PDF par chantier,
+  // avec les comptes rendus de ses interventions non annulées.
+  chantierId           String?
+  chantier             Chantier?           @relation(fields: [chantierId], references: [id], onDelete: Restrict)
   canal                String // MESSAGERIE
   destinataire         String
   objet                String
@@ -845,6 +851,7 @@ model EnvoiDocument {
   @@index([factureId, createdAt])
   @@index([interventionId, createdAt])
   @@index([contratMaintenanceId, createdAt])
+  @@index([chantierId, createdAt])
 }
 
 model JournalFacture {
