@@ -1016,7 +1016,7 @@ const ChantierDetail = () => {
               <h3 className="font-bold text-gray-800 flex items-center gap-2 mb-4 text-sm uppercase tracking-wide">
                 <Users size={16} className="text-purple-500" /> Heures par intervenant
               </h3>
-              <BarBreakdown rows={parIntervenant} color="#8b5cf6" formatValue={(v) => `${v.toFixed(1)} h`} emptyLabel="Aucune heure enregistrée" />
+              <BarBreakdown rows={parIntervenant} color="#8b5cf6" formatValue={fmtHeures} emptyLabel="Aucune heure enregistrée" />
             </div>
           </div>
 

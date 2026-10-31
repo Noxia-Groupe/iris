@@ -43,18 +43,22 @@ async function preparer(request: APIRequestContext, token: string, creerClient: 
   await envoyer('patch', `/chantiers/${chantier.id}`, { responsableId: conducteur.id });
   await envoyer('patch', `/chantiers/${chantier.id}/commercial`, { commercialId: commercial.id });
   // Trois quarts d'heure pointés : les heures réalisées s'affichent elles aussi au centième (« 0,75 h »).
-  const intervenant = await envoyer('post', '/intervenants', { nom: `Intervenant affichage heures ${suffixe}`, role: 'Technicien', tauxHoraireCharge: 40 }) as { id: string };
+  const nomIntervenant = `Intervenant affichage heures ${suffixe}`;
+  const intervenant = await envoyer('post', '/intervenants', { nom: nomIntervenant, role: 'Technicien', tauxHoraireCharge: 40 }) as { id: string };
   await envoyer('post', '/heures', { chantierId: chantier.id, intervenantId: intervenant.id, date: dateDuJour(), nbrHeures: 0.75 });
-  return chantier;
+  return { chantier, nomIntervenant };
 }
 
 // Carte « Heures Prévues » et carte « Consommation Heures » (heures réalisées, puis « / » heures vendues) de la fiche.
 const heuresPrevues = (page: Page) => page.getByText('Heures Prévues', { exact: true }).locator('xpath=following-sibling::div[1]');
 const consommationHeures = (page: Page) => page.getByRole('heading', { name: 'Consommation Heures' }).locator('xpath=following-sibling::div[1]/span');
+// Carte « Heures par intervenant » : la valeur écrite à côté du nom de l'intervenant.
+const heuresIntervenant = (page: Page, nom: string) => page.getByRole('heading', { name: 'Heures par intervenant' }).locator('xpath=..')
+  .getByText(nom, { exact: true }).locator('xpath=following-sibling::span[1]');
 
 test('chantier de 18,75 heures vendues ouvert d’un devis au jour et à la demi-journée : « 18,75 h » sur la fiche et dans la liste, et « Modifier » enregistre 18,75, 20 et 18,5 sans refus du navigateur', async ({ page, request, session, creerClient, allerSurPageAdmin }) => {
   test.slow();
-  const chantier = await preparer(request, session.token, creerClient);
+  const { chantier, nomIntervenant } = await preparer(request, session.token, creerClient);
   const relire = async () => ((await (await request.get(`${api}/chantiers/${chantier.id}`, { headers: { Authorization: `Bearer ${session.token}` } })).json()) as Chantier).heuresVendues;
   // Aucune alerte : un refus du serveur s'afficherait par une fenêtre.
   const fenetres: string[] = [];
@@ -66,6 +70,9 @@ test('chantier de 18,75 heures vendues ouvert d’un devis au jour et à la demi
   await expect(page.getByRole('heading', { name: chantier.nom })).toBeVisible();
   await expect(heuresPrevues(page)).toHaveText('18,75 h');
   await expect(consommationHeures(page)).toHaveText(['0,75 h', '/ 18,75 h']);
+  // Carte « Heures par intervenant » (C1 du contrôle de cohérence de #384) : les mêmes heures pointées, « 0,75 h », et non
+  // « 0.8 h » (toFixed(1)), qui contredisait « 0,75 h » de la carte voisine.
+  await expect(heuresIntervenant(page, nomIntervenant)).toHaveText('0,75 h');
 
   // Liste des chantiers : « 0,75 h / 18,75 h », et non « 0,8 h / 18,8 h », valeur qui n'était plus celle du devis.
   await page.goto('/chantiers', { waitUntil: 'networkidle' });
