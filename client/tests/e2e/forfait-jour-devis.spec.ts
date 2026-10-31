@@ -68,9 +68,12 @@ test('fiche de main d’œuvre avec ses prix de la demi-journée, puis devis com
   const objet = `Devis forfait jour E2E ${suffixe}`;
   await page.getByRole('textbox', { name: 'Objet' }).fill(objet);
   const bloc = page.getByRole('group', { name: 'Main d’œuvre au jour ou à la demi-journée', exact: true });
-  const ajouter = bloc.getByRole('button', { name: 'Ajouter la main d’œuvre au forfait' });
+  // Libellés de l'écran du devis (remarque N6 du contrôle de cohérence de #379, puis note N1 de celui de #384, choix par
+  // défaut, à confirmer) : le bouton et la liste des mains d'œuvre disent « au jour ou à la demi-journée », et non plus
+  // « au forfait », pris par les prestations d'unité « forfait ».
+  const ajouter = bloc.getByRole('button', { name: 'Ajouter la ligne au jour ou à la demi-journée', exact: true });
   await expect(ajouter).toBeDisabled();
-  await bloc.getByRole('combobox', { name: 'Main d’œuvre au forfait' }).selectOption(mainOeuvre.id);
+  await bloc.getByRole('combobox', { name: 'Main d’œuvre au jour ou à la demi-journée', exact: true }).selectOption(mainOeuvre.id);
   await expect(bloc.getByRole('combobox', { name: 'Tarif du forfait' }).locator('option')).toHaveText(['Hors contrat — 300,00 € HT', 'Sous contrat — 280,00 € HT']);
   await expect(bloc.getByTestId('prix-forfait-propose')).toHaveText('300,00 € HT par jour');
   await ajouter.click();
@@ -79,15 +82,21 @@ test('fiche de main d’œuvre avec ses prix de la demi-journée, puis devis com
   await lignes.nth(0).getByRole('spinbutton', { name: 'Jours' }).fill('2');
   await expect(lignes.nth(0).getByTestId('prix-forfait')).toHaveText('300,00 € HT');
   await expect(lignes.nth(0)).toContainText('jour');
+  // « Prix du forfait jour », comme le catalogue (« Prix de vente HT au forfait jour »), et non plus « Prix du jour », qui
+  // se lirait « prix d'aujourd'hui ». « Prix du jour » n'est pas une sous-chaîne de « Prix du forfait jour » : la recherche,
+  // sans `exact` (sous-chaîne, sans casse), ne trouve que l'ancien libellé. Elle passe avant l'attente du nouveau libellé,
+  // pour que l'ancien la fasse échouer elle-même.
+  await expect(page.getByText('Prix du jour')).toHaveCount(0);
+  await expect(lignes.nth(0).getByText('Prix du forfait jour', { exact: true })).toBeVisible();
 
   // Main d'œuvre sans prix de la demi-journée : l'ajout reste inactif, avec la raison.
   await bloc.getByRole('combobox', { name: 'Forfait de la main d’œuvre' }).selectOption('DEMI_JOURNEE');
-  await bloc.getByRole('combobox', { name: 'Main d’œuvre au forfait' }).selectOption(sansDemi.id);
+  await bloc.getByRole('combobox', { name: 'Main d’œuvre au jour ou à la demi-journée', exact: true }).selectOption(sansDemi.id);
   await expect(bloc.getByRole('combobox', { name: 'Tarif du forfait' }).locator('option')).toHaveText(['Hors contrat — non réglé', 'Sous contrat — non réglé']);
   await expect(bloc.getByRole('status')).toContainText('n’a pas de prix de la demi-journée hors contrat');
   await expect(ajouter).toBeDisabled();
 
-  await bloc.getByRole('combobox', { name: 'Main d’œuvre au forfait' }).selectOption(mainOeuvre.id);
+  await bloc.getByRole('combobox', { name: 'Main d’œuvre au jour ou à la demi-journée', exact: true }).selectOption(mainOeuvre.id);
   await bloc.getByRole('combobox', { name: 'Tarif du forfait' }).selectOption('SOUS_CONTRAT');
   await expect(bloc.getByTestId('prix-forfait-propose')).toHaveText('150,50 € HT par demi-journée');
   await ajouter.click();
@@ -95,6 +104,8 @@ test('fiche de main d’œuvre avec ses prix de la demi-journée, puis devis com
   await expect(lignes.nth(1).getByRole('spinbutton', { name: 'Demi-journées' })).toHaveValue('1');
   await expect(lignes.nth(1).getByTestId('prix-forfait')).toHaveText('150,50 € HT');
   await expect(lignes.nth(1)).toContainText('demi-journée');
+  await expect(lignes.nth(1).getByText('Prix de la demi-journée', { exact: true })).toBeVisible();
+  await expect(lignes.nth(0).getByText('Prix du forfait jour', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Créer le brouillon' }).click();
 
   // 2 × 300 € + 150,50 € ; 2 × 7,5 h + 3,75 h.

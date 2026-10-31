@@ -51,7 +51,7 @@ export function ChoixForfaitMainOeuvre({ onAjouter }: { onAjouter: (ligne: Ligne
     {mainsOeuvre && mainsOeuvre.length === 0 && <p role="status" className="text-sm text-gray-600">Aucune main d’œuvre active au catalogue : l’administration la crée dans Catalogue &gt; Main d’œuvre.</p>}
     <div className="grid gap-2 sm:grid-cols-3">
       <label className="text-sm">Main d’œuvre
-        <select aria-label="Main d’œuvre au forfait" className="mt-1 w-full border rounded px-2 py-2 bg-white" value={ficheId} disabled={!mainsOeuvre} onChange={(e) => setFicheId(e.target.value)}>
+        <select aria-label="Main d’œuvre au jour ou à la demi-journée" className="mt-1 w-full border rounded px-2 py-2 bg-white" value={ficheId} disabled={!mainsOeuvre} onChange={(e) => setFicheId(e.target.value)}>
           <option value="">Choisir une main d’œuvre…</option>
           {(mainsOeuvre ?? []).map((f) => <option key={f.id} value={f.id}>{f.nom} · Réf. {f.reference}</option>)}
         </select>
@@ -72,7 +72,7 @@ export function ChoixForfaitMainOeuvre({ onAjouter }: { onAjouter: (ligne: Ligne
     </div>
     {fiche && prix === null && <p role="status" className="text-sm text-amber-800">Cette main d’œuvre n’a pas de prix de la demi-journée {tarif === 'SOUS_CONTRAT' ? 'sous contrat' : 'hors contrat'} : elle ne se vend pas à la demi-journée tant que l’administration ne l’a pas saisi (Catalogue &gt; Main d’œuvre).</p>}
     <div className="flex flex-wrap items-center gap-3">
-      <button type="button" className="btn border" disabled={!fiche || prix === null} onClick={ajouter}>Ajouter la main d’œuvre au forfait</button>
+      <button type="button" className="btn border" disabled={!fiche || prix === null} onClick={ajouter}>Ajouter la ligne au jour ou à la demi-journée</button>
       {fiche && prix !== null && <span className="text-sm text-gray-600" data-testid="prix-forfait-propose">{formatPrix(prix)} HT {forfait === 'JOUR' ? 'par jour' : 'par demi-journée'}</span>}
     </div>
   </fieldset>;
@@ -95,7 +95,7 @@ export function LigneForfaitMainOeuvre({ ligne, onDesignation, onQuantite, onRet
     </label>
     <div className="grid gap-2 items-end grid-cols-2 md:grid-cols-[150px_1fr_1fr_1fr_auto]">
       <label className="text-sm">{LIBELLES_QUANTITE_FORFAIT[forfait]}<input required min="1" step="1" type="number" inputMode="numeric" className="mt-1 w-full border rounded px-2 py-2" value={ligne.quantite} onChange={(e) => onQuantite(e.target.value)}/></label>
-      <p className="text-sm"><span className="block text-gray-600">{forfait === 'JOUR' ? 'Prix du jour' : 'Prix de la demi-journée'}</span><strong data-testid="prix-forfait">{formatPrix(ligne.prixUnitaireHt)} HT</strong></p>
+      <p className="text-sm"><span className="block text-gray-600">{forfait === 'JOUR' ? 'Prix du forfait jour' : 'Prix de la demi-journée'}</span><strong data-testid="prix-forfait">{formatPrix(ligne.prixUnitaireHt)} HT</strong></p>
       <p className="text-sm"><span className="block text-gray-600">TVA</span>{String(ligne.tauxTva).replace('.', ',')} %</p>
       <p className="text-sm"><span className="block text-gray-600">Unité</span>{ligne.unite}</p>
       {onRetirer && <button type="button" className="btn border" onClick={onRetirer}>Retirer</button>}

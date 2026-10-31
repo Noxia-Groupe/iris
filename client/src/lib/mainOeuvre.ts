@@ -47,7 +47,7 @@ export type MainOeuvre = {
 export type MainOeuvreResumee = { id: string; reference: string; nom: string; actif: boolean };
 
 // Montant au centime, virgule décimale : « 45,50 € ».
-export const formatEuros = (montant: number) => `${Number(montant).toFixed(2).replace('.', ',')} €`;
+export const formatEuros = (montant: number) => `${Number(montant).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
 
 // Prix facultatif (demi-journée) : le montant, ou « Non réglé ».
 export const formatPrixFacultatif = (montant: number | null | undefined) => (montant == null ? 'Non réglé' : formatEuros(montant));
