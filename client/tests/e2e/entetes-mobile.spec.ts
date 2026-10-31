@@ -176,8 +176,11 @@ test.describe('écrans sur téléphone et tablette (320 à 1024 px)', () => {
   });
 });
 
-// Au-delà du téléphone, la barre d'actions de la fiche reprend sa place en haut à droite, sans
-// recouvrir un nom d'affaire long.
+// Sur tablette et grand écran, la barre d'actions de la fiche ne recouvre jamais un nom d'affaire long. Lot
+// 6a-4c (cadrage, « Écran », N5) : l'administration y a désormais trois boutons, « Modifier », « Rapport
+// interne (PDF) » (la capture, autrefois « PDF ») et « Rapport client (PDF) », et le retrait du titre est
+// recalculé pour eux ; la barre reprend sa place en haut à droite à partir de 1 280 px, et reste au-dessus du
+// titre en deçà, dont 700 px.
 test('fiche chantier sur grand écran : le titre ne passe pas sous les boutons', async ({ allerSurPageAdmin, request, session, creerClient }) => {
   const headers = { Authorization: `Bearer ${session.token}` };
   const envoyer = async (methode: 'post' | 'put', path: string, data: object) => {
@@ -193,7 +196,14 @@ test('fiche chantier sur grand écran : le titre ne passe pas sous les boutons',
   for (const largeur of [700, 1280]) {
     const page = await allerSurPageAdmin(`/chantiers/${chantier.id}`);
     await page.setViewportSize({ width: largeur, height: 900 });
-    await expect(page.getByRole('button', { name: 'PDF', exact: true }).first()).toBeVisible();
+    // La barre d'actions : le plus petit bloc qui porte les deux rapports (la fiche a un autre « Modifier »,
+    // celui du commercial).
+    const barre = page.locator('div')
+      .filter({ has: page.getByRole('button', { name: 'Rapport interne (PDF)', exact: true }) })
+      .filter({ has: page.getByRole('button', { name: 'Rapport client (PDF)', exact: true }) }).last();
+    for (const nom of ['Modifier', 'Rapport interne (PDF)', 'Rapport client (PDF)']) {
+      await expect(barre.getByRole('button', { name: nom, exact: true }), `${nom} à ${largeur} px`).toBeVisible();
+    }
     expect(await defautsAffichage(page), `à ${largeur} px`).toEqual({ coupes: [], recouverts: [] });
   }
 });

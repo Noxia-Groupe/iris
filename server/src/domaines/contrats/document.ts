@@ -1,6 +1,7 @@
 import { dateFrancaise } from '../../commun/dates';
 import { formaterAdresseFacturation } from '../factures/metier';
-import { ouvrirDocumentPdf, type IdentiteImprimee } from '../documents/gabarit';
+import { nomFichierPdf, ouvrirDocumentPdf, type IdentiteImprimee } from '../documents/gabarit';
+import { STATUT_INTERVENTION } from '../interventions/document';
 
 // PDF du contrat de maintenance (lot 6a-4b), sur le modèle commun du lot 6a-1 : un récapitulatif du
 // contrat tel qu'Iris l'enregistre, avec l'identité actuelle de la société (aucune n'est copiée sur un
@@ -26,7 +27,6 @@ export type ContratImprime = {
 };
 
 const STATUT_CONTRAT: Record<string, string> = { ACTIF: 'actif', SUSPENDU: 'suspendu', TERMINE: 'terminé', ANNULE: 'annulé' };
-const STATUT_VISITE: Record<string, string> = { A_PLANIFIER: 'à planifier', PLANIFIEE: 'planifiée', EN_COURS: 'en cours', TERMINEE: 'terminée', ANNULEE: 'annulée' };
 
 // Durée prévisionnelle d'une visite (15 à 1 440 minutes) en heures et minutes : « 45 min », « 2 h »,
 // « 1 h 30 min ».
@@ -37,13 +37,11 @@ export function dureeEnHeuresMinutes(minutes: number) {
   return reste ? `${heures} h ${reste} min` : `${heures} h`;
 }
 
-// Nom du fichier : l'intitulé réduit aux lettres sans accent, aux chiffres, au tiret et au tiret bas,
-// toute autre suite de caractères devenant un tiret, sans tiret en tête ni en fin ; l'identifiant du
-// contrat si rien n'en reste. Le même calcul nomme le fichier téléchargé à l'écran
-// (client/src/lib/documentPdf.ts).
+// Nom du fichier : `Contrat-<intitulé>.pdf`, l'intitulé réduit par le calcul commun des documents
+// (nomFichierPdf), qui nomme aussi le fichier téléchargé à l'écran (client/src/lib/documentPdf.ts) ;
+// `Contrat-<identifiant>.pdf` si rien n'en reste.
 export function nomFichierContrat(contrat: { id: string; titre: string }) {
-  const intitule = contrat.titre.normalize('NFD').replace(/\p{M}/gu, '').replace(/[^A-Za-z0-9_-]+/g, '-').replace(/-{2,}/g, '-').replace(/^-+|-+$/g, '');
-  return `Contrat-${intitule || contrat.id}.pdf`;
+  return nomFichierPdf('Contrat', contrat.titre, contrat.id);
 }
 
 export async function rendreDocumentContratPdf({ contrat, identite }: { contrat: ContratImprime; identite: IdentiteImprimee }): Promise<Buffer> {
@@ -97,7 +95,7 @@ export async function rendreDocumentContratPdf({ contrat, identite }: { contrat:
   ligne('Visites', { taille: 11 });
   if (!contrat.visites.length) ligne('Aucune visite enregistrée.', { taille: 9 });
   for (const visite of contrat.visites) {
-    ligne(`Échéance du ${dateFrancaise(visite.echeanceContrat)} : ${STATUT_VISITE[visite.statut] ?? visite.statut}`, { taille: 9 });
+    ligne(`Échéance du ${dateFrancaise(visite.echeanceContrat)} : ${STATUT_INTERVENTION[visite.statut] ?? visite.statut}`, { taille: 9 });
   }
   return document.terminer();
 }

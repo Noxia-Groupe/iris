@@ -15,6 +15,7 @@ import { nombreDecimalNonNegatif } from '../../commun/validation';
 import { getParametres } from '../parametres/metier';
 import { getCompanySettings } from '../administration/metier';
 import { normaliserNumeroDevis, erreurNumeroDevis, numeroDevisDejaPris } from '../devis/metier';
+import { IdentiteEmetteurIncompleteError, identiteActuelleImprimee } from '../documents/identite';
 import { sanitizeTypes, refusTitulaire, refusCommercial, journaliserChangementChantier, compteAuJournal } from './metier';
 import {
   voitRentabilite, REFUS_TECHNICIEN_MODIFICATION, REFUS_TECHNICIEN_COMMERCIAL, REFUS_TECHNICIEN_CLOTURE, peutCloturerChantier,
@@ -22,6 +23,7 @@ import {
 } from './droits';
 import { contexteSuivi, serializeChantier } from './suivi';
 import { avecCoutsSuites } from './coutsSuites';
+import { CHANTIER_IMPRIME, nomFichierRapportChantier, rendreRapportChantierPdf } from './document';
 
 // Champs publics d'un responsable ou d'un commercial rattaché à un chantier : jamais le
 // hash de mot de passe, et jamais le rôle non plus — l'application n'en a pas l'usage ici,
@@ -98,6 +100,35 @@ const blockCommercialSeulement: express.RequestHandler = (req, res, next) => {
     return;
   }
   next();
+};
+
+// Rapport de chantier remis au client (lot 6a-4c), sans montant ni heures (réponse de Nelson du
+// 31-10-2026). Réservé à l'administration, en session seulement, sans route /api/v1 (choix par défaut,
+// le plus restrictif, à confirmer) : il réunit le chantier et les comptes rendus de ses interventions,
+// qui n'ont pas les mêmes lecteurs. Refus, sans rien écrire : 404 pour un chantier introuvable ; 409 si
+// l'identité de la société est incomplète. Le chantier, ses interventions, leurs comptes rendus et
+// signatures, l'identité de la société et son fuseau sont lus dans un même instantané (REPEATABLE
+// READ), comme les PDF du compte rendu et du contrat. Un chantier annulé s'imprime, avec la mention.
+const imprimerRapportChantier: express.RequestHandler = async (req, res) => {
+  try {
+    const lu = await transactionVerifiee(async (tx) => {
+      const chantier = await tx.chantier.findUnique({ where: { id: paramId(req) }, select: CHANTIER_IMPRIME });
+      if (!chantier) return null;
+      const identite = await identiteActuelleImprimee(tx, 'd’imprimer un rapport de chantier');
+      const societe = await tx.companySettings.findUnique({ where: { id: 'singleton' }, select: { fuseauHoraire: true } });
+      return { chantier, identite, fuseau: societe?.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT };
+    }, { isolationLevel: 'RepeatableRead' });
+    if (!lu) return void res.status(404).json({ error: 'Chantier introuvable' });
+    const pdf = await rendreRapportChantierPdf(lu);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${nomFichierRapportChantier(lu.chantier)}"`);
+    res.setHeader('Content-Length', pdf.length);
+    res.send(pdf);
+  } catch (error) {
+    if (error instanceof IdentiteEmetteurIncompleteError) return void res.status(409).json({ error: error.message });
+    console.error('Chantier, rapport client PDF :', error);
+    res.status(500).json({ error: 'Impression du rapport de chantier impossible.' });
+  }
 };
 
 export function enregistrerRoutesChantiers(app: Express): void {
@@ -183,6 +214,9 @@ export function enregistrerRoutesChantiers(app: Express): void {
       res.status(500).json({ error: 'Error fetching journal des saisies' });
     }
   });
+
+  // Rapport de chantier remis au client (lot 6a-4c) : administration seule, en session seulement.
+  app.get('/api/chantiers/:id/document.pdf', requireAuth, requireAdmin, imprimerRapportChantier);
 
   // L'ouverture d'une affaire est contractualisée par un devis accepté : la conversion en
   // est la seule porte (cf. POST /api/devis/:id/convertir). Cette route historique ne créait

@@ -71,7 +71,8 @@ test('le rapport de chantier se télécharge au format A4', async ({ request, se
   const fiche = await allerSurPageAdmin(`/chantiers/${chantier.id}`);
   await expect(fiche.getByRole('heading', { name: chantier.nom })).toBeVisible();
   const telechargement = fiche.waitForEvent('download');
-  await fiche.getByRole('button', { name: 'PDF', exact: true }).click();
+  // Lot 6a-4c (cadrage, « Écran ») : la capture de la fiche s'appelle désormais « Rapport interne (PDF) ».
+  await fiche.getByRole('button', { name: 'Rapport interne (PDF)', exact: true }).click();
   const fichier = await (await telechargement).path();
   const contenu = readFileSync(fichier, 'latin1');
   // A4 : 595,28 × 841,89 points ; le format américain (letter) ferait 612 × 792.
