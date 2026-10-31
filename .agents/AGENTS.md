@@ -3,7 +3,7 @@
 Chaque fonctionnalité, correctif ou phase est développée sur une branche dédiée :
 
 1. Avant de créer une branche, vérifier les pull requests ouvertes et les branches en attente.
-2. S'il en existe une, demander au responsable s'il faut la fusionner, l'abandonner ou poursuivre dessus.
+2. S'il en existe une, demander au responsable s'il faut la fusionner, l'abandonner ou poursuivre dessus. Claude Code suit [`CLAUDE.md`](../CLAUDE.md#mode-de-livraison) : il mène une PR en attente jusqu'à sa fusion, demande à Nelson avant d'en abandonner une ou si elle attend son arbitrage, et mène en parallèle deux lots de domaines indépendants (« Parallélisme », section « Circuit d'une PR et sous-agents de projet »).
 3. Partir de `main` à jour puis créer une branche nommée `feat/…`, `fix/…`, `chore/…` ou `docs/…`.
 4. Exécuter les builds, tests et contrôles pertinents.
 5. Commiter, pousser la branche et ouvrir une pull request vers `main`.
@@ -25,6 +25,16 @@ appartiennent à l'agent qui les a ouvertes.
    sans reproduction n'est pas un constat.
 5. L'auteur résout les fils qu'il a traités ; le relecteur résout les siens une fois la
    correction livrée par l'auteur.
+
+## Sous-agents de projet (décision du 31-10-2026)
+
+Claude Code répartit son travail entre les sous-agents de [`.claude/agents/`](../.claude/agents/), selon le circuit décrit dans [`CLAUDE.md`](../CLAUDE.md#circuit-dune-pr-et-sous-agents-de-projet-décision-de-nelson-du-31-10-2026) :
+- le contrôle de cohérence, avant le lot et avant la fusion ;
+- la rédaction des tests, en parallèle du code ;
+- les audits spécialisés, sur les montants d'une part, sur les droits et la sécurité d'autre part ;
+- la documentation, après la fusion.
+
+Ces sous-agents ne fusionnent rien et ne poussent rien. Chaque auditeur rend toutes ses remarques en un seul passage, classées bloquantes ou non, qui suivent la règle 3 de la méthode ci-dessous.
 
 ## Méthode de travail (décision du 16-10-2026)
 

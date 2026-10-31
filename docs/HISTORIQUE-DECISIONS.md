@@ -1271,3 +1271,61 @@ Lecture retenue par Claude Code, à corriger par Nelson si besoin : la prémisse
 3. **Questions restantes.** Les questions de la TVA à voir avec le cabinet (mention d'autoliquidation, exonération ou vente hors de France, autres taux légaux) restent ouvertes (passation, section 3).
 
 **Mentions antérieures.** Les sections précédentes gardent leur rédaction d'origine ; leurs mentions « non validé comptablement », « non validée comptablement » ou « validation comptable de Nelson attendue » pour #364, #368 et #376 sont levées par la présente section, de même que la phrase « La validation comptable du lot et sa mise en service restent attendues. » des sections « Décisions du 29-10-2026 (nuit) sur la TVA française », « Décisions du 30-10-2026 sur le budget et les heures prévues du chantier » et « Décisions du 30-10-2026 (après-midi) sur le coût prévu et les heures prévues du chantier », pour sa validation comptable ; la mise en service reste attendue.
+
+## Décision du 31-10-2026 sur le circuit des PR et les sous-agents
+
+Message de Nelson du 31-10-2026 (11:02 UTC), dans la session de travail, mot pour mot (mise en forme d'origine conservée) :
+
+```text
+Objectif : aller plus vite sans perdre en solidité, en répartissant le travail entre des sous-agents spécialisés. Crée-les comme sous-agents de projet dans .claude/agents/ : un fichier Markdown par agent, avec name, description, tools et model. Versionne-les dans une PR documentaire, et décris le nouveau circuit dans CLAUDE.md.
+Un sous-agent ne reçoit que son propre prompt : chaque fichier doit lui demander de lire CLAUDE.md, .agents/AGENTS.md et les sections utiles de la roadmap et de la vision avant d'agir.
+
+## Les sous-agents
+1. controleur-coherence (lecture seule, peut lancer les tests ; model: inherit)
+   Il vérifie la cohérence fonctionnelle d'Iris, pas la qualité du code.
+   - Avant chaque lot, il répond à trois questions. Le lot est-il dans le périmètre gelé de la bêta ? Contredit-il une décision consignée, la vision ou un lot prévu, comme la refonte des droits ? Fait-il doublon avec l'existant ?
+   - Avant chaque fusion, il vérifie trois choses. Le parcours de bout en bout reste-t-il cohérent : devis, conversion, intervention ou contrat, planning, compte rendu, facture, règlement ? Une même notion porte-t-elle partout le même nom, le même statut et le même format ? Les écrans affichent-ils des libellés en français plutôt que des codes techniques, des montants au format français et des dates JJ-MM-AAAA ?
+   - Une fois par semaine, il fait un passage global sur tous les parcours et rend un rapport des incohérences, classées bloquantes ou non.
+   Il ne modifie rien. Ses remarques suivent la règle 3.
+2. auditeur-montants (lecture seule ; model: inherit) : calculs, arrondis, TVA, factures et avoirs figés, tests de montants.
+3. auditeur-droits-securite (lecture seule ; model: inherit) : droits et périmètres, refus côté API, journaux, données sensibles, dépendances.
+4. redacteur-tests (n'écrit que des fichiers de tests ; model: inherit) : écrit les tests d'API et E2E à partir du cadrage du lot, en parallèle du code, pour que l'audit ne bloque plus sur des tests manquants.
+5. documentaliste (n'écrit que dans docs/ ; model: sonnet) : met à jour la roadmap et l'historique après chaque fusion, garde la roadmap courte et archive ce qui est livré dans HISTORIQUE-DECISIONS.md.
+
+## Circuit d'une PR
+1. Cadrage, puis passage de controleur-coherence avant de coder.
+2. Code, avec redacteur-tests en parallèle.
+3. Auditeurs en parallèle, choisis selon ce que touche la PR. Ils assurent l'audit interne obligatoire : au moins un par PR.
+4. Corrections.
+5. Fusion, par toi seul.
+6. Mise à jour par documentaliste.
+Chaque auditeur rend toutes ses remarques en un seul passage, classées bloquantes ou non. Un nouveau passage ne sert qu'à vérifier les corrections bloquantes.
+
+## Parallélisme
+Quand deux lots touchent des domaines indépendants, mène-les en parallèle, chacun dans sa branche et sa PR, avec ses propres audits. Jamais deux lots en parallèle sur le même domaine, ni sur les montants d'un même document.
+
+## Ce qui ne change pas
+Toi seul fusionnes. Aucun sous-agent ne fusionne ni ne pousse sur main. Les règles 1 à 5 et ma validation comptable des montants restent en vigueur.
+
+## Priorité immédiate
+Une fois les agents en place, le prochain lot est la fin du lot 6 (6a-4, puis 6b). Il est décidé pour avant le premier jour et attend depuis le 24-10.
+```
+
+Application, par la PR documentaire qui ajoute cette section :
+- les cinq sous-agents sont définis dans [`.claude/agents/`](../.claude/agents/), un fichier par agent, avec leur nom, leur description, leurs outils et leur modèle ; chaque fichier fait lire au sous-agent `CLAUDE.md`, `.agents/AGENTS.md` et les sections utiles de la passation et de la vision avant d'agir ;
+- le circuit, les auditeurs, le parallélisme et ce qui ne change pas sont décrits dans [`CLAUDE.md`](../CLAUDE.md#circuit-dune-pr-et-sous-agents-de-projet-décision-de-nelson-du-31-10-2026), et rappelés dans [`.agents/AGENTS.md`](../.agents/AGENTS.md#sous-agents-de-projet-décision-du-31-10-2026) ;
+- le passage hebdomadaire du `controleur-coherence` est la seule exception à la règle « Ne lancer ni agent IA périodique ni fusion automatique » de `CLAUDE.md`, parce que Nelson l'a demandé expressément ; Claude Code le lance dans une session de travail, sans déclencheur automatique.
+
+Lectures retenues et choix de mise en œuvre de Claude Code (choix par défaut, à confirmer par Nelson) :
+- le « périmètre gelé de la bêta » est le périmètre du pilote (passation, section 2 : option 1, SAV et maintenance ; lots décidés pour le premier jour) ;
+- « lecture seule » vaut pour le dépôt : les auditeurs peuvent lancer des tests et des mutants sur une copie extraite hors du dépôt, et livrent leurs correctifs sous forme de patchs, que Claude Code reprend ; la lecture seule repose sur leurs consignes, et Claude Code vérifie après leur passage que la copie de travail n'a pas changé ;
+- une PR qui ne touche ni montant ni droit est auditée par l'`auditeur-droits-securite`, une PR uniquement documentaire par le `controleur-coherence` ; chaque auditeur relève aussi les erreurs hors de sa spécialité qu'il constate sur le diff complet ;
+- le `redacteur-tests` travaille sur la même branche que le code, écrit aussi les tests unitaires du client et possède les fichiers de tests du lot, que le code ne modifie pas sans passer par lui ;
+- un auditeur classe ses remarques bloquantes ou non dans la grille R/C/T/N existante : R, C et tout test manquant qui touche un montant (classé C) sont bloquants, T et N ne le sont pas ;
+- une PR qui touche une variable d'environnement est auditée par l'`auditeur-droits-securite` ;
+- une nouvelle tête qui ne fait que fusionner `main` dans la branche est vérifiée par un passage de vérification de chacun de ses auditeurs, avec une CI verte ;
+- le passage hebdomadaire est lancé par Claude Code lors de la première session de travail de chaque semaine ; son rapport est publié dans une issue ; ses remarques bloquantes deviennent un correctif prioritaire, les autres des issues `suivi-audit` ;
+- aucun sous-agent ne commite ni ne pousse : Claude Code commite, pousse, ouvre les PR, publie les constats et fusionne ;
+- si les agents de projet ne sont pas chargés dans une session, Claude Code lance un agent général avec le fichier de l'agent voulu comme consigne.
+
+Priorité immédiate : le prochain lot est la fin du lot 6, d'abord 6a-4 (PDF et envoi des autres documents), puis 6b (Microsoft 365), décidés pour le premier jour. La passation sera alignée par la prochaine PR documentaire, après la fusion de la troisième PR du lot « budget et heures prévues du chantier », qui la modifie.
