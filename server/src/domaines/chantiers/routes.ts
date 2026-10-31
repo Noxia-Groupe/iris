@@ -11,6 +11,7 @@ import { paramId } from '../../http/requete';
 import { routeMixte } from '../../http/routes-mixtes';
 import { FUSEAU_HORAIRE_PAR_DEFAUT, aujourdHuiEntreprise, dateIsoStricte } from '../../commun/dates';
 import { decimalToNumber, sommeExacte, differenceExacte } from '../../commun/montants';
+import { nombreDecimalNonNegatif } from '../../commun/validation';
 import { getParametres } from '../parametres/metier';
 import { getCompanySettings } from '../administration/metier';
 import { normaliserNumeroDevis, erreurNumeroDevis, numeroDevisDejaPris } from '../devis/metier';
@@ -30,6 +31,14 @@ const RESPONSABLE_SELECT = { select: { id: true, name: true, email: true } } as 
 // Le rôle du responsable ne sert qu'à décider qui peut clôturer (cf. peutCloturerChantier) :
 // il est retiré avant l'envoi, pour ne rien révéler d'un compte au-delà de son nom.
 const RESPONSABLE_SELECT_AVEC_ROLE = { select: { id: true, name: true, email: true, role: true } } as const;
+// Heures vendues et budgets du chantier (#387) : chiffres permis avant la virgule, ceux de la
+// colonne (Decimal(12,2) pour un budget, Decimal(10,2) pour les heures), et message du refus.
+const SAISIES_VENDUES: Record<string, { chiffres: number; refus: string }> = {
+  budgetGlobalVendu: { chiffres: 10, refus: 'Le budget global doit être un montant positif ou nul, d’au plus 10 chiffres avant la virgule et 2 après.' },
+  budgetMaterielVendu: { chiffres: 10, refus: 'Le budget matériel doit être un montant positif ou nul, d’au plus 10 chiffres avant la virgule et 2 après.' },
+  budgetMainOeuvreVendu: { chiffres: 10, refus: 'Le budget de main-d’œuvre doit être un montant positif ou nul, d’au plus 10 chiffres avant la virgule et 2 après.' },
+  heuresVendues: { chiffres: 8, refus: 'Les heures vendues doivent être un nombre positif ou nul, d’au plus 8 chiffres avant la virgule et 2 après.' },
+};
 function avecDroitDeCloture<T extends { responsableId: string | null; responsable: { role: string } | null }>(user: AuthRequest['user'], chantier: T) {
   const { responsable, ...reste } = chantier;
   const { role, ...responsableSansRole } = responsable ?? { role: null };
@@ -262,8 +271,15 @@ export function enregistrerRoutesChantiers(app: Express): void {
       if ('budgetGlobalVendu' in req.body && !voitRentabilite(req, existant, await getParametres())) {
         return res.status(403).json({ error: 'Le montant vendu n’est modifiable que par qui suit la rentabilité de ce chantier.' });
       }
+      // Heures vendues et budgets (#387) : même règle que les achats et les heures du chantier.
+      // Une saisie hors forme est refusée, jamais arrondie ni ramenée à 0, et rien n'est écrit ;
+      // le premier champ refusé, dans l'ordre de numericFields, donne le message.
       for (const key of numericFields) {
-        if (key in req.body) data[key] = parseFloat(req.body[key]) || 0;
+        if (!(key in req.body)) continue;
+        const { chiffres, refus } = SAISIES_VENDUES[key];
+        const valeur = nombreDecimalNonNegatif(req.body[key], chiffres, true);
+        if (valeur === null) return res.status(400).json({ error: refus });
+        data[key] = valeur;
       }
       for (const key of dateFields) {
         if (key in req.body) {
