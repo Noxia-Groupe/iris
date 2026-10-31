@@ -117,3 +117,48 @@ test('fiche de main d’œuvre avec ses prix de la demi-journée, puis devis com
   await expect(ligne.getByTestId('heures-prevues-devis')).toHaveText('Heures prévues : 22,5 h');
   expect((await lireDevis(request, session.token, objet)).heuresPrevues).toBe(22.5);
 });
+
+// Audit n° 1 de #379 (montants) : la modification d'une main d'œuvre remplace la fiche entière, un prix de la demi-journée
+// absent du corps étant vidé (choix par défaut, à confirmer). L'écran renvoie donc les deux prix de la demi-journée à la
+// réactivation et à l'enregistrement des autres prix ; seul un champ vidé à l'écran retire le sien.
+test('réactivation et enregistrement des prix depuis l’écran : les prix de la demi-journée sont renvoyés à l’identique ; un champ vidé retire le sien', async ({ allerSurPageAdmin, request, session }) => {
+  const suffixe = `${Date.now()}`;
+  const nom = `Demi-journée gardée E2E ${suffixe}`;
+  const fiche = await envoyer(request, session.token, 'post', '/catalogue/prestations', {
+    estMainOeuvre: true, reference: `E2E-FJ-GARDE-${suffixe}`, nom, tauxTva: '20',
+    prixVenteHt: '45', prixJourHorsContratHt: '300', prixHeureSousContratHt: '40', prixJourSousContratHt: '280', heuresParJour: '7.5',
+    prixDemiJourneeHorsContratHt: '160', prixDemiJourneeSousContratHt: '150.50',
+  }) as { id: string };
+  const relire = async () => {
+    const liste = await (await request.get(`${api}/catalogue/prestations`, { headers: { Authorization: `Bearer ${session.token}` } })).json() as
+      { id: string; actif: boolean; prixHeureSousContratHt: number; prixDemiJourneeHorsContratHt: number | null; prixDemiJourneeSousContratHt: number | null }[];
+    const lue = liste.find((p) => p.id === fiche.id)!;
+    return [lue.actif, lue.prixHeureSousContratHt, lue.prixDemiJourneeHorsContratHt, lue.prixDemiJourneeSousContratHt];
+  };
+  const desactivee = await request.delete(`${api}/catalogue/prestations/${fiche.id}`, { headers: { Authorization: `Bearer ${session.token}` } });
+  expect(desactivee.ok(), await desactivee.text()).toBeTruthy();
+  const page = await allerSurPageAdmin('/catalogue');
+  await page.getByRole('button', { name: 'Main d’œuvre', exact: true }).click();
+  const carte = page.getByRole('article', { name: nom });
+  // La réactivation depuis l'écran renvoie la fiche entière : les prix de la demi-journée restent.
+  await carte.getByRole('button', { name: `Réactiver ${nom}` }).click();
+  await expect(page.getByRole('status')).toHaveText(`Main d’œuvre « ${nom} » réactivée.`);
+  expect(await relire()).toEqual([true, 40, 160, 150.5]);
+  // Enregistrer un autre prix depuis l'écran garde ceux de la demi-journée, affichés dans le formulaire.
+  await carte.getByRole('button', { name: `Modifier les prix de ${nom}` }).click();
+  const formulaire = carte.getByRole('form', { name: `Prix de ${nom}` });
+  await expect(formulaire.getByLabel('Prix de vente HT à la demi-journée, hors contrat (€)')).toHaveValue('160');
+  await expect(formulaire.getByLabel('Prix de vente HT à la demi-journée, sous contrat (€)')).toHaveValue('150,5');
+  await formulaire.getByLabel('Prix de vente HT à l’heure, sous contrat (€)').fill('39,50');
+  await formulaire.getByRole('button', { name: 'Enregistrer les prix' }).click();
+  await expect(page.getByRole('status')).toHaveText(`Prix de « ${nom} » enregistrés.`);
+  expect(await relire()).toEqual([true, 39.5, 160, 150.5]);
+  // Un champ de la demi-journée vidé à l'écran retire ce prix, et lui seul.
+  await carte.getByRole('button', { name: `Modifier les prix de ${nom}` }).click();
+  await formulaire.getByLabel('Prix de vente HT à la demi-journée, sous contrat (€)').fill('');
+  await formulaire.getByRole('button', { name: 'Enregistrer les prix' }).click();
+  await expect(page.getByRole('status')).toHaveText(`Prix de « ${nom} » enregistrés.`);
+  expect(await relire()).toEqual([true, 39.5, 160, null]);
+  await expect(carte.locator('[data-prix="prixDemiJourneeHorsContratHt"]')).toHaveText('160,00 €');
+  await expect(carte.locator('[data-prix="prixDemiJourneeSousContratHt"]')).toHaveText('Non réglé');
+});
