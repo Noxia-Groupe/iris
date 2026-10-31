@@ -25133,5 +25133,70 @@ if (!TEST_DATABASE_URL) {
       await signer(devis.id);
       assert.equal(await heuresVenduesEnBase((await convertir(devis.id)).id), '0.68');
     });
+
+    // Audit n° 3 de #376 (montants) : l'écran renvoie une ligne gardée avec sa fiche (ligneEnEdition, puis
+    // ligneAEnvoyer, client/src/lib/catalogueDevis.ts) ; la durée modifiée de la fiche ne la change pas, jusqu'aux
+    // heures vendues du chantier.
+    test('une ligne gardée renvoyée avec sa fiche, comme par l’écran, garde ses minutes quand la durée de la fiche change, jusqu’au chantier', async () => {
+      const devis = await creerDevis('ligne gardée avec sa fiche', [duCatalogue(fiches.mes, 'prestations', { quantite: 2 })]);
+      assert.deepEqual([minutes(devis), devis.heuresPrevues], [[90], 3]);
+      const maj = await envoyer('put', `/api/catalogue/prestations/${fiches.mes.id}`, { ...fiches.mes, dureeIndicativeMin: 30 });
+      assert.equal(maj.status, 200, JSON.stringify(maj.body));
+      try {
+        const [l] = devis.lignes;
+        const garde = { ligneId: l.id, designation: l.designation, nature: l.nature, quantite: l.quantite, prixUnitaireHt: l.prixUnitaireHt, tauxTva: l.tauxTva, unite: l.unite, catalogueFamille: 'prestations', catalogueId: fiches.mes.id };
+        const modifie = await envoyer('patch', `/api/devis/${devis.id}`, { clientId: client.id, objet: devis.objet, lignes: [garde] });
+        assert.equal(modifie.status, 200, JSON.stringify(modifie.body));
+        assert.deepEqual([minutes(modifie.body), modifie.body.heuresPrevues], [[90], 3]);
+        await signer(devis.id);
+        assert.equal(await heuresVenduesEnBase((await convertir(devis.id)).id), '3.00');
+      } finally {
+        assert.equal((await envoyer('put', `/api/catalogue/prestations/${fiches.mes.id}`, { ...fiches.mes, dureeIndicativeMin: 90 })).status, 200);
+      }
+    });
+
+    // Audit n° 3 de #376 (montants) : un article ou un équipement repris du catalogue n'a pas de durée ; passé en
+    // main-d'œuvre, il compte 0 heure (choix par défaut, à confirmer), au devis comme au chantier.
+    test('un article ou un équipement du catalogue passé en main-d’œuvre compte 0 heure, au devis comme au chantier', async () => {
+      const equipement = await envoyer('post', '/api/catalogue/equipements', { reference: `TEST-HP-eqt-${suffixe}`, nom: 'TEST Heures prévues coffret', fabricant: 'Iris', prixVenteHt: '100', tauxTva: '20' });
+      assert.equal(equipement.status, 201, JSON.stringify(equipement.body));
+      const devis = await creerDevis('article et équipement en main-d’œuvre', [
+        duCatalogue(fiches.article, 'articles', { nature: 'MAIN_OEUVRE', quantite: 4 }),
+        duCatalogue(equipement.body, 'equipements', { nature: 'MAIN_OEUVRE', quantite: 2 }),
+        { designation: 'TEST Main-d’œuvre saisie à la main', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 50, tauxTva: 20 },
+      ]);
+      assert.deepEqual([minutes(devis), devis.heuresPrevues], [[0, 0, null], 1]);
+      await signer(devis.id);
+      assert.equal(await heuresVenduesEnBase((await convertir(devis.id)).id), '1.00');
+    });
+
+    // Audit n° 3 de #376 (T1) : le PDF ne porte ni le total ni les minutes prévues, quelle qu'en soit la formulation.
+    // Les libellés de test (fiche, objet, client, adresse) contiennent « heures prévues » : ils sont retirés du texte
+    // avant la recherche.
+    test('le PDF ne porte ni le total ni les minutes prévues, quelle qu’en soit la formulation', async () => {
+      const devis = await creerDevis('PDF sans heures', [duCatalogue(fiches.mes, 'prestations', { quantite: 2 })]);
+      const pdf = await request(app).get(`/api/devis/${devis.id}/document.pdf`).set(admin).buffer(true)
+        .parse((reponse, fin) => { const morceaux = []; reponse.on('data', (m) => morceaux.push(m)); reponse.on('end', () => fin(null, Buffer.concat(morceaux))); });
+      assert.equal(pdf.status, 200, String(pdf.body));
+      const lecteur = new PDFParse({ data: pdf.body });
+      const { text } = await lecteur.getText();
+      await lecteur.destroy();
+      assert.match(text, new RegExp(fiches.mes.nom));
+      let reste = text;
+      for (const libelle of [fiches.mes.nom, devis.objet, client.raisonSociale, '3 rue des Heures']) reste = reste.split(libelle).join('');
+      assert.doesNotMatch(reste, /heure|prévu|durée|minute|\bmin\b|\b90\b/i);
+    });
+
+    // Audit n° 3 de #376 (T2) : le total de l'écran est exact, comme les heures vendues ; c'est l'exemple de la
+    // passation (section 4) : 0,565 h donne 0,57 h (0,565 × 100 vaut 56,49999999999999 en flottant).
+    test('une ligne de 0,565 h saisie à la main : 0,57 h à l’écran comme au chantier, sans calcul en flottant', async () => {
+      const devis = await creerDevis('écran exact', [{ designation: 'TEST Main-d’œuvre de 0,565 h', nature: 'MAIN_OEUVRE', quantite: '0.565', prixUnitaireHt: 50, tauxTva: 20 }]);
+      assert.deepEqual([minutes(devis), devis.heuresPrevues], [[null], 0.57]);
+      const lu = await request(app).get('/api/devis').set(admin);
+      assert.equal(lu.status, 200, JSON.stringify(lu.body));
+      assert.equal(lu.body.find((d) => d.id === devis.id).heuresPrevues, 0.57);
+      await signer(devis.id);
+      assert.equal(await heuresVenduesEnBase((await convertir(devis.id)).id), '0.57');
+    });
   });
 }
