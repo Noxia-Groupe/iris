@@ -1,7 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { raisonSocialeActuelleImprimee } from './identite';
 
-// Envoi d'un document par la messagerie de l'utilisateur, et journal des envois (lot 6a-3).
+// Envoi d'un document par la messagerie de l'utilisateur, et journal des envois (lots 6a-3 et 6a-4d).
 //
 // Décision de Nelson du 22-10-2026 : tant que Microsoft 365 n'est pas prêt (lot 6b), la messagerie
 // de l'utilisateur s'ouvre avec le destinataire, l'objet et le texte remplis (lien mailto) ; un tel
@@ -10,8 +10,10 @@ import { raisonSocialeActuelleImprimee } from './identite';
 // objet et par quel compte (choix par défaut, à confirmer). Il est en ajout seul, garanti en base
 // (migration 20261023120000).
 //
-// Documents concernés : ceux qui ont déjà leur PDF, le devis (lot 6a-2) et la facture ou l'avoir
-// émis (lot 6a-1). Les autres documents viendront avec le lot 6a-4.
+// Documents concernés : ceux qui ont leur PDF. Le devis (lot 6a-2) et la facture ou l'avoir émis
+// (lot 6a-1), depuis le lot 6a-3 ; le compte rendu d'une intervention (lot 6a-4a) et le contrat de
+// maintenance (lot 6a-4b), depuis le lot 6a-4d (migration 20261031120000). L'envoi du rapport de
+// chantier viendra avec le lot 6a-4c.
 
 export const CANAL_MESSAGERIE = 'MESSAGERIE';
 
@@ -49,15 +51,23 @@ export async function propositionDestinataire(db: Prisma.TransactionClient, clie
   return courrielContact || client?.email?.trim() || '';
 }
 
-// Objet et texte du courriel, validés par Nelson le 23-10-2026 (lot 6a-3 bis) : aucune mention légale
-// ajoutée, le document joint porte les siennes. La raison sociale est celle que le PDF imprime, sauf
-// pour une pièce émise avant le lot 6a-1 (texteEnvoiFacture).
-type DocumentEnvoye = { nature: 'DEVIS'; numero: string; version: number } | { nature: 'FACTURE' | 'AVOIR'; numero: string };
+// Objet et texte du courriel : ceux du devis, de la facture et de l'avoir ont été validés par Nelson
+// le 23-10-2026 (lot 6a-3 bis) ; ceux du compte rendu et du contrat (lot 6a-4d) sont des choix par
+// défaut, à confirmer. Aucune mention légale ajoutée, le document joint porte les siennes. La raison
+// sociale est celle que le PDF imprime, sauf pour une pièce émise avant le lot 6a-1 (texteEnvoiFacture).
+type DocumentEnvoye = { nature: 'DEVIS'; numero: string; version: number } | { nature: 'FACTURE' | 'AVOIR'; numero: string }
+  | { nature: 'COMPTE_RENDU'; reference: string } | { nature: 'CONTRAT'; intitule: string };
+function designations(document: DocumentEnvoye): { designation: string; joint: string } {
+  switch (document.nature) {
+    case 'DEVIS': return { designation: `Devis ${document.numero} version ${document.version}`, joint: `notre devis ${document.numero} (version ${document.version})` };
+    case 'FACTURE': return { designation: `Facture ${document.numero}`, joint: `notre facture ${document.numero}` };
+    case 'AVOIR': return { designation: `Avoir ${document.numero}`, joint: `notre avoir ${document.numero}` };
+    case 'COMPTE_RENDU': return { designation: `Compte rendu d’intervention ${document.reference}`, joint: `le compte rendu de l’intervention ${document.reference}` };
+    case 'CONTRAT': return { designation: `Contrat de maintenance ${document.intitule}`, joint: `le récapitulatif de votre contrat de maintenance ${document.intitule}` };
+  }
+}
 export function texteEnvoi(document: DocumentEnvoye, raisonSociale: string): { objet: string; corps: string } {
-  const designation = document.nature === 'DEVIS' ? `Devis ${document.numero} version ${document.version}`
-    : `${document.nature === 'AVOIR' ? 'Avoir' : 'Facture'} ${document.numero}`;
-  const joint = document.nature === 'DEVIS' ? `notre devis ${document.numero} (version ${document.version})`
-    : `${document.nature === 'AVOIR' ? 'notre avoir' : 'notre facture'} ${document.numero}`;
+  const { designation, joint } = designations(document);
   return {
     objet: `${designation} – ${raisonSociale}`,
     corps: `Bonjour,\n\nVeuillez trouver ci-joint ${joint}.\n\nCordialement,\n${raisonSociale}`,
@@ -92,9 +102,24 @@ export async function texteEnvoiFacture(db: Prisma.TransactionClient, facture: F
   return texteEnvoi({ nature: avoir ? 'AVOIR' : 'FACTURE', numero: facture.numero ?? '' }, raisonSociale);
 }
 
+// Le compte rendu d'une intervention et le contrat de maintenance s'impriment avec l'identité actuelle
+// de la société (lots 6a-4a et 6a-4b) : l'objet et le texte de leur envoi aussi, refusés comme leur
+// PDF si elle est incomplète (lot 6a-4d).
+export async function texteEnvoiCompteRendu(db: Prisma.TransactionClient, intervention: { reference: string }) {
+  const raisonSociale = await raisonSocialeActuelleImprimee(db, 'd’envoyer un compte rendu');
+  return texteEnvoi({ nature: 'COMPTE_RENDU', reference: intervention.reference }, raisonSociale);
+}
+
+export async function texteEnvoiContrat(db: Prisma.TransactionClient, contrat: { titre: string }) {
+  const raisonSociale = await raisonSocialeActuelleImprimee(db, 'd’envoyer un contrat');
+  return texteEnvoi({ nature: 'CONTRAT', intitule: contrat.titre }, raisonSociale);
+}
+
 // Un envoi exposé : ni l'identifiant du compte ni le document, que l'écran connaît déjà.
 const ENVOI_EXPOSE = { id: true, canal: true, destinataire: true, objet: true, auteurNom: true, createdAt: true } as const;
-type DocumentDuJournal = { devisId: string } | { factureId: string };
+// Document d'un envoi : un devis, une facture (avoir compris), une intervention (son compte rendu) ou
+// un contrat de maintenance ; la base en exige exactement un (contrainte EnvoiDocument_un_document).
+type DocumentDuJournal = { devisId: string } | { factureId: string } | { interventionId: string } | { contratMaintenanceId: string };
 
 // Envois d'un document, du plus récent au plus ancien.
 export function lireEnvois(db: Prisma.TransactionClient, document: DocumentDuJournal) {

@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { CalendarPlus, FileDown, FilePlus2, RefreshCw, Wrench } from 'lucide-react';
+import { CalendarPlus, FileDown, FilePlus2, Mail, RefreshCw, Wrench } from 'lucide-react';
 import { apiFetch } from '../api';
 import { SelecteurClient } from '../components/SelecteurClient';
 import { GenerationVisites } from '../components/GenerationVisites';
+import EnvoiDocument, { type DocumentAEnvoyer } from '../components/EnvoiDocument';
 import { useCompanyTimezone, useFuseauSocieteConnu } from '../companyTimezoneContext';
 import { companyDateInputValue, formatCompanyDate, formatDateOnly } from '../lib/dateFormatting';
 import { nomFichierContrat, telechargerPdf } from '../lib/documentPdf';
@@ -36,6 +37,8 @@ export default function ContratsMaintenance() {
   const [enregistrementCouverture, setEnregistrementCouverture] = useState(false);
   const [erreur, setErreur] = useState('');
   const [succes, setSucces] = useState('');
+  // Envoi par la messagerie (lot 6a-4d) : le dialogue s'ouvre en tête de l'écran.
+  const [envoi, setEnvoi] = useState<DocumentAEnvoyer | null>(null);
 
   const charger = async () => {
     setChargement(true);
@@ -151,6 +154,13 @@ export default function ContratsMaintenance() {
     }
   };
 
+  // Envoi du contrat (lot 6a-4d) : tout contrat sauf un contrat annulé, que le serveur refuse aussi ; un
+  // contrat suspendu ou terminé s'envoie avec le statut que son PDF imprime.
+  const ouvrirEnvoi = (contrat: Contrat) => {
+    setErreur(''); setSucces('');
+    setEnvoi({ libelle: `le contrat de maintenance ${contrat.titre}`, chemin: `/contrats-maintenance/${contrat.id}`, nomFichier: nomFichierContrat(contrat) });
+  };
+
   return <div className="space-y-6">
     <div className="flex flex-col items-start gap-3 sm:flex-row sm:justify-between">
       <div><h1 className="text-2xl font-bold text-gray-900">Contrats de maintenance</h1><p className="text-gray-500">Les échéances contractuelles génèrent des dossiers d’intervention à planifier. Le planning reste une projection.</p></div>
@@ -158,6 +168,7 @@ export default function ContratsMaintenance() {
     </div>
     {erreur && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-red-700">{erreur}</div>}
     {succes && <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-700">{succes}</div>}
+    {envoi && <EnvoiDocument key={envoi.chemin} document={envoi} onFermer={() => setEnvoi(null)} />}
     <GenerationVisites onGeneration={() => void charger()} />
     {formulaireOuvert && <form onSubmit={creer} className="rounded-xl border border-blue-200 bg-blue-50 p-5 space-y-3">
       <h2 className="font-semibold">Nouveau contrat de maintenance</h2>
@@ -177,7 +188,7 @@ export default function ContratsMaintenance() {
       <textarea required name="motif" minLength={3} className="form-input" placeholder="Motif de la modification (obligatoire, 500 caractères maximum)" />
       <div className="flex gap-2"><button className="btn btn-primary" type="submit" disabled={enregistrementCouverture}>{enregistrementCouverture ? 'Enregistrement…' : 'Enregistrer la couverture'}</button><button className="btn btn-secondary" type="button" disabled={enregistrementCouverture} onClick={() => setContratCouvertureEdite(null)}>Annuler</button></div>
     </form>}
-    {chargement ? <p className="text-gray-500">Chargement…</p> : contrats.length === 0 ? <div className="rounded-xl border border-dashed p-10 text-center text-gray-500"><Wrench className="mx-auto mb-3" />Aucun contrat de maintenance.</div> : <div className="grid grid-cols-1 gap-3">{contrats.map((contrat) => <article key={contrat.id} className="rounded-xl border bg-white p-5 shadow-sm break-words"><div className="flex flex-col justify-between gap-4 sm:flex-row"><div className="min-w-0"><h2 className="font-semibold text-gray-900">{contrat.titre}</h2><p className="mt-1 text-sm text-gray-600">{contrat.client.raisonSociale}{contrat.site ? ` · ${contrat.site.nom} (${contrat.site.ville})` : ''}</p><p className="mt-2 text-sm text-gray-500">Début : {formatDate(contrat.dateDebut)} · Échéance : {formatDate(contrat.prochaineEcheance)} · Tous les {contrat.periodiciteMois} mois · {contrat.dureePrevisionnelleMinutes} min prévues</p><p className="mt-2 text-sm text-gray-700">Couverture : main-d’œuvre {contrat.politiqueMainOeuvre === 'INCLUSE' ? 'incluse' : 'hors forfait'} · matériel {contrat.politiqueMateriel === 'INCLUS' ? 'inclus' : 'hors forfait'}{contrat.noteCouverture ? ` · ${contrat.noteCouverture}` : ''}</p>{contrat.statut === 'ANNULE' && <p className="mt-2 text-sm text-red-700">Annulé avec son devis{contrat.annuleLe ? ` le ${formatCompanyDate(contrat.annuleLe, companyTimezone)}` : ''}{contrat.motifAnnulation ? ` : ${contrat.motifAnnulation}` : ''}</p>}</div><div className="flex flex-wrap items-center gap-3 sm:justify-end"><span className={`rounded-full px-3 py-1 text-sm font-medium ${contrat.statut === 'ANNULE' ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'}`}>{libelleStatut[contrat.statut] || contrat.statut}</span><button className="btn btn-secondary flex items-center gap-2" data-testid={`pdf-contrat-${contrat.id}`} aria-label={`PDF du contrat ${contrat.titre}`} onClick={() => void telechargerDocument(contrat)}><FileDown size={17} /> PDF</button>{contrat.statut === 'ACTIF' && <button className="btn btn-secondary" onClick={() => setContratCouvertureEdite(contrat)}>Modifier la couverture</button>}{contrat.statut === 'ACTIF' && <><button className="btn btn-secondary flex items-center gap-2" onClick={() => void generer(contrat)}><CalendarPlus size={17} /> Générer l’intervention</button><button className="btn btn-secondary flex items-center gap-2" onClick={() => void avancerEcheance(contrat)}><RefreshCw size={17} /> Échéance suivante</button></>}{contrat.statut === 'ACTIF' && <button className="btn btn-secondary" onClick={() => void changerStatut(contrat, 'SUSPENDU')}>Suspendre</button>}{contrat.statut === 'SUSPENDU' && <button className="btn btn-secondary" onClick={() => void changerStatut(contrat, 'ACTIF')}>Réactiver</button>}{!['TERMINE', 'ANNULE'].includes(contrat.statut) && <button className="btn btn-secondary" onClick={() => void changerStatut(contrat, 'TERMINE')}>Clôturer</button>}</div></div></article>)}</div>}
+    {chargement ? <p className="text-gray-500">Chargement…</p> : contrats.length === 0 ? <div className="rounded-xl border border-dashed p-10 text-center text-gray-500"><Wrench className="mx-auto mb-3" />Aucun contrat de maintenance.</div> : <div className="grid grid-cols-1 gap-3">{contrats.map((contrat) => <article key={contrat.id} className="rounded-xl border bg-white p-5 shadow-sm break-words"><div className="flex flex-col justify-between gap-4 sm:flex-row"><div className="min-w-0"><h2 className="font-semibold text-gray-900">{contrat.titre}</h2><p className="mt-1 text-sm text-gray-600">{contrat.client.raisonSociale}{contrat.site ? ` · ${contrat.site.nom} (${contrat.site.ville})` : ''}</p><p className="mt-2 text-sm text-gray-500">Début : {formatDate(contrat.dateDebut)} · Échéance : {formatDate(contrat.prochaineEcheance)} · Tous les {contrat.periodiciteMois} mois · {contrat.dureePrevisionnelleMinutes} min prévues</p><p className="mt-2 text-sm text-gray-700">Couverture : main-d’œuvre {contrat.politiqueMainOeuvre === 'INCLUSE' ? 'incluse' : 'hors forfait'} · matériel {contrat.politiqueMateriel === 'INCLUS' ? 'inclus' : 'hors forfait'}{contrat.noteCouverture ? ` · ${contrat.noteCouverture}` : ''}</p>{contrat.statut === 'ANNULE' && <p className="mt-2 text-sm text-red-700">Annulé avec son devis{contrat.annuleLe ? ` le ${formatCompanyDate(contrat.annuleLe, companyTimezone)}` : ''}{contrat.motifAnnulation ? ` : ${contrat.motifAnnulation}` : ''}</p>}</div><div className="flex flex-wrap items-center gap-3 sm:justify-end"><span className={`rounded-full px-3 py-1 text-sm font-medium ${contrat.statut === 'ANNULE' ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'}`}>{libelleStatut[contrat.statut] || contrat.statut}</span><button className="btn btn-secondary flex items-center gap-2" data-testid={`pdf-contrat-${contrat.id}`} aria-label={`PDF du contrat ${contrat.titre}`} onClick={() => void telechargerDocument(contrat)}><FileDown size={17} /> PDF</button>{contrat.statut !== 'ANNULE' && <button className="btn btn-secondary flex items-center gap-2" data-testid={`envoyer-contrat-${contrat.id}`} aria-label={`Envoyer le contrat de maintenance ${contrat.titre}`} onClick={() => ouvrirEnvoi(contrat)}><Mail size={17} /> Envoyer</button>}{contrat.statut === 'ACTIF' && <button className="btn btn-secondary" onClick={() => setContratCouvertureEdite(contrat)}>Modifier la couverture</button>}{contrat.statut === 'ACTIF' && <><button className="btn btn-secondary flex items-center gap-2" onClick={() => void generer(contrat)}><CalendarPlus size={17} /> Générer l’intervention</button><button className="btn btn-secondary flex items-center gap-2" onClick={() => void avancerEcheance(contrat)}><RefreshCw size={17} /> Échéance suivante</button></>}{contrat.statut === 'ACTIF' && <button className="btn btn-secondary" onClick={() => void changerStatut(contrat, 'SUSPENDU')}>Suspendre</button>}{contrat.statut === 'SUSPENDU' && <button className="btn btn-secondary" onClick={() => void changerStatut(contrat, 'ACTIF')}>Réactiver</button>}{!['TERMINE', 'ANNULE'].includes(contrat.statut) && <button className="btn btn-secondary" onClick={() => void changerStatut(contrat, 'TERMINE')}>Clôturer</button>}</div></div></article>)}</div>}
     <button className="text-sm text-gray-500 underline" onClick={() => void charger()}><RefreshCw className="mr-1 inline" size={14} />Actualiser la liste</button>
   </div>;
 }

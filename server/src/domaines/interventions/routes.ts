@@ -24,6 +24,7 @@ import {
 import { enregistrerLecturesInterventions } from './lectures';
 import { enregistrerRemiseAPlanifier } from './remiseAPlanifier';
 import { enregistrerSuites } from './suites';
+import { enregistrerEnvoisCompteRendu } from './envois';
 import { margeDevisIntervention } from './margeDevis';
 import { margeSavHorsContrat, prixVenteHoraireHorsContrat } from './margeSav';
 import { RefusAffaireSuite, verifierAffaireDeLaSuite } from './affaireSuite';
@@ -535,4 +536,7 @@ export function enregistrerRoutesInterventions(app: Express): void {
 
   // Marque « à suivre » et création d'une suite (intervention de suivi liée ; cf. suites.ts).
   enregistrerSuites(app);
+
+  // Envoi du compte rendu par la messagerie et journal de ses envois (lot 6a-4d ; cf. envois.ts).
+  enregistrerEnvoisCompteRendu(app);
 }

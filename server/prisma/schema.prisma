@@ -813,29 +813,38 @@ model EcritureFacture {
   @@index([factureId])
 }
 
-// Journal des envois d'un document (lot 6a-3, choix par défaut, à confirmer) : chaque envoi préparé
-// depuis Iris, aujourd'hui par la messagerie de l'utilisateur (lien mailto, PDF joint à la main).
-// Iris ne sait pas si le courriel est parti : une ligne dit qu'un envoi a été préparé, à qui, sous
-// quel objet et par qui. En ajout seul, garanti en base (migration 20261023120000) : ni
-// modification, ni suppression, ni vidage ; horodatage imposé par la base ; exactement un
-// document, devis ou facture (avoir compris). Le canal MICROSOFT_365 viendra avec le lot 6b.
+// Journal des envois d'un document (lots 6a-3 et 6a-4d, choix par défaut, à confirmer) : chaque envoi
+// préparé depuis Iris, aujourd'hui par la messagerie de l'utilisateur (lien mailto, PDF joint à la
+// main). Iris ne sait pas si le courriel est parti : une ligne dit qu'un envoi a été préparé, à qui,
+// sous quel objet et par qui. En ajout seul, garanti en base (migration 20261023120000) : ni
+// modification, ni suppression, ni vidage ; horodatage imposé par la base. Exactement un document :
+// devis ou facture (avoir compris), depuis le lot 6a-3 ; compte rendu d'une intervention ou contrat
+// de maintenance, depuis le lot 6a-4d (migration 20261031120000). Le canal MICROSOFT_365 viendra avec
+// le lot 6b.
 model EnvoiDocument {
-  id           String   @id @default(uuid())
-  devisId      String?
-  devis        Devis?   @relation(fields: [devisId], references: [id], onDelete: Restrict)
-  factureId    String?
-  facture      Facture? @relation(fields: [factureId], references: [id], onDelete: Restrict)
-  canal        String   // MESSAGERIE
-  destinataire String
-  objet        String
+  id                   String              @id @default(uuid())
+  devisId              String?
+  devis                Devis?              @relation(fields: [devisId], references: [id], onDelete: Restrict)
+  factureId            String?
+  facture              Facture?            @relation(fields: [factureId], references: [id], onDelete: Restrict)
+  // Compte rendu d'une intervention : un seul PDF par intervention, avec tous ses comptes rendus.
+  interventionId       String?
+  intervention         Intervention?       @relation(fields: [interventionId], references: [id], onDelete: Restrict)
+  contratMaintenanceId String?
+  contratMaintenance   ContratMaintenance? @relation(fields: [contratMaintenanceId], references: [id], onDelete: Restrict)
+  canal                String // MESSAGERIE
+  destinataire         String
+  objet                String
   // Compte qui a préparé l'envoi, sans clé étrangère (comme JournalFacture.acteurId), et son nom
   // copié à l'enregistrement : le journal se lit même si le compte est renommé ou supprimé.
-  auteurId     String
-  auteurNom    String
-  createdAt    DateTime @default(now()) @db.Timestamptz(3)
+  auteurId             String
+  auteurNom            String
+  createdAt            DateTime            @default(now()) @db.Timestamptz(3)
 
   @@index([devisId, createdAt])
   @@index([factureId, createdAt])
+  @@index([interventionId, createdAt])
+  @@index([contratMaintenanceId, createdAt])
 }
 
 model JournalFacture {
@@ -1092,6 +1101,7 @@ model ContratMaintenance {
   updatedAt                   DateTime    @updatedAt
   interventions               Intervention[]
   factures                    Facture[] @relation("FactureContratMaintenance")
+  envois                      EnvoiDocument[]
 
   @@index([clientId, statut])
   @@index([siteId])
@@ -1152,6 +1162,7 @@ model Intervention {
   coutsAchats    CoutInterventionAchat[]
   planningEvent  PlanningEvent?
   factures       Facture[] @relation("FactureIntervention")
+  envois         EnvoiDocument[]
 
   @@index([clientId, statut])
   @@index([siteId])
