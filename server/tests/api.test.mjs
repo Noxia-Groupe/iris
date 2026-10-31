@@ -25416,5 +25416,45 @@ if (!TEST_DATABASE_URL) {
         assert.equal(await heuresVenduesEnBase((await convertir(devis.id)).id), '99999999.99');
       }
     });
+
+    // Audit n° 8 de #376 (montants) : les minutes ne se saisissent jamais (« jamais saisies », commentaire de
+    // resoudreLignesDevis ; « une valeur envoyée par l'écran ou une clé d'intégration est ignorée », passation). Les tests
+    // précédents l'éprouvent sur une prestation à durée, une ligne gardée à minutes, une ligne saisie à la main et un
+    // article. Restent les branches où ni la fiche ni la copie ne donnent de minutes : prestation sans durée (0), main
+    // d'œuvre du catalogue (vide), ligne gardée sans minutes (vide) ou à 0 minute. Des minutes envoyées y sont ignorées,
+    // au devis comme au chantier.
+    test('des minutes envoyées pour une prestation sans durée, une main d’œuvre du catalogue, ou une ligne gardée sans minutes ou à 0 minute, sont ignorées, jusqu’au chantier', async () => {
+      const devis = await creerDevis('minutes envoyées sans durée', [
+        duCatalogue(fiches.sansduree, 'prestations', { quantite: 2, minutesPrevuesUnite: 45 }), // 0 h, et non 1,5 h
+        duCatalogue(fiches.mo, 'prestations', { quantite: 2, minutesPrevuesUnite: 30 }), // 2 h, et non 1 h
+        { designation: 'TEST Main-d’œuvre saisie à la main', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 50, tauxTva: 20 }, // 1 h
+      ]);
+      assert.deepEqual([minutes(devis), devis.heuresPrevues], [[0, null, null], 3]);
+      // Les trois lignes, gardées, renvoyées avec 15 minutes : 3 h, et non 0,75 h (lignes sans minutes) ni 3,5 h (ligne à
+      // 0 minute).
+      const garde = devis.lignes.map((l) => ({ ligneId: l.id, designation: l.designation, nature: l.nature, quantite: l.quantite, prixUnitaireHt: l.prixUnitaireHt, tauxTva: l.tauxTva, unite: l.unite, catalogueFamille: l.catalogueFamille, catalogueId: l.catalogueId, minutesPrevuesUnite: 15 }));
+      const modifie = await envoyer('patch', `/api/devis/${devis.id}`, { clientId: client.id, objet: devis.objet, lignes: garde });
+      assert.equal(modifie.status, 200, JSON.stringify(modifie.body));
+      assert.deepEqual([minutes(modifie.body), modifie.body.heuresPrevues], [[0, null, null], 3]);
+      await signer(devis.id);
+      assert.equal(await heuresVenduesEnBase((await convertir(devis.id)).id), '3.00');
+    });
+
+    // Audit n° 8 de #376 (montants) : la somme des minutes est exacte, sans arrondi par ligne (correctif R1 de l'audit
+    // n° 1). Le test des 0,1 × 5, 20 et 20 minutes ne le sépare que d'un arrondi de chaque ligne au centième d'heure :
+    // arrondies à la minute (1, 2 et 2), ses lignes donnent le même total, 0,08 h. Ici, 0,059 × 5 minutes et 0,012 × 50
+    // minutes font 0,895 minute, soit 0,01 h. Arrondies à la minute (0 et 1), ou au centième de minute (0,30 et 0,60),
+    // elles feraient 0,02 h. C'est vrai au devis comme au chantier.
+    test('0,059 × 5 minutes et 0,012 × 50 minutes font 0,895 minute : 0,01 h, sans arrondi des minutes de chaque ligne, au devis comme au chantier', async () => {
+      await prestation('cinq-somme', { unite: 'forfait', prixVenteHt: '10', dureeIndicativeMin: 5 });
+      await prestation('cinquante-somme', { unite: 'forfait', prixVenteHt: '10', dureeIndicativeMin: 50 });
+      const devis = await creerDevis('minutes non arrondies', [
+        duCatalogue(fiches['cinq-somme'], 'prestations', { quantite: '0.059' }), // 0,295 minute
+        duCatalogue(fiches['cinquante-somme'], 'prestations', { quantite: '0.012' }), // 0,6 minute
+      ]);
+      assert.deepEqual([minutes(devis), devis.heuresPrevues], [[5, 50], 0.01]);
+      await signer(devis.id);
+      assert.equal(await heuresVenduesEnBase((await convertir(devis.id)).id), '0.01');
+    });
   });
 }
