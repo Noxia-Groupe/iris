@@ -920,6 +920,8 @@ Règle 5 : sur un micro-arbitrage, l'option la plus simple et, en cas de doute, 
   - Libellés et noms de fichiers ci-dessus.
   - Envoi dans une PR suivante (lot 6a-4e, #401).
 
+**Production commune des PDF (lot 6b-1a)**, sans changement de comportement : chaque domaine lit, dans une transaction donnée, ce que le PDF de son document imprime (devis, facture ou avoir, compte rendu, contrat, rapport de chantier), ou rend le refus de sa route, avec le même statut et le même message, puis rend le PDF après la transaction ; la route « PDF » enchaîne les deux étapes, et l'envoi par Microsoft 365 (lot 6b-1b) les reprendra. Les gardes, le périmètre et le refus du technicien restent dans la route. Le PDF d'une facture ou d'un avoir, lu jusque-là hors transaction, l'est en REPEATABLE READ comme les quatre autres, sans effet visible : la pièce émise est figée. **Appliqué** (#405).
+
 **Tableau du catalogue sur téléphone et tablette** (#327, micro-arbitrage d'affichage, règle 5) : choix par défaut **confirmé** par Nelson le 26-10-2026 (« Affichage du catalogue : fait le defiler », [historique](HISTORIQUE-DECISIONS.md#décisions-du-26-10-2026-sur-le-temps-passé-et-le-catalogue)) : le tableau des fiches défile latéralement dans son cadre (`overflow-x-auto`, comme le plan comptable), plutôt que de passer en cartes sous une largeur donnée ; à 320, 375 et 1024 px, la colonne « Actions » n'est plus rognée. **Appliqué** par #331 (#327).
 
 ## 5. Préalables à la mise en service et contrat d'une PR

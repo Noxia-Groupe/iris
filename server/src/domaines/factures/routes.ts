@@ -20,12 +20,13 @@ import {
   factureInclude, formaterAdresseFacturation, FactureRattachementRefuse, ventilationTvaDerivee, ventilationFacture,
   lignesAvoirPartiel, AvoirPlafondError, derniereDateFactureNumerotee, refusDocumentFacture, refuserOrigineAnnulee,
 } from './metier';
-import { rendreDocumentFacturePdf } from './pdf';
 import { tempsPasseDeLaChaine } from './tempsPasse';
 import { champsIdentiteManquants, figerIdentiteEmetteur, IdentiteEmetteurIncompleteError } from '../documents/identite';
 import { exigerIdentiteClient, IdentiteClientIncompleteError } from '../documents/identiteClient';
 import { avecSoldes, synchroniserStatutReglement } from '../reglements/metier';
 import { FACTURE_A_ENVOYER, DestinataireInvalideError, enregistrerEnvoi, lireEnvois, propositionDestinataire, texteEnvoiFacture, validerDestinataire } from '../documents/envois';
+import { produirePdf, repondrePdf } from '../documents/productionPdf';
+import { lireFacturePdf, rendreFichierFacturePdf } from './productionPdf';
 
 export function enregistrerRoutesFactures(app: Express): void {
   app.get('/api/factures/chronologie', requireAuth, requireAdmin, async (_req, res) => {
@@ -76,19 +77,11 @@ export function enregistrerRoutesFactures(app: Express): void {
     } catch (error) { return res.status(500).json({ error: 'Lecture des factures impossible.' }); }
   });
 
+  // PDF d'une facture ou d'un avoir émis, lu puis rendu par factures/productionPdf.ts (lot 6b-1a).
   app.get('/api/factures/:id/document.pdf', requireAuth, requireAdmin, async (req, res) => {
     try {
-      const facture = await prisma.facture.findUnique({ where: { id: String(req.params.id) }, include: { ...factureInclude, identiteEmetteur: { include: { logo: { select: { contenu: true } } } } } });
-      if (!facture) return res.status(404).json({ error: 'Facture introuvable.' });
-      const refus = refusDocumentFacture(facture);
-      if (refus) return res.status(409).json({ error: refus });
-      // L'identité figée garde son logo en octets : elle échappe à la conversion des montants.
-      const { identiteEmetteur, ...piece } = facture;
-      const pdf = await rendreDocumentFacturePdf({ ...decimalToNumber(piece), identiteEmetteur });
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `inline; filename="${facture.numero}.pdf"`);
-      res.setHeader('Content-Length', pdf.length);
-      return res.send(pdf);
+      // REPEATABLE READ, comme les quatre autres PDF : la pièce et ses relations, que Prisma lit en plusieurs requêtes, dans un même instantané.
+      return repondrePdf(res, await produirePdf((tx) => lireFacturePdf(tx, String(req.params.id)), rendreFichierFacturePdf, { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead }));
     } catch { return res.status(500).json({ error: 'Lecture du document de facture impossible.' }); }
   });
 

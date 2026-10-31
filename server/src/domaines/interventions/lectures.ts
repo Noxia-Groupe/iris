@@ -1,5 +1,5 @@
 import type { Express } from 'express';
-import { prisma, transactionVerifiee } from '../../db';
+import { prisma } from '../../db';
 import { ROLE_TECHNICIEN } from '../../droits/roles';
 import { type AuthRequest, requireAuth } from '../../http/auth';
 import { blockCommercial } from '../../http/gardes';
@@ -7,16 +7,13 @@ import { paramId } from '../../http/requete';
 import { FUSEAU_HORAIRE_PAR_DEFAUT, aujourdHuiEntreprise, dateIsoStricte } from '../../commun/dates';
 import { decimalToNumber } from '../../commun/montants';
 import { getCompanySettings } from '../administration/metier';
-import { IdentiteEmetteurIncompleteError, identiteActuelleImprimee } from '../documents/identite';
 import { CHANTIER_INTERVENTION_SELECT, exposerIntervention, getInterventionFilterForUser } from './metier';
 import { RAPPORT_SELECT, SIGNATURE_SELECT } from './comptesRendus';
-import { INTERVENTION_IMPRIMEE, rendreCompteRenduPdf } from './document';
 import { liensSuivi } from './suites';
+import { produirePdf, repondrePdf } from '../documents/productionPdf';
+import { lireCompteRenduPdf, rendreFichierCompteRenduPdf } from './productionPdf';
 
 // --- Lectures des interventions SAV : liste, journée du technicien et fiche (lot pilote 3b-4), PDF du compte rendu (lot 6a-4a) ---
-
-// Intervention sans compte rendu : rien à imprimer (409).
-class AucunCompteRendu extends Error {}
 
 // Ce que portent la liste, la journée et la fiche : de quoi se rendre sur place (adresse du site ou
 // de l'affaire, téléphone du contact) et le créneau planifié, jamais un montant. Les liens d'une
@@ -131,30 +128,16 @@ export function enregistrerLecturesInterventions(app: Express): void {
   // s'imprime. L'identité imprimée est l'identité actuelle de la société, refusée si elle est incomplète
   // (409). Toutes les lectures se font dans un même instantané (REPEATABLE READ), comme le PDF du devis :
   // un compte rendu ou une signature enregistrés pendant l'impression n'y entrent pas à moitié, ni
-  // l'identité avec un autre logo.
+  // l'identité avec un autre logo. Le PDF est lu puis rendu par interventions/productionPdf.ts (lot
+  // 6b-1a), le rendu après la transaction : le refus du technicien, le périmètre de la fiche et
+  // l'exclusion des annulées restent ici.
   app.get('/api/interventions/:id/document.pdf', requireAuth, blockCommercial, async (req: AuthRequest, res) => {
     try {
       if (req.user!.role === ROLE_TECHNICIEN) return res.status(403).json({ error: 'Le PDF du compte rendu n’est pas ouvert au technicien.' });
-      const lu = await transactionVerifiee(async (tx) => {
-        const intervention = await tx.intervention.findFirst({
-          where: { AND: [{ id: paramId(req) }, getInterventionFilterForUser(req.user!), { statut: { not: 'ANNULEE' } }] },
-          select: INTERVENTION_IMPRIMEE,
-        });
-        if (!intervention) return null;
-        if (!intervention.rapports.length) throw new AucunCompteRendu();
-        const identite = await identiteActuelleImprimee(tx, 'd’imprimer un compte rendu');
-        const societe = await tx.companySettings.findUnique({ where: { id: 'singleton' }, select: { fuseauHoraire: true } });
-        return { intervention, identite, fuseau: societe?.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT };
-      }, { isolationLevel: 'RepeatableRead' });
-      if (!lu) return res.status(404).json({ error: 'Intervention introuvable.' });
-      const pdf = await rendreCompteRenduPdf(lu);
-      res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `inline; filename="Compte-rendu-${lu.intervention.reference}.pdf"`);
-      res.setHeader('Content-Length', pdf.length);
-      res.send(pdf);
+      repondrePdf(res, await produirePdf((tx) => lireCompteRenduPdf(tx, {
+        AND: [{ id: paramId(req) }, getInterventionFilterForUser(req.user!), { statut: { not: 'ANNULEE' } }],
+      }), rendreFichierCompteRenduPdf, { isolationLevel: 'RepeatableRead' }));
     } catch (error) {
-      if (error instanceof AucunCompteRendu) return res.status(409).json({ error: 'Aucun compte rendu à imprimer.' });
-      if (error instanceof IdentiteEmetteurIncompleteError) return res.status(409).json({ error: error.message });
       console.error('Erreur PDF compte rendu intervention SAV', error);
       res.status(500).json({ error: 'Impression du compte rendu impossible.' });
     }

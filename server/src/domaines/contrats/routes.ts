@@ -5,12 +5,12 @@ import { requireAdmin } from '../../http/gardes';
 import { paramId } from '../../http/requete';
 import { decimalToNumber } from '../../commun/montants';
 import { exposerIntervention } from '../interventions/metier';
-import { SITE_FACTURATION_ORDRE } from '../factures/metier';
-import { IdentiteEmetteurIncompleteError, identiteActuelleImprimee } from '../documents/identite';
+import { IdentiteEmetteurIncompleteError } from '../documents/identite';
 import { DestinataireInvalideError, enregistrerEnvoi, lireEnvois, propositionDestinataire, texteEnvoiContrat, validerDestinataire } from '../documents/envois';
 import { GenerationVisitesDesactivee, etatGenerationVisites, executerGenerationVisites } from './generation';
 import { journaliserContrat, motifContratValide, lirePolitiqueCouverture, verrouillerContratMaintenance, lireSaisieContrat, creerContratMaintenance, SaisieContratInvalide, visiteDeLEcheance, creerVisiteContrat, avancerEcheanceContrat, VISITE_INCLUDE } from './metier';
-import { nomFichierContrat, rendreDocumentContratPdf } from './document';
+import { produirePdf, repondrePdf } from '../documents/productionPdf';
+import { lireContratPdf, rendreFichierContratPdf } from './productionPdf';
 
 // Un contrat annulé avec son devis (lot 4 suite) ne se modifie, ne se suspend, ne se clôt ni ne se
 // réactive plus ; la base le refuse aussi (trigger contrat_annule_fige). La suspension et la clôture
@@ -20,43 +20,12 @@ const REFUS_CONTRAT_ANNULE = 'Ce contrat a été annulé avec son devis : il ne 
 // PDF du contrat de maintenance (lot 6a-4b) : récapitulatif du contrat, de tout statut, avec
 // l'identité actuelle de la société, refusé (409) si elle est incomplète. Toutes les lectures se font
 // dans un même instantané (REPEATABLE READ) : le contrat, ses visites, son devis d'origine, le site de
-// facturation du client et l'identité de la société, logo compris.
+// facturation du client et l'identité de la société, logo compris. Le PDF est lu puis rendu par
+// contrats/productionPdf.ts (lot 6b-1a), le rendu après la transaction.
 const imprimerContrat: RequestHandler = async (req, res) => {
   try {
-    const lu = await transactionVerifiee(async (tx) => {
-      const contrat = await tx.contratMaintenance.findUnique({
-        where: { id: paramId(req) },
-        include: {
-          client: { select: { raisonSociale: true, sites: { orderBy: SITE_FACTURATION_ORDRE, take: 1 } } },
-          site: true,
-          // Les visites seules : les suites portent le contrat sans échéance.
-          interventions: { where: { echeanceContrat: { not: null } }, orderBy: [{ echeanceContrat: 'asc' }, { id: 'asc' }], select: { echeanceContrat: true, statut: true } },
-        },
-      });
-      if (!contrat) return null;
-      const identite = await identiteActuelleImprimee(tx, 'd’imprimer un contrat');
-      // Devis d'origine : celui dont la conversion a créé le contrat (lot pilote 4).
-      const conversion = await tx.devisConversion.findFirst({
-        where: { cibleType: 'CONTRAT', cibleId: contrat.id }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-        select: { devis: { select: { numero: true, version: true } } },
-      });
-      return { contrat, identite, devisOrigine: conversion?.devis ?? null };
-    }, { isolationLevel: 'RepeatableRead' });
-    if (!lu) return void res.status(404).json({ error: 'Contrat de maintenance introuvable.' });
-    const { contrat, identite, devisOrigine } = lu;
-    const pdf = await rendreDocumentContratPdf({
-      identite,
-      contrat: {
-        ...contrat, siteFacturation: contrat.client.sites[0] ?? null, devisOrigine,
-        visites: contrat.interventions.map((visite) => ({ echeanceContrat: visite.echeanceContrat!, statut: visite.statut })),
-      },
-    });
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="${nomFichierContrat(contrat)}"`);
-    res.setHeader('Content-Length', pdf.length);
-    res.send(pdf);
+    repondrePdf(res, await produirePdf((tx) => lireContratPdf(tx, paramId(req)), rendreFichierContratPdf, { isolationLevel: 'RepeatableRead' }));
   } catch (error) {
-    if (error instanceof IdentiteEmetteurIncompleteError) return void res.status(409).json({ error: error.message });
     console.error('Contrat de maintenance, PDF :', error);
     res.status(500).json({ error: 'Impression du contrat de maintenance impossible.' });
   }

@@ -33,7 +33,7 @@ USE / <anonymous>#aad6e7e7a45c
 GET /api/factures/chronologie requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#d089685a5f45
 GET /api/factures/a-regler requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#da27e52f58a3
 GET /api/factures requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#bb316d5281c8
-GET /api/factures/:id/document.pdf requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#7234cd775819
+GET /api/factures/:id/document.pdf requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#7f2413f4ae09
 GET /api/factures/:id/envois requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#3c864ba42010
 POST /api/factures/:id/envois requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#9623ed8b265a
 GET /api/factures/:id/journal requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#90d251d8d096
@@ -68,7 +68,7 @@ GET /api/contrats-maintenance requireAuth#07b983da0ce5 > requireAdmin#72440b3191
 GET /api/contrats-maintenance/generation-visites requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#373a35ed462c
 POST /api/contrats-maintenance/generation-visites requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#1e9928683461
 GET /api/contrats-maintenance/:id/journal-saisies requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#3f95c0d7c799
-GET /api/contrats-maintenance/:id/document.pdf requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > imprimerContrat#f6ec0d683c4e
+GET /api/contrats-maintenance/:id/document.pdf requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > imprimerContrat#66662fc8c94e
 GET /api/contrats-maintenance/:id/envois requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > lireEnvoisContrat#5d497359adf0
 POST /api/contrats-maintenance/:id/envois requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > envoyerContrat#edffbb1a5f35
 POST /api/contrats-maintenance requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#cb003fe48a0c
@@ -80,7 +80,7 @@ POST /api/interventions requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 
 GET /api/interventions requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#3367306260fa
 GET /api/interventions/journee requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#c20552bc49ac
 GET /api/interventions/:id requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#4d7dee0b11a1
-GET /api/interventions/:id/document.pdf requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#45611a4924f0
+GET /api/interventions/:id/document.pdf requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#e936d5457d4c
 GET /api/interventions/:id/couts requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#cf770672fe56
 POST /api/interventions/:id/couts/heures requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#857c638bde3f
 POST /api/interventions/:id/couts/achats requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#ecb2f2a84911
@@ -108,7 +108,7 @@ GET /api/chantiers requireAuth#07b983da0ce5 > listerChantiers#11dab797928b
 GET /api/v1/chantiers <anonymous>{scope="chantiers:read"}#4aeb6d464b38 > listerChantiers#11dab797928b
 GET /api/chantiers/:id requireAuth#07b983da0ce5 > <anonymous>#47b737c19cf3
 GET /api/chantiers/:id/journal-saisies requireAuth#07b983da0ce5 > <anonymous>#4373de266aea
-GET /api/chantiers/:id/document.pdf requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > imprimerRapportChantier#d6256a77338f
+GET /api/chantiers/:id/document.pdf requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > imprimerRapportChantier#a1c8ca5e6196
 GET /api/chantiers/:id/envois requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > lireEnvoisRapportChantier#c22e9c533f8c
 POST /api/chantiers/:id/envois requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > envoyerRapportChantier#251cb99af820
 POST /api/chantiers requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#5a2a6ae542c5
@@ -222,7 +222,7 @@ PATCH /api/v1/devis/:id <anonymous>{scope="devis:write"}#4aeb6d464b38 > modifier
 POST /api/devis/:id/revisions requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > creerRevision#0b37377b1190
 POST /api/v1/devis/:id/revisions <anonymous>{scope="devis:write"}#4aeb6d464b38 > creerRevision#0b37377b1190
 POST /api/devis/:id/signature requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > signerDevis#aac29183a21a
-GET /api/devis/:id/document.pdf requireAuth#07b983da0ce5 > <anonymous>{permission="devis:read"}#c4dc4769916b > imprimerDevis#b0e632f75b6b
+GET /api/devis/:id/document.pdf requireAuth#07b983da0ce5 > <anonymous>{permission="devis:read"}#c4dc4769916b > imprimerDevis#1a5d3834cffa
 GET /api/devis/:id/envois requireAuth#07b983da0ce5 > <anonymous>{permission="devis:read"}#c4dc4769916b > lireEnvoisDevis#2f968ae9a8f2
 POST /api/devis/:id/envois requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > envoyerDevis#a62f429280b0
 PUT /api/devis/:id/statut requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > changerStatutDevis#bae4b07f199b

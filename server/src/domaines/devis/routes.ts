@@ -16,8 +16,8 @@ import { nombreDecimalNonNegatif } from '../../commun/validation';
 import { estTauxTvaFrancais } from '../../commun/tva';
 import { getParametres } from '../parametres/metier';
 import { getCompanySettings } from '../administration/metier';
-import { SITE_FACTURATION_ORDRE, formaterAdresseFacturation } from '../factures/metier';
-import { IdentiteEmetteurIncompleteError, figerIdentiteEmetteur, identiteActuelleImprimee } from '../documents/identite';
+import { formaterAdresseFacturation } from '../factures/metier';
+import { IdentiteEmetteurIncompleteError, figerIdentiteEmetteur } from '../documents/identite';
 import { IdentiteClientIncompleteError, exigerIdentiteClient } from '../documents/identiteClient';
 import { type CatalogueFamily, catalogueFamily, catalogueModels } from '../catalogue/metier';
 import { sanitizeTypes, refusTitulaire, refusCommercial } from '../chantiers/metier';
@@ -33,10 +33,11 @@ import {
   dureeTempsPasse, type ReglagesTempsPasseDevis,
 } from './tempsPasse';
 import { ForfaitSaisieError, exigerForfaitHorsTempsPasse } from './forfaitMainOeuvre';
-import { rendreDocumentDevisPdf } from './document';
 import { annulerDevisEnCascade } from './annulation';
 import { chantierPourInterventionDuDevis, rattacherInterventionDuDevis } from './rattachement';
 import { DEVIS_A_ENVOYER, DestinataireInvalideError, enregistrerEnvoi, lireEnvois, propositionDestinataire, texteEnvoiDevis, validerDestinataire } from '../documents/envois';
+import { produirePdf, repondrePdf } from '../documents/productionPdf';
+import { lireDevisPdf, rendreFichierDevisPdf } from './productionPdf';
 
 function devisErreur(res: express.Response, error: unknown) {
   if (error instanceof DevisSaisieError || error instanceof TempsPasseSaisieError || error instanceof ForfaitSaisieError) return res.status(400).json({ error: error.message });
@@ -163,36 +164,11 @@ const signerDevis: express.RequestHandler = async (req, res) => { try {
   res.status(201).json(signature);
 } catch (error) { devisErreur(res, error); } };
 
-// Un devis signé s'imprime depuis les copies prises à sa signature ; un devis non signé (brouillon,
-// envoyé, ou refusé ou annulé avant signature), avec l'identité de la société et la fiche client
-// actuelles. Une signature antérieure au lot 6a-2 n'a pas de copie : son devis s'imprime comme un
-// devis non signé.
-// Toutes les lectures se font dans un même instantané (REPEATABLE READ) : un devis modifié pendant
-// l'impression ne mêle jamais ses anciens totaux à ses nouvelles lignes, ni l'identité à un autre logo.
+// PDF du devis (lot 6a-2), lu puis rendu par devis/productionPdf.ts (lot 6b-1a). Toutes les lectures se
+// font dans un même instantané (REPEATABLE READ) : un devis modifié pendant l'impression ne mêle jamais
+// ses anciens totaux à ses nouvelles lignes, ni l'identité à un autre logo. Le rendu suit la transaction.
 const imprimerDevis: express.RequestHandler = async (req, res) => { try {
-  const lu = await transactionVerifiee(async tx => {
-    const devis = await tx.devis.findUnique({ where: { id: paramId(req) }, include: {
-      lignes: { orderBy: { ordre: 'asc' } },
-      signature: { include: { identiteEmetteur: { include: { logo: { select: { contenu: true } } } } } },
-      client: { select: { raisonSociale: true, sites: { orderBy: SITE_FACTURATION_ORDRE, take: 1 } } },
-    } });
-    if (!devis) return null;
-    const copie = devis.signature?.identiteEmetteur ? devis.signature : null;
-    const identite = copie?.identiteEmetteur ?? await identiteActuelleImprimee(tx, 'd’imprimer un devis');
-    const client = copie
-      ? { raisonSociale: copie.clientRaisonSociale!, adresse: copie.clientAdresse }
-      : { raisonSociale: devis.client.raisonSociale, adresse: devis.client.sites[0] ? formaterAdresseFacturation(devis.client.sites[0]) : null };
-    // Les dates d'un devis signé (création, signature) se lisent dans le fuseau copié à sa signature.
-    const societe = copie ? null : await tx.companySettings.findUnique({ where: { id: 'singleton' }, select: { fuseauHoraire: true } });
-    return { devis, identite, client, fuseau: copie?.fuseauHoraire || societe?.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT };
-  }, { isolationLevel: 'RepeatableRead' });
-  if (!lu) return void res.status(404).json({ error: 'Devis introuvable.' });
-  const { devis } = lu;
-  const pdf = await rendreDocumentDevisPdf(lu);
-  res.setHeader('Content-Type', 'application/pdf');
-  res.setHeader('Content-Disposition', `inline; filename="${devis.numero}-v${devis.version}.pdf"`);
-  res.setHeader('Content-Length', pdf.length);
-  res.send(pdf);
+  repondrePdf(res, await produirePdf(tx => lireDevisPdf(tx, paramId(req)), rendreFichierDevisPdf, { isolationLevel: 'RepeatableRead' }));
 } catch (error) { devisErreur(res, error); } };
 
 // Envoi du devis par la messagerie de l'utilisateur (lot 6a-3) : destinataire, objet et texte
