@@ -41,6 +41,10 @@ export type LigneDevisSaisie = {
   tarifTempsPasse?: 'HORS_CONTRAT' | 'SOUS_CONTRAT' | null;
 };
 
+// Total des heures prévues d'un devis (lot « budget et heures prévues du chantier ») : calculé par le
+// serveur, affiché à l'écran du devis seulement, jamais sur le PDF (réponse « Écran seulement »).
+export const formatHeuresPrevues = (heures: number) => `${Number(heures).toLocaleString('fr-FR', { maximumFractionDigits: 2 })} h`;
+
 export const LIBELLES_FAMILLES: Record<FamilleCatalogue, string> = {
   prestations: 'Prestation',
   articles: 'Article',

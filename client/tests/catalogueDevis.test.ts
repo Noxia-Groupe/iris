@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ligneAEnvoyer, ligneDepuisCatalogue, ligneEnEdition, ligneVierge, type FicheCatalogueDevis } from '../src/lib/catalogueDevis.ts';
+import { formatHeuresPrevues, ligneAEnvoyer, ligneDepuisCatalogue, ligneEnEdition, ligneVierge, type FicheCatalogueDevis } from '../src/lib/catalogueDevis.ts';
 
 const fiche: FicheCatalogueDevis = { famille: 'articles', id: 'fiche-1', reference: 'CAB-01', nom: 'Câble', unite: 'm', nature: 'FOURNITURE', prixVenteHt: 2.5, tauxTva: 20, prixAchatHt: 0.8 };
 
@@ -42,4 +42,11 @@ test('seule une ligne vierge est remplacée par la première fiche ajoutée', ()
   assert.equal(ligneVierge({ designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 0, tauxTva: 20 }), false);
   assert.equal(ligneVierge({ designation: '', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 5, tauxTva: 20 }), false);
   assert.equal(ligneVierge({ ligneId: 'l', designation: '', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 0, tauxTva: 20 }), false);
+});
+
+test('total des heures prévues d’un devis : en heures, deux décimales au plus, à la française', () => {
+  assert.equal(formatHeuresPrevues(8), '8 h');
+  assert.equal(formatHeuresPrevues(2.5), '2,5 h');
+  assert.equal(formatHeuresPrevues(0.75), '0,75 h');
+  assert.equal(formatHeuresPrevues(0), '0 h');
 });
