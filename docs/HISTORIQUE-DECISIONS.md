@@ -1320,7 +1320,7 @@ Lectures retenues et choix de mise en œuvre de Claude Code (choix par défaut, 
 - le « périmètre gelé de la bêta » est le périmètre du pilote (passation, section 2 : option 1, SAV et maintenance ; lots décidés pour le premier jour) ;
 - « lecture seule » vaut pour le dépôt : les auditeurs peuvent lancer des tests et des mutants sur une copie extraite hors du dépôt, et livrent leurs correctifs sous forme de patchs, que Claude Code reprend ; la lecture seule repose sur leurs consignes, et Claude Code vérifie après leur passage que la copie de travail n'a pas changé ;
 - une PR qui ne touche ni montant ni droit est auditée par l'`auditeur-droits-securite`, une PR uniquement documentaire par le `controleur-coherence` ; chaque auditeur relève aussi les erreurs hors de sa spécialité qu'il constate sur le diff complet ;
-- le `redacteur-tests` travaille sur la même branche que le code et possède les fichiers de tests du lot, que le code ne modifie pas sans passer par lui ;
+- le `redacteur-tests` travaille sur la même branche que le code, écrit aussi les tests unitaires du client et possède les fichiers de tests du lot, que le code ne modifie pas sans passer par lui ;
 - un auditeur classe ses remarques bloquantes ou non dans la grille R/C/T/N existante : R, C et tout test manquant qui touche un montant (classé C) sont bloquants, T et N ne le sont pas ;
 - une PR qui touche une variable d'environnement est auditée par l'`auditeur-droits-securite` ;
 - une nouvelle tête qui ne fait que fusionner `main` dans la branche est vérifiée par un passage de vérification de chacun de ses auditeurs, avec une CI verte ;

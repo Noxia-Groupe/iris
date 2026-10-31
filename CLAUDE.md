@@ -41,7 +41,7 @@ Les sous-agents de projet sont définis dans [`.claude/agents/`](.claude/agents/
 | `controleur-coherence` | Cohérence fonctionnelle d'Iris, et non qualité du code : avant le lot, avant la fusion, passage hebdomadaire | Rien (il peut lancer les tests) | Celui de la session |
 | `auditeur-montants` | Calculs, arrondis, TVA, factures et avoirs figés, tests de montants | Rien dans le dépôt | Celui de la session |
 | `auditeur-droits-securite` | Droits et périmètres, refus côté API, journaux, données sensibles, dépendances | Rien dans le dépôt | Celui de la session |
-| `redacteur-tests` | Tests d'API, unitaires et E2E, écrits à partir du cadrage, en parallèle du code | Fichiers de tests seulement | Celui de la session |
+| `redacteur-tests` | Tests d'API et E2E, écrits à partir du cadrage, en parallèle du code | Fichiers de tests seulement | Celui de la session |
 | `documentaliste` | Passation et historique après chaque fusion ; passation courte, ce qui est livré archivé dans l'historique | `docs/` seulement | Sonnet |
 
 **Circuit d'une PR.**
@@ -67,7 +67,7 @@ Chaque auditeur rend toutes ses remarques en un seul passage, classées bloquant
 - **Choix de l'auditeur** : une PR qui ne touche ni montant ni droit, ou qui touche une variable d'environnement (règle permanente 3), est auditée par l'`auditeur-droits-securite`. Une PR uniquement documentaire l'est par le `controleur-coherence`, qui vérifie les citations, les statuts et la cohérence avec les décisions.
 - **Erreurs hors spécialité** : tout auditeur relève aussi celles qu'il constate sur le diff complet.
 - **Classement des remarques** : dans la grille R/C/T/N, les remarques R et C sont bloquantes, tout comme un test manquant qui touche un montant, classé C (T reste réservé aux tests manquants hors montants) ; T et N ne le sont pas.
-- **Rédaction des tests** : le `redacteur-tests` travaille sur la même branche que le code. Il possède les fichiers de tests du lot : le code ne les modifie pas sans passer par lui.
+- **Rédaction des tests** : le `redacteur-tests` travaille sur la même branche que le code. Il écrit aussi les tests unitaires du client. Il possède les fichiers de tests du lot : le code ne les modifie pas sans passer par lui.
 - **Passage hebdomadaire** du `controleur-coherence` :
   - Claude Code le lance lors de la première session de travail de chaque semaine, sans déclencheur automatique ;
   - son rapport est publié dans une issue ;
