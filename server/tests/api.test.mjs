@@ -25121,5 +25121,17 @@ if (!TEST_DATABASE_URL) {
       const vu = lu.body.find((d) => d.id === devis.id);
       assert.deepEqual([vu.heuresPrevues, minutes(vu), vu.lignes.some((l) => 'prixAchatUnitaireHt' in l)], [3, [90], false]);
     });
+
+    // Audit n° 2 de #376 : les heures vendues sont le total exact de l'écran, et non une somme en flottant
+    // (0,57 + 0,105 vaut 0,6749999999999999 en flottant) : 0,675 h, soit 0,68 h, au devis comme au chantier.
+    test('0,57 h et 0,105 h saisies à la main font 0,675 h : 0,68 h au devis comme au chantier, sans somme en flottant', async () => {
+      const devis = await creerDevis('somme exacte', [
+        { designation: 'TEST Main-d’œuvre de 0,57 h', nature: 'MAIN_OEUVRE', quantite: '0.57', prixUnitaireHt: 50, tauxTva: 20 },
+        { designation: 'TEST Main-d’œuvre de 0,105 h', nature: 'MAIN_OEUVRE', quantite: '0.105', prixUnitaireHt: 50, tauxTva: 20 },
+      ]);
+      assert.deepEqual([minutes(devis), devis.heuresPrevues], [[null, null], 0.68]);
+      await signer(devis.id);
+      assert.equal(await heuresVenduesEnBase((await convertir(devis.id)).id), '0.68');
+    });
   });
 }
