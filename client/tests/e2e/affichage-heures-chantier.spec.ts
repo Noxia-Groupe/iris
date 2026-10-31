@@ -119,3 +119,87 @@ test('chantier de 18,75 heures vendues ouvert d’un devis au jour et à la demi
   await enregistrer('18.75', 18.75, '18,75 h');
   expect(fenetres).toEqual([]);
 });
+
+// Correctif #387 (cadrage, version 2 du 31-10-2026, section « Tests (B5) », E2E) : le serveur refuse désormais une
+// saisie négative, non numérique, à trois décimales ou au-delà de la colonne des heures vendues et des budgets du
+// chantier (400, sans rien écrire), au lieu de l'enregistrer telle quelle, à 0 ou arrondie. À l'écran, `min="0"`
+// s'ajoute aux quatre champs de « Modifier », sans `max` (choix par défaut, à confirmer) ; le refus du serveur
+// s'affiche par la fenêtre d'alerte, « Modifier » restant ouvert avec la saisie (comportement existant).
+test('« Modifier » : « -5 » refusé par le navigateur dans les heures vendues et chacun des trois budgets, sans rien envoyer ; « 0 » admis ; 100 000 000 heures, que le navigateur admet, refusées par le serveur avec son message, sans fermer « Modifier » ni rien enregistrer', async ({ page, request, session, creerClient, allerSurPageAdmin }) => {
+  test.slow();
+  const { chantier } = await preparer(request, session.token, creerClient);
+  const CHAMPS = [
+    ['Budget Global (€ HT)', 'budgetGlobalVendu'],
+    ['Total Heures Vendues (h)', 'heuresVendues'],
+    ['Dont Matériel (€ HT)', 'budgetMaterielVendu'],
+    ['Dont Main d\'Œuvre (€ HT)', 'budgetMainOeuvreVendu'],
+  ] as const;
+  const relire = async () => {
+    const fiche = await (await request.get(`${api}/chantiers/${chantier.id}`, { headers: { Authorization: `Bearer ${session.token}` } })).json() as Record<string, unknown>;
+    return Object.fromEntries(CHAMPS.map(([, nom]) => [nom, fiche[nom]]));
+  };
+  const avant = await relire();
+  // Témoin : l'administration lit les quatre valeurs, dont les 18,75 heures vendues de la préparation.
+  expect(avant.heuresVendues).toBe(18.75);
+  for (const [, nom] of CHAMPS) expect(typeof avant[nom], nom).toBe('number');
+  const fenetres: string[] = [];
+  page.on('dialog', (dialogue) => { fenetres.push(dialogue.message()); void dialogue.accept(); });
+  // Toute modification envoyée par la page (fiche ou commercial du chantier).
+  const envois: string[] = [];
+  page.on('request', (requete) => { if (requete.method() === 'PATCH' && new URL(requete.url()).pathname.startsWith('/api/chantiers/')) envois.push(new URL(requete.url()).pathname); });
+
+  await allerSurPageAdmin(`/chantiers/${chantier.id}`);
+  await expect(page.getByRole('heading', { name: chantier.nom })).toBeVisible();
+  await page.getByRole('button', { name: 'Modifier', exact: true }).first().click();
+  const modifier = page.getByRole('heading', { name: 'Modifier le chantier' });
+  await expect(modifier).toBeVisible();
+  const enregistrer = page.getByRole('button', { name: 'Enregistrer les modifications' });
+  // Le champ sous son étiquette, telle qu'affichée dans « Modifier ».
+  const champ = (etiquette: string) => page.locator('.form-group', { has: page.getByText(etiquette, { exact: true }) }).locator('input');
+  const validite = (saisie: ReturnType<typeof champ>) => saisie.evaluate((element) => {
+    const { valid, rangeUnderflow } = (element as HTMLInputElement).validity;
+    return { valid, rangeUnderflow };
+  });
+
+  // « -5 » dans chaque champ, les trois autres gardant leur valeur : le navigateur le refuse (`min="0"`), et
+  // « Enregistrer les modifications » n'envoie rien ; la relecture par l'API rend les valeurs d'avant.
+  for (const [etiquette, nom] of CHAMPS) {
+    const saisie = champ(etiquette);
+    await expect(saisie).toHaveCount(1);
+    await expect(saisie).toHaveAttribute('name', nom);
+    const origine = await saisie.inputValue();
+    await saisie.fill('-5');
+    expect(await validite(saisie), `${etiquette} : « -5 »`).toEqual({ valid: false, rangeUnderflow: true });
+    await enregistrer.click();
+    await expect(modifier).toBeVisible();
+    await expect(saisie).toHaveValue('-5');
+    expect(envois, `${etiquette} : aucune modification envoyée`).toEqual([]);
+    expect(await relire(), etiquette).toEqual(avant);
+    await saisie.fill(origine);
+  }
+
+  // « 0 » est admis par le navigateur dans chacun des quatre champs.
+  for (const [etiquette] of CHAMPS) {
+    const saisie = champ(etiquette);
+    const origine = await saisie.inputValue();
+    await saisie.fill('0');
+    expect(await validite(saisie), `${etiquette} : « 0 »`).toEqual({ valid: true, rangeUnderflow: false });
+    await saisie.fill(origine);
+  }
+  expect(fenetres).toEqual([]);
+
+  // 100 000 000 heures : sans `max`, le navigateur les admet ; le serveur les refuse (au-delà des 8 chiffres de la
+  // colonne), son message s'affiche, et « Modifier » reste ouvert avec la saisie. Rien n'est enregistré.
+  const heures = champ('Total Heures Vendues (h)');
+  await heures.fill('100000000');
+  expect(await validite(heures)).toEqual({ valid: true, rangeUnderflow: false });
+  const reponse = page.waitForResponse((r) => r.request().method() === 'PATCH' && new URL(r.url()).pathname === `/api/chantiers/${chantier.id}`);
+  await enregistrer.click();
+  expect((await reponse).status()).toBe(400);
+  await expect.poll(() => fenetres).toEqual(['Les heures vendues doivent être un nombre positif ou nul, d’au plus 8 chiffres avant la virgule et 2 après.']);
+  await expect(modifier).toBeVisible();
+  await expect(heures).toHaveValue('100000000');
+  // Une seule modification envoyée de tout le parcours, celle-ci : les essais à « -5 » n'en ont envoyé aucune.
+  expect(envois).toEqual([`/api/chantiers/${chantier.id}`]);
+  expect(await relire()).toEqual(avant);
+});

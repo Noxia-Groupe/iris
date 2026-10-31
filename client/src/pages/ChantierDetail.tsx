@@ -1432,24 +1432,24 @@ const ChantierDetail = () => {
               {chantier.budgetGlobalVendu != null && (
                 <div className="form-group mb-0">
                   <label className="form-label font-bold text-primary">Budget Global (€ HT)</label>
-                  <input ref={editChantierBudgetRef} required type="number" step="0.01" name="budgetGlobalVendu" defaultValue={chantier.budgetGlobalVendu} className="form-input" />
+                  <input ref={editChantierBudgetRef} required type="number" min="0" step="0.01" name="budgetGlobalVendu" defaultValue={chantier.budgetGlobalVendu} className="form-input" />
                 </div>
               )}
               <div className="form-group mb-0">
                 <label className="form-label">Total Heures Vendues (h)</label>
-                <input required type="number" step="0.01" name="heuresVendues" defaultValue={chantier.heuresVendues} className="form-input" />
+                <input required type="number" min="0" step="0.01" name="heuresVendues" defaultValue={chantier.heuresVendues} className="form-input" />
               </div>
               {/* Budgets par poste : seulement pour qui les voit (le serveur refuse qu'un technicien les modifie). */}
               {chantier.budgetMaterielVendu != null && (
                 <div className="form-group mb-0">
                   <label className="form-label">Dont Matériel (€ HT)</label>
-                  <input required type="number" step="0.01" name="budgetMaterielVendu" defaultValue={chantier.budgetMaterielVendu} className="form-input" />
+                  <input required type="number" min="0" step="0.01" name="budgetMaterielVendu" defaultValue={chantier.budgetMaterielVendu} className="form-input" />
                 </div>
               )}
               {chantier.budgetMainOeuvreVendu != null && (
                 <div className="form-group mb-0">
                   <label className="form-label">Dont Main d'Œuvre (€ HT)</label>
-                  <input required type="number" step="0.01" name="budgetMainOeuvreVendu" defaultValue={chantier.budgetMainOeuvreVendu} className="form-input" />
+                  <input required type="number" min="0" step="0.01" name="budgetMainOeuvreVendu" defaultValue={chantier.budgetMainOeuvreVendu} className="form-input" />
                 </div>
               )}
               <div className="form-group mb-0 md:col-span-2">
