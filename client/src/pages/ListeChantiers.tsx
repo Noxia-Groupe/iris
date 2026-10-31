@@ -32,7 +32,7 @@ const TRIS: { valeur: TriChantiers; libelle: string; margeRequise?: boolean }[] 
 ];
 
 const fmtEuro = (n: number) => `${arrondiEuro(n).toLocaleString('fr-FR')} €`;
-const fmtHeures = (n: number) => `${n.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} h`;
+const fmtHeures = (n: number) => `${n.toLocaleString('fr-FR', { maximumFractionDigits: 2 })} h`;
 
 // Compteurs cliquables : un chiffre qui intrigue mène directement à la liste filtrée.
 function Compteur({ valeur, libelle, icone, actif, alerte = false, onClick }: { valeur: number; libelle: string; icone: ReactNode; actif: boolean; alerte?: boolean; onClick: () => void }) {
