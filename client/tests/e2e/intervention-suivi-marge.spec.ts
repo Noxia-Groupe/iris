@@ -1,5 +1,5 @@
 import { createHmac, randomUUID } from 'node:crypto';
-import type { APIRequestContext } from '@playwright/test';
+import type { APIRequestContext, Page } from '@playwright/test';
 import { test, expect, dateDuJour } from './fixtures';
 
 const api = `http://127.0.0.1:${process.env.E2E_API_PORT || '3001'}/api`;
@@ -18,6 +18,11 @@ function jetonPour(userId: string) {
 }
 
 const RAPPEL = 'Intervention hors contrat : cette suite n’était pas prévue au départ et peut coûter au client. Prévenez-le qu’elle sera facturée ou non.';
+
+// Heures réalisées de la carte « Consommation Heures » de la fiche chantier. Correctif d'affichage des heures
+// (remarque N1 du contrôle de cohérence de #379) : au format français, deux décimales au plus, sans zéro inutile
+// (« 2,5 h », « 3 h »), et non plus `toFixed(2)` (« 2.50 h », « 3.00 h »).
+const heuresRealisees = (page: Page) => page.getByRole('heading', { name: 'Consommation Heures' }).locator('xpath=following-sibling::div[1]/span[1]');
 
 async function preparer(request: APIRequestContext, token: string, creerClient: (libelle: string) => Promise<{ id: string }>, libelle: string) {
   const envoyer = async (methode: 'post' | 'put' | 'patch', path: string, data?: object, auth = token) => {
@@ -119,7 +124,7 @@ test('fiche chantier : l’intervention issue du devis du chantier compte comme 
   await expect(page.locator('[data-couts-suites]')).toHaveText(/^Dont suites SAV de l’affaire, comptées dans le réel : matériel 0,00\s€ · main-d’œuvre 20,00\s€\. Heures des suites SAV de l’affaire, hors des heures réalisées : 0,5 h\.$/);
   // 1 h pointée et 1,5 h de l'intervention du devis : 2,5 h réalisées pour 2 h vendues ; la demi-heure en trop au coût
   // horaire du chantier, (40 + 60) € ÷ 2,5 h = 40 €, soit 20 €.
-  await expect(page.getByText('2.50 h', { exact: true })).toBeVisible();
+  await expect(heuresRealisees(page)).toHaveText('2,5 h');
   await expect(page.getByText('Manque à gagner : -20 €', { exact: true })).toBeVisible();
 });
 
@@ -139,7 +144,7 @@ test('fiche chantier : les coûts des suites de l’affaire sont comptés dans l
   // Décision de Nelson du 27-10-2026 à 21:41 UTC (« Oui il faut sortir les heures ») : les heures réalisées sont
   // les 3 h du chantier seules, et non 5 h ; l'heure en trop est valorisée au coût horaire du chantier, 40 €, et
   // non au coût mêlé de la suite (200 € pour 3 h, 66,67 €).
-  await expect(page.getByText('3.00 h', { exact: true })).toBeVisible();
+  await expect(heuresRealisees(page)).toHaveText('3 h');
   await expect(page.getByText('Manque à gagner : -40 €', { exact: true })).toBeVisible();
 });
 
@@ -155,7 +160,7 @@ test('fiche chantier : manque à gagner au coût horaire du chantier, la suite a
   const intervenant = await envoyer('post', '/intervenants', { nom: `Fiche à 30 € ${suffixe}`, role: 'Technicien', tauxHoraireCharge: 30 }) as { id: string };
   await envoyer('post', '/heures', { chantierId: chantier.id, intervenantId: intervenant.id, date: dateDuJour(), nbrHeures: 3 }); // 90 €
   const page = await allerSurPageAdmin(`/chantiers/${chantier.id}`);
-  await expect(page.getByText('3.00 h', { exact: true })).toBeVisible();
+  await expect(heuresRealisees(page)).toHaveText('3 h');
   // 1 h en trop à 30 €, coût horaire du chantier ; et non 34 € (170 € pour 5 h) ni 56,67 € (170 € pour 3 h).
   await expect(page.getByText('Manque à gagner : -30 €', { exact: true })).toBeVisible();
 });
@@ -274,7 +279,7 @@ test('fiche chantier : pas de ligne des suites sans coût de suite, puis des heu
   const suite = await envoyer('post', `/interventions/${initiale.id}/suites`, {}) as { id: string };
   const page = await allerSurPageAdmin(`/chantiers/${chantier.id}`);
   // Les métriques sont affichées (aucune heure au réel du chantier) : la suite, sans saisie, n'a pas de ligne.
-  await expect(page.getByText('0.00 h', { exact: true }).first()).toBeVisible();
+  await expect(heuresRealisees(page)).toHaveText('0 h');
   await expect(page.locator('[data-couts-suites]')).toHaveCount(0);
   await heuresDuTechnicien(suite.id, 1.5);
   await page.reload({ waitUntil: 'networkidle' });
@@ -356,7 +361,7 @@ test('fiche chantier vue du conducteur, puis du technicien titulaire : la part d
   // Le conducteur ne reçoit pas la main-d'œuvre ; le matériel, nul hors contrat, n'est pas cité.
   const vueConducteur = await ouvrir(conducteur, ['chantiers:read', 'clients:read']);
   await expect(vueConducteur.page.locator('[data-couts-intervention-devis]')).toHaveText(PHRASE);
-  await expect(vueConducteur.page.getByText('1.50 h', { exact: true })).toBeVisible();
+  await expect(heuresRealisees(vueConducteur.page)).toHaveText('1,5 h');
   await vueConducteur.contexte.close();
   // Le technicien titulaire ne reçoit aucun montant : l'écran n'en affiche aucun.
   await envoyer('patch', `/chantiers/${chantier.id}`, { responsableId: technicien.id });

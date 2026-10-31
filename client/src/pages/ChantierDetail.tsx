@@ -30,8 +30,8 @@ const toDateFrancaise = (d: string | null | undefined) => {
 
 const fmtDate = (d: string) => formatDateOnly(d);
 const fmtEuro = (n: number) => `${arrondiEuro(n).toLocaleString('fr-FR')} €`;
-// Heures pointées : demi-heures possibles, mais pas de décimale inutile (8 h, 7,5 h).
-const fmtHeures = (n: number) => `${n.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} h`;
+// Heures : jusqu'au centième (18,75 h), sans décimale inutile (8 h, 7,5 h).
+const fmtHeures = (n: number) => `${n.toLocaleString('fr-FR', { maximumFractionDigits: 2 })} h`;
 
 type FactureLiee = {
   id: string;
@@ -862,7 +862,7 @@ const ChantierDetail = () => {
             <div className="bg-gray-50 p-5 rounded-xl border border-gray-100 flex flex-col justify-center relative overflow-hidden group">
               <div aria-hidden="true" className="absolute top-0 right-0 w-16 h-16 bg-purple-100 rounded-bl-full -mr-8 -mt-8 transition-transform group-hover:scale-110"></div>
               <div className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1 z-10">Heures Prévues</div>
-              <div className="text-2xl font-black text-purple-600 z-10">{chantier.heuresVendues} h</div>
+              <div className="text-2xl font-black text-purple-600 z-10">{fmtHeures(chantier.heuresVendues)}</div>
             </div>
 
             {chantier.budgetMainOeuvreVendu != null && (
@@ -983,8 +983,8 @@ const ChantierDetail = () => {
                   <Clock3 size={18} className="text-purple-500" /> Consommation Heures
                 </h3>
                 <div className="text-right">
-                  <span className="text-xl font-black text-purple-600">{heuresRealisees.toFixed(2)} h</span>
-                  <span className="text-sm font-semibold text-gray-400 ml-1">/ {chantier.heuresVendues} h</span>
+                  <span className="text-xl font-black text-purple-600">{fmtHeures(heuresRealisees)}</span>
+                  <span className="text-sm font-semibold text-gray-400 ml-1">/ {fmtHeures(chantier.heuresVendues)}</span>
                 </div>
               </div>
               <ProgressMeter value={heuresRealisees} max={chantier.heuresVendues} color="purple" striped />
@@ -1016,7 +1016,7 @@ const ChantierDetail = () => {
               <h3 className="font-bold text-gray-800 flex items-center gap-2 mb-4 text-sm uppercase tracking-wide">
                 <Users size={16} className="text-purple-500" /> Heures par intervenant
               </h3>
-              <BarBreakdown rows={parIntervenant} color="#8b5cf6" formatValue={(v) => `${v.toFixed(1)} h`} emptyLabel="Aucune heure enregistrée" />
+              <BarBreakdown rows={parIntervenant} color="#8b5cf6" formatValue={fmtHeures} emptyLabel="Aucune heure enregistrée" />
             </div>
           </div>
 
@@ -1432,24 +1432,24 @@ const ChantierDetail = () => {
               {chantier.budgetGlobalVendu != null && (
                 <div className="form-group mb-0">
                   <label className="form-label font-bold text-primary">Budget Global (€ HT)</label>
-                  <input ref={editChantierBudgetRef} required type="number" step="0.01" name="budgetGlobalVendu" defaultValue={chantier.budgetGlobalVendu} className="form-input" />
+                  <input ref={editChantierBudgetRef} required type="number" min="0" step="0.01" name="budgetGlobalVendu" defaultValue={chantier.budgetGlobalVendu} className="form-input" />
                 </div>
               )}
               <div className="form-group mb-0">
                 <label className="form-label">Total Heures Vendues (h)</label>
-                <input required type="number" step="0.5" name="heuresVendues" defaultValue={chantier.heuresVendues} className="form-input" />
+                <input required type="number" min="0" step="0.01" name="heuresVendues" defaultValue={chantier.heuresVendues} className="form-input" />
               </div>
               {/* Budgets par poste : seulement pour qui les voit (le serveur refuse qu'un technicien les modifie). */}
               {chantier.budgetMaterielVendu != null && (
                 <div className="form-group mb-0">
                   <label className="form-label">Dont Matériel (€ HT)</label>
-                  <input required type="number" step="0.01" name="budgetMaterielVendu" defaultValue={chantier.budgetMaterielVendu} className="form-input" />
+                  <input required type="number" min="0" step="0.01" name="budgetMaterielVendu" defaultValue={chantier.budgetMaterielVendu} className="form-input" />
                 </div>
               )}
               {chantier.budgetMainOeuvreVendu != null && (
                 <div className="form-group mb-0">
                   <label className="form-label">Dont Main d'Œuvre (€ HT)</label>
-                  <input required type="number" step="0.01" name="budgetMainOeuvreVendu" defaultValue={chantier.budgetMainOeuvreVendu} className="form-input" />
+                  <input required type="number" min="0" step="0.01" name="budgetMainOeuvreVendu" defaultValue={chantier.budgetMainOeuvreVendu} className="form-input" />
                 </div>
               )}
               <div className="form-group mb-0 md:col-span-2">
