@@ -25230,5 +25230,24 @@ if (!TEST_DATABASE_URL) {
       await signer(revision.body.id);
       assert.equal(await heuresVenduesEnBase((await convertir(revision.body.id)).id), '7.00');
     });
+
+    // Audit n° 5 de #376 (montants) : deux lectures retenues, à confirmer (passation, section 4), ne sont éprouvées
+    // ailleurs que là où elles coïncident avec l'autre lecture possible :
+    //  - « Durée indicative » vaut pour toute prestation du catalogue qui n'est pas une main d'œuvre, quelle que soit
+    //    son unité : vendue à l'heure sans durée, elle compte 0 heure (sa quantité avant ce lot) ; avec 60 minutes,
+    //    une heure par unité ;
+    //  - conciliation de N7 : toute ligne de main-d'œuvre saisie à la main compte sa quantité, même au forfait.
+    test('lectures retenues : une prestation vendue à l’heure sans durée compte 0 heure, une ligne saisie à la main au forfait sa quantité, au devis comme au chantier', async () => {
+      await prestation('heure', { unite: 'heure', prixVenteHt: '55' });
+      await prestation('heure60', { unite: 'heure', prixVenteHt: '55', dureeIndicativeMin: 60 });
+      const devis = await creerDevis('lectures retenues', [
+        duCatalogue(fiches.heure, 'prestations', { quantite: 4 }), // sans durée : 0 h, même vendue à l'heure (4 h avant ce lot)
+        duCatalogue(fiches.heure60, 'prestations', { quantite: 3 }), // 3 × 60 min = 3 h
+        { designation: 'TEST Mise en service saisie à la main', nature: 'MAIN_OEUVRE', quantite: 2, unite: 'forfait', prixUnitaireHt: 250, tauxTva: 20 }, // sa quantité : 2 h
+      ]);
+      assert.deepEqual([minutes(devis), devis.heuresPrevues], [[0, 60, null], 5]);
+      await signer(devis.id);
+      assert.equal(await heuresVenduesEnBase((await convertir(devis.id)).id), '5.00');
+    });
   });
 }

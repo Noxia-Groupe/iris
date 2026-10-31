@@ -614,8 +614,9 @@ model DevisLigne {
   // Heures prévues (lot « budget et heures prévues du chantier », réponses de Nelson du 30-10-2026) :
   // minutes prévues pour une unité de la ligne, copiées à son ajout comme la référence, puis figées. Une
   // prestation du catalogue qui n'est pas une main d'œuvre y porte sa durée indicative, 0 sans durée
-  // (« Durée indicative ») ; vide, la ligne compte sa quantité en heures (ligne saisie à la main, « Sa
-  // quantité » ; main d'œuvre à l'heure ; ligne enregistrée avant ce lot, qui garde la règle d'avant).
+  // (« Durée indicative ») ; un article ou un équipement, 0 (choix par défaut, à confirmer) ; vide, la
+  // ligne compte sa quantité en heures (ligne saisie à la main, « Sa quantité » ; main d'œuvre à l'heure ;
+  // ligne enregistrée avant ce lot, qui garde la règle d'avant).
   // En minutes, pour un compte exact : une durée en minutes ne s'écrit pas toujours en heures décimales.
   // Seule une ligne de main-d'œuvre compte des heures ; jamais imprimées ni signées.
   minutesPrevuesUnite Decimal? @db.Decimal(12, 2)
