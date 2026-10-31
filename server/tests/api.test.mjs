@@ -25456,5 +25456,74 @@ if (!TEST_DATABASE_URL) {
       await signer(devis.id);
       assert.equal(await heuresVenduesEnBase((await convertir(devis.id)).id), '0.01');
     });
+
+    // Audit n° 9 de #376 (montants) : « même modifiées » (choix par défaut du devis enregistré avant ce lot) et copie
+    // figée. Les tests précédents ne renvoient une ligne antérieure ou une ligne à 0 minute qu'à l'identique, et ne
+    // changent que la quantité d'une ligne à minutes (50 minutes, quantité 1 puis 6). L'écran laisse pourtant changer la
+    // quantité, le prix, l'unité et la désignation d'une ligne gardée. Ici, les cinq lignes d'un devis antérieur complété
+    // après le lot sont modifiées après un changement de leurs fiches : la ligne antérieure garde sa quantité, la ligne à
+    // minutes ses minutes, la ligne à 0 minute ses 0 minute, au devis comme au chantier.
+    test('des lignes gardées réellement modifiées, quantité, prix, unité et désignation, gardent leur copie : ligne antérieure sa quantité, ligne à minutes ses minutes, ligne à 0 minute 0 heure, même après un changement de leur fiche, jusqu’au chantier', async () => {
+      await prestation('modif-duree', { unite: 'forfait', prixVenteHt: '250', dureeIndicativeMin: 90 });
+      await prestation('modif-sans', { unite: 'forfait', prixVenteHt: '80' });
+      const duree = fiches['modif-duree'], sans = fiches['modif-sans'];
+      // Devis enregistré avant le lot : trois lignes du catalogue, colonne vide, date antérieure à la migration.
+      const devis = await creerDevis('lignes modifiées', [
+        duCatalogue(duree, 'prestations', { quantite: 2 }), // antérieure : 2 h (3 h selon ce lot)
+        duCatalogue(fiches.article, 'articles', { nature: 'MAIN_OEUVRE', quantite: 4 }), // antérieure : 4 h (0 selon ce lot)
+        duCatalogue(sans, 'prestations', { quantite: 1 }), // antérieure : 1 h (0 selon ce lot)
+      ]);
+      await prisma.devisLigne.updateMany({ where: { devisId: devis.id }, data: { minutesPrevuesUnite: null } });
+      await prisma.devis.update({ where: { id: devis.id }, data: { createdAt: new Date('2026-10-15T08:00:00.000Z') } });
+      const garder = (lignes, modifier = () => ({})) => lignes.map((l, i) => ({ ligneId: l.id, designation: l.designation, nature: l.nature, quantite: l.quantite, prixUnitaireHt: l.prixUnitaireHt, tauxTva: l.tauxTva, unite: l.unite, catalogueFamille: l.catalogueFamille, catalogueId: l.catalogueId, ...modifier(l, i) }));
+      // Après le lot, il reçoit une ligne à minutes (90) et une ligne à 0 minute.
+      const complete = await envoyer('patch', `/api/devis/${devis.id}`, { clientId: client.id, objet: devis.objet, lignes: [
+        ...garder(devis.lignes),
+        duCatalogue(duree, 'prestations', { quantite: 2 }),
+        duCatalogue(sans, 'prestations', { quantite: 3 }),
+      ] });
+      assert.equal(complete.status, 200, JSON.stringify(complete.body));
+      // 2 + 4 + 1 (antérieures) + 2 × 90 min + 3 × 0 min = 10 h.
+      assert.deepEqual([minutes(complete.body), complete.body.heuresPrevues], [[null, null, null, 90, 0], 10]);
+      for (const [fiche, dureeIndicativeMin] of [[duree, 30], [sans, 45]]) {
+        const maj = await envoyer('put', `/api/catalogue/prestations/${fiche.id}`, { ...fiche, dureeIndicativeMin });
+        assert.equal(maj.status, 200, JSON.stringify(maj.body));
+      }
+      // Les cinq lignes, gardées, changent de quantité, de prix, d'unité et de désignation, comme à l'écran.
+      const nouvelles = [[3, 200], [5, 12], [2, 70], [4, 200], [5, 70]];
+      const modifie = await envoyer('patch', `/api/devis/${devis.id}`, { clientId: client.id, objet: devis.objet, lignes: garder(complete.body.lignes, (l, i) => ({ quantite: nouvelles[i][0], prixUnitaireHt: nouvelles[i][1], unite: 'lot', designation: `${l.designation} (modifiée)` })) });
+      assert.equal(modifie.status, 200, JSON.stringify(modifie.body));
+      // 3 + 5 + 2 (antérieures : leur quantité) + 4 × 90 min + 5 × 0 min = 16 h. On aurait 9 h si une ligne antérieure
+      // modifiée passait à la règle du lot (fiches du jour : 1,5 h, 0 et 1,5 h), 8,75 h si toute ligne modifiée relisait
+      // sa fiche, 19,75 h si la seule ligne à 0 minute la relisait, et 19 h si une ligne modifiée quittait sa copie
+      // (sa quantité, comme une ligne saisie à la main).
+      assert.deepEqual([minutes(modifie.body), modifie.body.lignes.map((l) => [l.quantite, l.unite]), modifie.body.heuresPrevues], [[null, null, null, 90, 0], nouvelles.map(([q]) => [q, 'lot']), 16]);
+      const duplicata = await envoyer('post', `/api/devis/${devis.id}/duplication`);
+      assert.equal(duplicata.status, 201, JSON.stringify(duplicata.body));
+      assert.deepEqual([minutes(duplicata.body), duplicata.body.heuresPrevues], [[null, null, null, 90, 0], 16]);
+      await signer(devis.id);
+      const revision = await envoyer('post', `/api/devis/${devis.id}/revisions`);
+      assert.equal(revision.status, 201, JSON.stringify(revision.body));
+      assert.deepEqual([minutes(revision.body), revision.body.heuresPrevues], [[null, null, null, 90, 0], 16]);
+      await signer(revision.body.id);
+      assert.equal(await heuresVenduesEnBase((await convertir(revision.body.id)).id), '16.00');
+    });
+
+    // Audit n° 9 de #376 (montants) : l'unité saisie n'est pas lue (découpage du lot, choix par défaut ; réponse
+    // « Option de la main d'œuvre », l'option « Unité libre « jour » » étant écartée). Le test précédent ne relibelle une
+    // main d'œuvre du catalogue qu'en « jour » et « demi-journée ». Or Iris vend une main d'œuvre « au forfait jour » (ses
+    // prix), et le point 16 dit « Un forfait compte pour un forfait donc d’une journee ou d’une demi journée ». Relibellée
+    // « forfait », « forfait jour » ou « journée », elle compte encore sa quantité en heures, et non les heures par jour de
+    // sa fiche (7 h), au devis comme au chantier.
+    test('une main d’œuvre du catalogue relibellée « forfait », « forfait jour » ou « journée » à la main compte sa quantité en heures : l’unité saisie n’est pas lue', async () => {
+      const devis = await creerDevis('unité forfait', [
+        duCatalogue(fiches.mo, 'prestations', { quantite: 2, unite: 'forfait', prixUnitaireHt: 300 }), // 2 h, et non 2 × 7 h
+        duCatalogue(fiches.mo, 'prestations', { quantite: 1, unite: 'forfait jour', prixUnitaireHt: 300 }), // 1 h, et non 7 h
+        duCatalogue(fiches.mo, 'prestations', { quantite: 3, unite: 'journée', prixUnitaireHt: 300 }), // 3 h, et non 21 h
+      ]);
+      assert.deepEqual([minutes(devis), devis.heuresPrevues], [[null, null, null], 6]);
+      await signer(devis.id);
+      assert.equal(await heuresVenduesEnBase((await convertir(devis.id)).id), '6.00');
+    });
   });
 }
