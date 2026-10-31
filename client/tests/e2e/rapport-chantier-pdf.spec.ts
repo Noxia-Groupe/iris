@@ -94,7 +94,7 @@ async function placeParRapportALaZone(page: Page, titre: Locator, element: Locat
 // Cadrage, « Écran » et « Tests » : « le bouton « Rapport client (PDF) » de l'administration télécharge un PDF
 // valide, sans montant » ; « « Rapport interne (PDF) » reste » ; noms de fichiers `Rapport-chantier-<nom>.pdf`
 // (nom réduit, même calcul côté serveur et côté client) et `Rapport-interne_<nom>.pdf` (le nom tel quel).
-test('rapport client : l’administration télécharge le PDF du serveur, sans montant ni heures ; trois boutons dans l’ordre, le rapport interne reste', async ({ allerSurPageAdmin, creerClient, request, session }) => {
+test('rapport client : l’administration télécharge le PDF du serveur, sans montant ni heures ; quatre boutons dans l’ordre, le rapport interne reste', async ({ allerSurPageAdmin, creerClient, request, session }) => {
   test.slow();
   await horsDuPassageDeMinuit();
   const suffixe = `${Date.now()}`;
@@ -115,7 +115,7 @@ test('rapport client : l’administration télécharge le PDF du serveur, sans m
   const boutonInterne = page.getByRole('button', { name: 'Rapport interne (PDF)', exact: true });
   await expect(boutonInterne).toBeVisible();
   await expect(page.getByRole('button', { name: 'PDF', exact: true })).toHaveCount(0);
-  expect((await barreActions(page).getByRole('button').allTextContents()).map((texte) => texte.trim())).toEqual(['Modifier', 'Rapport interne (PDF)', 'Rapport client (PDF)']);
+  expect((await barreActions(page).getByRole('button').allTextContents()).map((texte) => texte.trim())).toEqual(['Modifier', 'Rapport interne (PDF)', 'Rapport client (PDF)', 'Envoyer']);
 
   // Le rapport client : la réponse de la route du serveur, téléchargée sous son nom.
   const reponse = page.waitForResponse((r) => r.request().method() === 'GET' && r.url().endsWith(`/api/chantiers/${chantier.id}/document.pdf`));

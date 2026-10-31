@@ -9,6 +9,7 @@ Deux niveaux, lancés ensemble par `npm test` :
 | `serveur.test.mjs` | Délais de connexion du serveur HTTP, sur une vraie connexion TCP | non |
 | `api.test.mjs` | Requêtes HTTP réelles sur l'application montée en mémoire | **oui** |
 | `chantier-saisie-montants.test.mjs` | Saisie des heures vendues et des budgets du chantier (`PATCH /api/chantiers/:id`, #393) : formes admises relues exactement en base, formes refusées (400, rien n'est écrit), ordre des contrôles ; requêtes HTTP réelles sur une base jetable propre au fichier, créée à côté de celle de `TEST_DATABASE_URL`, migrée puis supprimée | **oui** |
+| `envoi-rapport-chantier.test.mjs` | Envoi du rapport de chantier remis au client par la messagerie (`GET` et `POST /api/chantiers/:id/envois`, lot 6a-4e) : proposition, objet et texte sans montant ni heures, journal des envois, administration seule, ordre des contrôles, chantier annulé, verrou, migration du journal ; requêtes HTTP réelles sur une base jetable propre au fichier, créée à côté de celle de `TEST_DATABASE_URL`, migrée puis supprimée | **oui** |
 | `environnement.test.mjs` | Chaque variable d'environnement lue par le code est documentée dans un modèle `.env.example` et dans `docs/CONFIGURATION-ENVIRONNEMENT.md` | non |
 
 ## Pourquoi pas de test qui relit le code source

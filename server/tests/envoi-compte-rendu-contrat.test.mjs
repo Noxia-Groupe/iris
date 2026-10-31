@@ -28,6 +28,9 @@ const dossierPrisma = resolve(dossierServeur, 'prisma');
 const binairePrisma = resolve(dossierServeur, 'node_modules/.bin/prisma');
 // Dernière migration de `main` (4e0a903) avant ce lot : celles qui la suivent sont celles de la PR.
 const DERNIERE_MIGRATION_MAIN = '20261030230000_forfait_main_oeuvre_devis';
+// Migration de ce lot. Celle du lot 6a-4e (20261031200000_journal_envois_rapport_chantier), qui la suit et porte la
+// contrainte à cinq colonnes, est prouvée par envoi-rapport-chantier.test.mjs : ce fichier rejoue la sienne seule.
+const MIGRATION_DU_LOT = '20261031120000_journal_envois_compte_rendu_contrat';
 
 // Objet et texte du cadrage (« Objet et texte », choix par défaut, à confirmer), mot pour mot :
 // apostrophe typographique (’) et tiret demi-cadratin (–), comme ceux du lot 6a-3 validés par Nelson.
@@ -869,13 +872,14 @@ if (!TEST_DATABASE_URL) {
     });
 
     // « la contrainte est supprimée puis recréée sous le même nom, EnvoiDocument_un_document :
-    // num_nonnulls("devisId", "factureId", "interventionId", "contratMaintenanceId") = 1 » ; « deux
+    // num_nonnulls("devisId", "factureId", "interventionId", "contratMaintenanceId") = 1 », recréée à son tour sur
+    // cinq colonnes, avec "chantierId", par le lot 6a-4e (envoi-rapport-chantier.test.mjs) ; « deux
     // index : (interventionId, createdAt) et (contratMaintenanceId, createdAt) » ; « le canal reste
     // MESSAGERIE seul ».
     test('migration : EnvoiDocument_un_document refuse une ligne sans document et une ligne à deux documents, sur les quatre colonnes ; canal MESSAGERIE seul ; deux index', async () => {
       const s = suffixe();
       const [contrainte] = await prisma.$queryRaw`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint WHERE conrelid = '"EnvoiDocument"'::regclass AND conname = 'EnvoiDocument_un_document'`;
-      assert.equal(contrainte?.definition, 'CHECK ((num_nonnulls("devisId", "factureId", "interventionId", "contratMaintenanceId") = 1))');
+      assert.equal(contrainte?.definition, 'CHECK ((num_nonnulls("devisId", "factureId", "interventionId", "contratMaintenanceId", "chantierId") = 1))');
       const index = (await prisma.$queryRaw`SELECT indexdef FROM pg_indexes WHERE tablename = 'EnvoiDocument'`).map((ligne) => ligne.indexdef.replace(/^.* USING btree /, ''));
       for (const colonnes of ['("interventionId", "createdAt")', '("contratMaintenanceId", "createdAt")', '("devisId", "createdAt")', '("factureId", "createdAt")']) {
         assert.ok(index.includes(colonnes), `index ${colonnes} absent : ${index.join(' ; ')}`);
@@ -968,8 +972,8 @@ if (!TEST_DATABASE_URL) {
         const toutes = readdirSync(join(dossierPrisma, 'migrations')).filter((nom) => nom !== 'migration_lock.toml').sort();
         assert.ok(toutes.includes(DERNIERE_MIGRATION_MAIN), 'dernière migration de main absente');
         const deMain = toutes.filter((nom) => nom <= DERNIERE_MIGRATION_MAIN);
-        const duLot = toutes.filter((nom) => nom > DERNIERE_MIGRATION_MAIN);
-        assert.ok(duLot.length >= 1, 'aucune migration du lot');
+        const duLot = toutes.filter((nom) => nom > DERNIERE_MIGRATION_MAIN && nom <= MIGRATION_DU_LOT);
+        assert.deepEqual(duLot, [MIGRATION_DU_LOT], 'migration du lot');
         for (const nom of deMain) cpSync(join(dossierPrisma, 'migrations', nom), join(migrations, nom), { recursive: true });
         const deployer = () => execFileSync(binairePrisma, ['migrate', 'deploy', '--schema', schema], {
           env: { ...process.env, DATABASE_URL: urlEtape.toString() }, encoding: 'utf8', stdio: 'pipe', timeout: 180_000,

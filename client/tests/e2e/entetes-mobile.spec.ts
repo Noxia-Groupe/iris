@@ -176,12 +176,14 @@ test.describe('écrans sur téléphone et tablette (320 à 1024 px)', () => {
   });
 });
 
-// Sur tablette et grand écran, la barre d'actions de la fiche ne recouvre jamais un nom d'affaire long. Lot
-// 6a-4c (cadrage, « Écran », N5) : l'administration y a désormais trois boutons, « Modifier », « Rapport
-// interne (PDF) » (la capture, autrefois « PDF ») et « Rapport client (PDF) ». La barre reste au-dessus du
-// titre à toute largeur, sans retrait du titre, pour que la capture du rapport interne, mise en page sur la
-// largeur d'une page A4, ne l'écrase pas (contrôle de cohérence de #397, B1).
-test('fiche chantier sur grand écran : le titre ne passe pas sous les boutons', async ({ allerSurPageAdmin, request, session, creerClient }) => {
+// Du téléphone au grand écran, la barre d'actions de la fiche ne recouvre jamais un nom d'affaire long. Lot
+// 6a-4c (cadrage, « Écran », N5) : l'administration y a trois boutons, « Modifier », « Rapport interne (PDF) »
+// (la capture, autrefois « PDF ») et « Rapport client (PDF) » ; lot 6a-4e (cadrage, « Barre d'actions de la
+// fiche ») : « Envoyer » s'y ajoute en quatrième, et la barre passe à la ligne au besoin. La barre reste au-dessus
+// du titre à toute largeur, sans retrait du titre, pour que la capture du rapport interne, mise en page sur la
+// largeur d'une page A4, ne l'écrase pas (contrôle de cohérence de #397, B1). Avec quatre boutons, aucun
+// recouvrement ni débordement à 375, 700, 1 280 et 1 536 px.
+test('fiche chantier, administration, de 375 à 1 536 px : quatre boutons dans l’ordre, tous dans l’écran, le titre ne passe pas sous les boutons', async ({ allerSurPageAdmin, request, session, creerClient }) => {
   const headers = { Authorization: `Bearer ${session.token}` };
   const envoyer = async (methode: 'post' | 'put', path: string, data: object) => {
     const reponse = await request[methode](`${api}${path}`, { headers, data });
@@ -192,18 +194,24 @@ test('fiche chantier sur grand écran : le titre ne passe pas sous les boutons',
   const devis = await envoyer('post', '/devis', { clientId: client.id, objet: `Rénovation complète de la chaufferie collective et des réseaux de distribution ${Date.now()}`, lignes: [{ designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }] }) as { id: string };
   await envoyer('put', `/devis/${devis.id}/statut`, { statut: 'ENVOYE' });
   await envoyer('post', `/devis/${devis.id}/signature`, { signataire: 'Client E2E', confirme: true });
-  const chantier = await envoyer('post', `/devis/${devis.id}/convertir`, { cible: 'CHANTIER' }) as { id: string };
-  for (const largeur of [700, 1280]) {
+  const chantier = await envoyer('post', `/devis/${devis.id}/convertir`, { cible: 'CHANTIER' }) as { id: string; nom: string };
+  for (const largeur of [375, 700, 1280, 1536]) {
     const page = await allerSurPageAdmin(`/chantiers/${chantier.id}`);
     await page.setViewportSize({ width: largeur, height: 900 });
+    await expect(page.getByRole('heading', { name: chantier.nom }), `à ${largeur} px`).toBeVisible();
     // La barre d'actions : le plus petit bloc qui porte les deux rapports (la fiche a un autre « Modifier »,
     // celui du commercial).
     const barre = page.locator('div')
       .filter({ has: page.getByRole('button', { name: 'Rapport interne (PDF)', exact: true }) })
       .filter({ has: page.getByRole('button', { name: 'Rapport client (PDF)', exact: true }) }).last();
-    for (const nom of ['Modifier', 'Rapport interne (PDF)', 'Rapport client (PDF)']) {
-      await expect(barre.getByRole('button', { name: nom, exact: true }), `${nom} à ${largeur} px`).toBeVisible();
+    expect((await barre.getByRole('button').allTextContents()).map((texte) => texte.trim()), `à ${largeur} px`).toEqual(['Modifier', 'Rapport interne (PDF)', 'Rapport client (PDF)', 'Envoyer']);
+    for (const nom of ['Modifier', 'Rapport interne (PDF)', 'Rapport client (PDF)', `Envoyer le rapport de chantier ${chantier.nom}`]) {
+      const bouton = barre.getByRole('button', { name: nom, exact: true });
+      await expect(bouton, `${nom} à ${largeur} px`).toBeVisible();
+      const boite = await bouton.boundingBox();
+      expect(boite && boite.x >= 0 && boite.x + boite.width <= largeur, `${nom} dans la largeur de l’écran à ${largeur} px`).toBe(true);
     }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth), `défilement horizontal à ${largeur} px`).toBeLessThanOrEqual(largeur);
     expect(await defautsAffichage(page), `à ${largeur} px`).toEqual({ coupes: [], recouverts: [] });
   }
 });
@@ -287,6 +295,59 @@ test('fiche chantier, de 375 à 1 920 px : barre d’actions au-dessus du titre 
       enteteSurTouteLaLargeur: Math.abs(capture.largeurEntete - capture.largeurUtile) <= 1,
       barreAuDessusDuTitre: capture.barreAuDessusDuTitre,
     }, `capture à ${largeur} px : ${JSON.stringify(capture)}`).toEqual({ pageA4: true, retraitEntete: '0px', enteteSurTouteLaLargeur: true, barreAuDessusDuTitre: true });
+  }
+});
+
+// Hors administration, la barre d'actions de la fiche n'a que deux boutons (« Modifier » et « Rapport interne (PDF) »
+// pour le conducteur titulaire) ou un seul (« Rapport interne (PDF) » pour le directeur), sans « Rapport client (PDF) »
+// ni « Envoyer » (lot 6a-4e, réservé à l'administration). Elle reste dans le flux, au-dessus du titre, à toute largeur
+// (contrôle de cohérence de #397, B1) : à chaque largeur, ses boutons sont tous visibles dans l'écran, et ni coupés ni
+// posés sur le titre. Issue #398, T1, sous sa forme revue après B1 de #397 (commentaire du 31-10-2026), versée par le
+// lot 6a-4e.
+test('fiche chantier hors administration, de 375 à 1 536 px : boutons exacts, sans « Rapport client (PDF) » ni « Envoyer », tous visibles, titre jamais recouvert', async ({ browser, request, session, creerClient }) => {
+  const headers = { Authorization: `Bearer ${session.token}` };
+  const envoyer = async (methode: 'post' | 'put' | 'patch', path: string, data: object) => {
+    const reponse = await request[methode](`${api}${path}`, { headers, data });
+    expect(reponse.ok(), `${path} : ${await reponse.text()}`).toBeTruthy();
+    return reponse.json();
+  };
+  const suffixe = `${Date.now()}`;
+  const client = await creerClient('écrans fiche hors administration');
+  const nom = `Rénovation complète de la chaufferie collective et des réseaux de distribution ${suffixe}`;
+  const devis = await envoyer('post', '/devis', { clientId: client.id, objet: nom, lignes: [{ designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }] }) as { id: string };
+  await envoyer('put', `/devis/${devis.id}/statut`, { statut: 'ENVOYE' });
+  await envoyer('post', `/devis/${devis.id}/signature`, { signataire: 'Client E2E', confirme: true });
+  const chantier = await envoyer('post', `/devis/${devis.id}/convertir`, { cible: 'CHANTIER' }) as { id: string; nom: string };
+  const conducteur = await envoyer('post', '/users', { email: `fiche.hors.admin.conducteur.${suffixe}@iris.test`, name: `Conducteur fiche ${suffixe}`, role: 'CONDUCTEUR_TRAVAUX' }) as { id: string; role: string };
+  const directeur = await envoyer('post', '/users', { email: `fiche.hors.admin.directeur.${suffixe}@iris.test`, name: `Directeur fiche ${suffixe}`, role: 'DIRECTEUR' }) as { id: string; role: string };
+  await envoyer('patch', `/chantiers/${chantier.id}`, { responsableId: conducteur.id });
+  const comptes: Array<[{ id: string; role: string }, string[]]> = [
+    [conducteur, ['Modifier', 'Rapport interne (PDF)']],
+    [directeur, ['Rapport interne (PDF)']],
+  ];
+  for (const [compte, boutons] of comptes) {
+    await dansUnePageNeuve(browser, jetonPour(compte.id), JSON.stringify({ ...compte, permissions: [] }), async (page) => {
+      for (const largeur of [375, 700, 1280, 1536]) {
+        const contexte = `${compte.role} à ${largeur} px`;
+        await page.setViewportSize({ width: largeur, height: 900 });
+        await page.goto(`/chantiers/${chantier.id}`, { waitUntil: 'networkidle' });
+        await expect(page.getByRole('heading', { name: chantier.nom }), contexte).toBeVisible();
+        // La barre d'actions : le plus petit bloc qui porte « Rapport interne (PDF) ».
+        const barre = page.locator('div').filter({ has: page.getByRole('button', { name: 'Rapport interne (PDF)', exact: true }) }).last();
+        expect((await barre.getByRole('button').allTextContents()).map((texte) => texte.trim()), contexte).toEqual(boutons);
+        for (const nomBouton of boutons) {
+          const bouton = barre.getByRole('button', { name: nomBouton, exact: true });
+          await expect(bouton, `${nomBouton}, ${contexte}`).toBeVisible();
+          await expect(bouton, `${nomBouton}, ${contexte}`).toBeEnabled();
+          const boite = await bouton.boundingBox();
+          expect(boite && boite.x >= 0 && boite.x + boite.width <= largeur, `${nomBouton} dans la largeur de l’écran, ${contexte}`).toBe(true);
+        }
+        await expect(page.getByTestId('rapport-client-pdf'), contexte).toHaveCount(0);
+        await expect(page.getByTestId('envoyer-rapport-client'), contexte).toHaveCount(0);
+        await expect(page.getByRole('button', { name: /^Envoyer/ }), contexte).toHaveCount(0);
+        expect(await defautsAffichage(page), contexte).toEqual({ coupes: [], recouverts: [] });
+      }
+    });
   }
 });
 
