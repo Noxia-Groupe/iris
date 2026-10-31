@@ -671,6 +671,40 @@ if (!TEST_DATABASE_URL) {
       }
     });
 
+    // Audit n° 1 (auditeur-montants), remarque T1 : une pièce émise imprime ses lignes dans leur ordre figé (`ordre`),
+    // chacune avec ses montants, quel que soit l'ordre d'écriture des lignes, de leurs désignations ou de leurs
+    // identifiants. Les rangs des lignes du brouillon sont permutés en base avant l'émission : l'ordre d'insertion
+    // (A, C, B), l'ordre alphabétique (A, B, C) et l'ordre inverse des rangs (A, B, C) diffèrent tous de l'ordre
+    // figé (C, B, A). Une lecture qui ne reprendrait pas le tri de factureInclude imprimerait la facture autrement.
+    test('facture émise : lignes imprimées dans leur ordre figé, chacune avec ses montants', async () => {
+      const brouillon = await creerBrouillonFacture(f.client.id, [
+        { designation: 'TEST Ligne A ordre 6b1a', quantite: 1, prixUnitaireHt: 11, tauxTva: 20 },
+        { designation: 'TEST Ligne C ordre 6b1a', quantite: 2, prixUnitaireHt: 33, tauxTva: 20 },
+        { designation: 'TEST Ligne B ordre 6b1a', quantite: 3, prixUnitaireHt: 22, tauxTva: 20 },
+      ], 'TEST ordre des lignes 6b1a');
+      const lignes = await prisma.factureLigne.findMany({ where: { factureId: brouillon.id }, orderBy: { ordre: 'asc' } });
+      assert.deepEqual(lignes.map((ligne) => ligne.designation), ['TEST Ligne A ordre 6b1a', 'TEST Ligne C ordre 6b1a', 'TEST Ligne B ordre 6b1a']);
+      // Rangs figés voulus : C, puis B, puis A (rangs provisoires d'abord, à cause de l'unicité (facture, rang)).
+      const rangs = { 'TEST Ligne C ordre 6b1a': 0, 'TEST Ligne B ordre 6b1a': 1, 'TEST Ligne A ordre 6b1a': 2 };
+      await prisma.$transaction(async (tx) => {
+        for (const [rang, ligne] of lignes.entries()) await tx.factureLigne.update({ where: { id: ligne.id }, data: { ordre: 100 + rang } });
+        for (const ligne of lignes) await tx.factureLigne.update({ where: { id: ligne.id }, data: { ordre: rangs[ligne.designation] } });
+      });
+      const emise = await emettre(brouillon.id);
+      assert.deepEqual([emise.statut, emise.totalHt, emise.totalTva, emise.totalTtc], ['EMISE', 143, 28.6, 171.6]);
+      const res = await lire(CHEMINS.facture(emise.id));
+      verifierPdf(res, `${emise.numero}.pdf`, 'facture aux lignes permutées');
+      const plat = aplatir(await texteDuPdf(res.body));
+      const positions = ['C', 'B', 'A'].map((lettre) => plat.indexOf(`TEST Ligne ${lettre} ordre 6b1a`));
+      assert.ok(positions.every((position) => position >= 0), plat);
+      assert.deepEqual([...positions].sort((x, y) => x - y), positions, `lignes hors de leur ordre figé (C, B, A)\n${plat}`);
+      // Chaque ligne garde ses montants, dans le même ordre : 66,00 € (C), 66,00 € (B), 11,00 € (A) en total HT, et ses
+      // prix unitaires 33,00 €, 22,00 €, 11,00 €.
+      const prix = ['33,00 €', '22,00 €', '11,00 €'].map((montant) => plat.indexOf(montant));
+      assert.ok(prix.every((position, rang) => position > positions[rang] && (rang === 2 || position < positions[rang + 1])), `prix unitaires hors de leur ligne\n${plat}`);
+      for (const attendu of ['Total HT : 143,00 €', 'TVA 20 % sur 143,00 € : 28,60 €', 'Total TTC : 171,60 €']) assert.ok(plat.includes(attendu), `${attendu}\n${plat}`);
+    });
+
     // P1 et P3 : la route du compte rendu garde blockCommercial (commercial, directeur), puis le refus du technicien,
     // avant tout périmètre ; puis getInterventionFilterForUser et l'exclusion des annulées (404 « Intervention
     // introuvable. ») ; puis 409 « Aucun compte rendu à imprimer. ».
