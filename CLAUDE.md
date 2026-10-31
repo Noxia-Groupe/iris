@@ -53,7 +53,7 @@ Les sous-agents de projet sont définis dans [`.claude/agents/`](.claude/agents/
 2. **Code**, avec le `redacteur-tests` en parallèle.
 3. **Auditeurs en parallèle**, choisis selon ce que touche la PR :
    - l'`auditeur-montants` pour un montant ;
-   - l'`auditeur-droits-securite` pour un droit, un périmètre, un journal, une donnée sensible, une dépendance ou une variable d'environnement.
+   - l'`auditeur-droits-securite` pour un droit, un périmètre, un journal, une donnée sensible ou une dépendance.
 
    Ils assurent l'audit interne obligatoire : au moins un par PR. Avant la fusion, le `controleur-coherence` repasse. Il vérifie que le parcours de bout en bout reste cohérent, qu'une même notion porte partout le même nom, le même statut et le même format, et que les écrans affichent des libellés en français, des montants au format français et des dates `JJ-MM-AAAA`.
 4. **Corrections.**
@@ -64,7 +64,7 @@ Chaque auditeur rend toutes ses remarques en un seul passage, classées bloquant
 
 **Choix de mise en œuvre** (choix par défaut, à confirmer) :
 - **Lecture retenue** : le « périmètre gelé de la bêta » est le périmètre du pilote, décrit en section 2 de la passation (option 1, SAV et maintenance ; lots décidés pour le premier jour).
-- **PR sans montant ni droit** : elle est auditée par l'`auditeur-droits-securite`. Une PR uniquement documentaire l'est par le `controleur-coherence`, qui vérifie les citations, les statuts et la cohérence avec les décisions.
+- **Choix de l'auditeur** : une PR qui ne touche ni montant ni droit, ou qui touche une variable d'environnement (règle permanente 3), est auditée par l'`auditeur-droits-securite`. Une PR uniquement documentaire l'est par le `controleur-coherence`, qui vérifie les citations, les statuts et la cohérence avec les décisions.
 - **Erreurs hors spécialité** : tout auditeur relève aussi celles qu'il constate sur le diff complet.
 - **Classement des remarques** : dans la grille R/C/T/N, les remarques R et C sont bloquantes, tout comme un test manquant qui touche un montant, classé C (T reste réservé aux tests manquants hors montants) ; T et N ne le sont pas.
 - **Rédaction des tests** : le `redacteur-tests` travaille sur la même branche que le code. Il possède les fichiers de tests du lot : le code ne les modifie pas sans passer par lui.
@@ -73,7 +73,7 @@ Chaque auditeur rend toutes ses remarques en un seul passage, classées bloquant
   - son rapport est publié dans une issue ;
   - une remarque bloquante devient un correctif prioritaire (voir « Ordre pendant le pilote »), une autre une issue `suivi-audit`.
 - **Lecture seule** : Nelson dit « lecture seule » des deux auditeurs, et « lecture seule, peut lancer les tests » du `controleur-coherence`. Lecture retenue : elle vaut pour le dépôt ; les auditeurs lancent tests et mutants sur une copie extraite hors du dépôt, et livrent leurs correctifs en patchs. Elle repose sur les consignes de chaque sous-agent. Après le passage d'un sous-agent en lecture seule, Claude Code vérifie que la copie de travail n'a pas changé : `git status` vide, même tête (`git rev-parse HEAD`) et même branche.
-- **SHA rafraîchie sur `main`** : une nouvelle tête qui ne fait que fusionner `main` dans la branche, sans conflit ni autre changement, est vérifiée par un passage de vérification de l'auditeur (la fusion n'apporte que les changements de `main`), avec une CI verte sur cette tête.
+- **SHA rafraîchie sur `main`** : une nouvelle tête qui ne fait que fusionner `main` dans la branche, sans conflit ni autre changement, est vérifiée par un passage de vérification de chacun de ses auditeurs (la fusion n'apporte que les changements de `main`), avec une CI verte sur cette tête.
 - **Commits et publication** : un sous-agent ne commite et ne pousse rien. Claude Code commite, pousse, ouvre les PR et publie les constats.
 - **Repli** : si les agents de projet ne sont pas chargés dans la session, Claude Code lance un agent général en lui donnant le fichier de l'agent voulu comme consigne.
 

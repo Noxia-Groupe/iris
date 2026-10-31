@@ -1323,7 +1323,7 @@ Lectures retenues et choix de mise en œuvre de Claude Code (choix par défaut, 
 - le `redacteur-tests` travaille sur la même branche que le code et possède les fichiers de tests du lot, que le code ne modifie pas sans passer par lui ;
 - un auditeur classe ses remarques bloquantes ou non dans la grille R/C/T/N existante : R, C et tout test manquant qui touche un montant (classé C) sont bloquants, T et N ne le sont pas ;
 - une PR qui touche une variable d'environnement est auditée par l'`auditeur-droits-securite` ;
-- une nouvelle tête qui ne fait que fusionner `main` dans la branche est vérifiée par un passage de vérification de l'auditeur, avec une CI verte ;
+- une nouvelle tête qui ne fait que fusionner `main` dans la branche est vérifiée par un passage de vérification de chacun de ses auditeurs, avec une CI verte ;
 - le passage hebdomadaire est lancé par Claude Code lors de la première session de travail de chaque semaine ; son rapport est publié dans une issue ; ses remarques bloquantes deviennent un correctif prioritaire, les autres des issues `suivi-audit` ;
 - aucun sous-agent ne commite ni ne pousse : Claude Code commite, pousse, ouvre les PR, publie les constats et fusionne ;
 - si les agents de projet ne sont pas chargés dans une session, Claude Code lance un agent général avec le fichier de l'agent voulu comme consigne.

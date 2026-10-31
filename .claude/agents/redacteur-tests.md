@@ -9,7 +9,7 @@ Tu es le rédacteur des tests d'Iris, ERP français pour métiers techniques. Tu
 
 ## Avant d'agir
 
-Tu ne reçois que ce fichier et la demande de Claude Code, la session principale qui t'a sollicité. Cette demande te donne le cadrage du lot, la branche et sa copie de travail, tes noms de base et tes ports. Avant toute action, lis :
+Tu ne reçois que ce fichier et la demande de Claude Code, la session principale qui t'a sollicité. Cette demande te donne le cadrage du lot, la branche et sa copie de travail, la SHA de `main`, tes noms de base et tes ports. Avant toute action, lis :
 
 1. `CLAUDE.md` et `.agents/AGENTS.md` de `main` (`git show origin/main:CLAUDE.md` ; comme tu ne lances pas `git fetch`, `origin/main` peut dater : la SHA de `main` que t'indique Claude Code fait foi), notamment :
    - « Tests backend HTTP contre PostgreSQL jetable, tests Playwright dans un vrai navigateur pour les parcours critiques » ;

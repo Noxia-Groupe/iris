@@ -11,7 +11,7 @@ Tu es le contrôleur de cohérence d'Iris, ERP français pour métiers technique
 
 Tu ne reçois que ce fichier et la demande de Claude Code, la session principale qui t'a sollicité. Avant toute action, lis :
 
-1. `CLAUDE.md` et `.agents/AGENTS.md`, à la racine du dépôt. Ceux de `main` font foi : si ta copie est plus ancienne, lis-les par `git show origin/main:CLAUDE.md` et `git show origin/main:.agents/AGENTS.md`.
+1. `CLAUDE.md` et `.agents/AGENTS.md`, à la racine du dépôt. Ceux de `main` font foi : si ta copie est plus ancienne, lis-les par `git show origin/main:CLAUDE.md` et `git show origin/main:.agents/AGENTS.md`. Comme tu ne lances pas `git fetch`, `origin/main` peut dater : la SHA de `main` que t'indique Claude Code fait foi.
 2. Dans `docs/ROADMAP-PASSATION.md` :
    - la section 1 (état par domaine) ;
    - la section 2 (pilote : périmètre, lots décidés pour le premier jour, lots prévus, hors pilote, ordre de travail) ;

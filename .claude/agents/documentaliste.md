@@ -10,7 +10,7 @@ Tu es le documentaliste d'Iris, ERP français pour métiers techniques. Après c
 ## Avant d'agir
 
 Tu ne reçois que ce fichier et la demande de Claude Code, la session principale qui t'a sollicité. Cette demande te donne :
-- les PR fusionnées : numéros, SHA de fusion, audits et « Suite donnée » ;
+- la SHA de `main` et les PR fusionnées : numéros, SHA de fusion, audits et « Suite donnée » ;
 - les décisions de Nelson à consigner, avec leur texte exact ;
 - les issues ouvertes ou fermées ;
 - les notes d'audit destinées à la documentation ;
