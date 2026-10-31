@@ -10,6 +10,7 @@ import { getParametres } from '../parametres/metier';
 import { getCompanySettings } from '../administration/metier';
 import { type CatalogueFamily, catalogueFamily } from '../catalogue/metier';
 import { type SaisieTempsPasse, drapeauDevisTempsPasse, lireLigneTempsPasse, resoudreLigneTempsPasse, REFUS_NATURE_LIGNE_EXISTANTE, REFUS_PRIX_ACHAT_TEMPS_PASSE, TempsPasseSaisieError } from './tempsPasse';
+import { type SaisieForfait, estLigneForfait, lireLigneForfait, resoudreLigneForfait, ForfaitSaisieError, REFUS_NATURE_LIGNE_FORFAIT, REFUS_PRIX_ACHAT_FORFAIT } from './forfaitMainOeuvre';
 
 // Référence d'affaire portée par le chantier : celle du devis Iris dont il est issu
 // (A26-0001), attribuée par la séquence annuelle à la création du devis et recopiée
@@ -50,9 +51,10 @@ export class DevisDroitError extends Error {}
 
 // Demande de reprise du catalogue, ou de conservation d'une ligne existante, portée par une
 // ligne saisie. `devisPayload` ne fait que la valider ; `resoudreLignesDevis` la résout en base.
-// Une ligne au temps passé porte en plus sa saisie (`tempsPasse`) : son prix est fixé à la résolution.
-type ReferenceLigneDevis = { ligneId: string | null; catalogue: { famille: CatalogueFamily; id: string } | null; prixAchatUnitaireHt: number | null | undefined; tempsPasse?: SaisieTempsPasse };
-// Ligne validée : une ligne au temps passé n'a ni prix, ni TVA, ni totaux avant sa résolution.
+// Une ligne au temps passé porte en plus sa saisie (`tempsPasse`), une ligne au jour ou à la demi-journée la
+// sienne (`forfait`) : leur prix est fixé à la résolution.
+type ReferenceLigneDevis = { ligneId: string | null; catalogue: { famille: CatalogueFamily; id: string } | null; prixAchatUnitaireHt: number | null | undefined; tempsPasse?: SaisieTempsPasse; forfait?: SaisieForfait };
+// Ligne validée : une ligne au temps passé ou au forfait n'a ni prix, ni TVA, ni totaux avant sa résolution.
 type LigneDevisValidee = { ordre: number; designation: string; nature: string; quantite: number; prixUnitaireHt: number | null; tauxTva: number | null; totalHt: number | null; totalTtc: number | null; unite: string | null };
 // Prix d'achat prévu : facultatif ; `undefined` signifie « non transmis », null « effacé ».
 function prixAchatSaisi(item: Record<string, unknown>): number | null | undefined {
@@ -88,6 +90,17 @@ export function devisPayload(body: Record<string, unknown>) {
       if (!famille || !id) throw new DevisSaisieError('Fiche catalogue de la ligne invalide.');
       return { famille, id };
     };
+    // Ligne de main d'œuvre au jour ou à la demi-journée : son prix, sa TVA, son unité et ses totaux
+    // viennent de la main d'œuvre, à la résolution (resoudreLignesDevis, ./forfaitMainOeuvre.ts).
+    if (estLigneForfait(item)) {
+      const catalogue = lireCatalogue();
+      const forfait = lireLigneForfait(item, ligneId, catalogue);
+      if (!designation || designation.length > 500) throw new DevisSaisieError('Ligne de devis invalide.');
+      const prixAchatUnitaireHt = prixAchatSaisi(item);
+      if (prixAchatUnitaireHt !== undefined && prixAchatUnitaireHt !== null) throw new ForfaitSaisieError(REFUS_PRIX_ACHAT_FORFAIT);
+      references.push({ ligneId, catalogue, prixAchatUnitaireHt, forfait: forfait.saisie });
+      return { ordre, designation, nature: 'MAIN_OEUVRE', quantite: forfait.quantite, prixUnitaireHt: null, tauxTva: null, totalHt: null, totalTtc: null, unite: null };
+    }
     // Ligne « main d'œuvre au temps passé » : son prix, sa TVA et ses totaux viennent de la main
     // d'œuvre, à la résolution (resoudreLignesDevis).
     if (item.tempsPasse !== undefined && item.tempsPasse !== null && item.tempsPasse !== false) {
@@ -116,8 +129,8 @@ export function devisPayload(body: Record<string, unknown>) {
     references.push({ ligneId, catalogue, prixAchatUnitaireHt });
     return { ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc, unite };
   });
-  // Les totaux d'un devis qui porte une ligne au temps passé ne se connaissent qu'une fois son prix
-  // fixé par le serveur : les routes les calculent toujours sur les lignes résolues (totauxDevis).
+  // Les totaux d'un devis qui porte une ligne au temps passé ou au forfait ne se connaissent qu'une fois
+  // son prix fixé par le serveur : les routes les calculent toujours sur les lignes résolues (totauxDevis).
   const totaux = lignesCalculees.some((ligne) => ligne.totalHt === null) ? { totalHt: null, totalTva: null, totalTtc: null }
     : totauxDevis(lignesCalculees as { tauxTva: number; totalHt: number }[]);
   return { clientId, objet, auTempsPasse, lignesCalculees, references, ...totaux };
@@ -162,6 +175,7 @@ export function devisPourLecteur<T>(req: express.Request, valeur: T): T {
 type LigneDevisExistante = {
   id: string; reference: string | null; catalogueFamille: string | null; catalogueId: string | null; prixAchatUnitaireHt: Prisma.Decimal | null;
   tempsPasse: boolean; tarifTempsPasse: string | null; prixUnitaireHt: Prisma.Decimal; tauxTva: Prisma.Decimal; minutesPrevuesUnite: Prisma.Decimal | null;
+  forfaitMainOeuvre: string | null; tarifForfait: string | null;
 };
 // Résout la copie du catalogue et le prix d'achat prévu de chaque ligne saisie :
 //  - une ligne existante du devis (`ligneId`) garde sa fiche d'origine et sa référence, copiées
@@ -171,9 +185,11 @@ type LigneDevisExistante = {
 //  - le prix d'achat prévu n'est écrit que par un administrateur. Sinon, une ligne existante
 //    garde le sien, et une nouvelle ligne du catalogue reprend celui de la fiche ;
 //  - la ligne au temps passé prend le prix, la TVA et la référence de sa main d'œuvre à son ajout,
-//    puis les garde (./tempsPasse.ts) ; une ligne existante ne change pas de nature ;
+//    puis les garde (./tempsPasse.ts) ; la ligne au jour ou à la demi-journée aussi, avec son unité et
+//    ses minutes prévues (./forfaitMainOeuvre.ts) ; une ligne existante ne change pas de nature ;
 //  - les minutes prévues par unité sont copiées comme la référence, jamais saisies : la durée
 //    indicative d'une prestation qui n'est pas une main d'œuvre, 0 sans durée (« Durée indicative ») ;
+//    les heures par jour de la main d'œuvre × 60, ou × 30, pour une ligne au jour ou à la demi-journée ;
 //    vides pour une main d'œuvre à l'heure et une ligne saisie à la main (« Sa quantité »). Un article
 //    ou un équipement n'a pas de durée : 0 (choix par défaut, à confirmer ; seule une ligne de
 //    main-d'œuvre compte des heures).
@@ -198,9 +214,14 @@ export async function resoudreLignesDevis(
       if (!existante || vues.has(reference.ligneId)) throw new DevisSaisieError('Ligne de devis inconnue : rechargez le devis.');
       vues.add(reference.ligneId);
       if (existante.tempsPasse !== !!reference.tempsPasse) throw new TempsPasseSaisieError(REFUS_NATURE_LIGNE_EXISTANTE);
+      if ((existante.forfaitMainOeuvre !== null) !== !!reference.forfait) throw new ForfaitSaisieError(REFUS_NATURE_LIGNE_FORFAIT);
     }
     if (reference.tempsPasse) {
       lignes.push(await resoudreLigneTempsPasse(db, ligne, reference.tempsPasse, reference.catalogue, existante));
+      continue;
+    }
+    if (reference.forfait) {
+      lignes.push(await resoudreLigneForfait(db, ligne, reference.forfait, reference.catalogue, existante));
       continue;
     }
     let copie: { reference: string | null; catalogueFamille: string | null; catalogueId: string | null; prixAchatUnitaireHt: Prisma.Decimal | number | null; minutesPrevuesUnite: Prisma.Decimal | number | null };
@@ -220,7 +241,7 @@ export async function resoudreLignesDevis(
     }
     if (ecritPrixAchat && reference.prixAchatUnitaireHt !== undefined) copie.prixAchatUnitaireHt = reference.prixAchatUnitaireHt;
     // Une ligne ordinaire est déjà chiffrée par devisPayload.
-    lignes.push({ ...ligne, prixUnitaireHt: ligne.prixUnitaireHt!, tauxTva: ligne.tauxTva!, totalHt: ligne.totalHt!, totalTtc: ligne.totalTtc!, ...copie, tempsPasse: false, tarifTempsPasse: null });
+    lignes.push({ ...ligne, prixUnitaireHt: ligne.prixUnitaireHt!, tauxTva: ligne.tauxTva!, totalHt: ligne.totalHt!, totalTtc: ligne.totalTtc!, ...copie, tempsPasse: false, tarifTempsPasse: null, forfaitMainOeuvre: null, tarifForfait: null });
   }
   return lignes;
 }
@@ -239,13 +260,18 @@ export function contenuDevisSigne(devis: {
   id: string; dossierId: string; numero: string; version: number; clientId: string; objet: string;
   acompteExige: boolean; tauxAcompte: Prisma.Decimal | null; totalHt: Prisma.Decimal; totalTva: Prisma.Decimal; totalTtc: Prisma.Decimal;
   auTempsPasse: boolean; pasTempsPasseMinutes: number | null; tempsMinimumMinutes: number | null;
-  lignes: { ordre: number; designation: string; nature: string; reference: string | null; unite: string | null; quantite: Prisma.Decimal; prixUnitaireHt: Prisma.Decimal; tauxTva: Prisma.Decimal; totalHt: Prisma.Decimal; totalTtc: Prisma.Decimal; tempsPasse: boolean; tarifTempsPasse: string | null }[];
+  lignes: {
+    ordre: number; designation: string; nature: string; reference: string | null; unite: string | null; quantite: Prisma.Decimal; prixUnitaireHt: Prisma.Decimal; tauxTva: Prisma.Decimal; totalHt: Prisma.Decimal; totalTtc: Prisma.Decimal;
+    tempsPasse: boolean; tarifTempsPasse: string | null; forfaitMainOeuvre: string | null; tarifForfait: string | null;
+  }[];
 }) {
   // Le prix d'achat prévu, donnée interne, n'entre jamais dans ce que le client signe. Le marqueur et
   // le pas d'un devis au temps passé, et le tarif de sa ligne au temps passé, y entrent ; ils ne
   // figurent pas dans le contenu d'un devis ordinaire, dont l'empreinte reste celle d'avant ce lot. Le
   // temps minimum facturé y entre depuis le lot « facture au temps passé », sauf sur un devis antérieur
-  // (minimum vide), dont le contenu reste celui d'alors.
+  // (minimum vide), dont le contenu reste celui d'alors. Le forfait et le tarif d'une ligne au jour ou à
+  // la demi-journée y entrent avec cette ligne seulement : l'empreinte d'un devis qui n'en porte pas ne
+  // change pas. Les minutes prévues n'y entrent jamais (« Écran seulement »).
   return {
     devisId: devis.id, dossierId: devis.dossierId, numero: devis.numero, version: devis.version,
     clientId: devis.clientId, objet: devis.objet, acompteExige: devis.acompteExige,
@@ -258,18 +284,20 @@ export function contenuDevisSigne(devis: {
       quantite: montantDevisFige(ligne.quantite, 3), prixUnitaireHt: montantDevisFige(ligne.prixUnitaireHt, 2),
       tauxTva: montantDevisFige(ligne.tauxTva, 2), totalHt: montantDevisFige(ligne.totalHt, 2), totalTtc: montantDevisFige(ligne.totalTtc, 2),
       ...(ligne.tempsPasse ? { tempsPasse: true, tarifTempsPasse: ligne.tarifTempsPasse } : {}),
+      ...(ligne.forfaitMainOeuvre !== null ? { forfaitMainOeuvre: ligne.forfaitMainOeuvre, tarifForfait: ligne.tarifForfait } : {}),
     })),
   };
 }
 // Copie à l'identique d'une ligne (révision, duplication) : la copie du catalogue, le prix
-// d'achat prévu, les minutes prévues et la ligne au temps passé (son tarif et son prix figés)
-// suivent, comme les montants.
-export function copieLigneDevis({ ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc, unite, reference, catalogueFamille, catalogueId, prixAchatUnitaireHt, tempsPasse, tarifTempsPasse, minutesPrevuesUnite }: {
+// d'achat prévu, les minutes prévues, la ligne au temps passé (son tarif et son prix figés) et la
+// ligne au jour ou à la demi-journée (son forfait, son tarif et son prix figés) suivent, comme les
+// montants.
+export function copieLigneDevis({ ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc, unite, reference, catalogueFamille, catalogueId, prixAchatUnitaireHt, tempsPasse, tarifTempsPasse, minutesPrevuesUnite, forfaitMainOeuvre, tarifForfait }: {
   ordre: number; designation: string; nature: string; quantite: Prisma.Decimal; prixUnitaireHt: Prisma.Decimal; tauxTva: Prisma.Decimal; totalHt: Prisma.Decimal; totalTtc: Prisma.Decimal;
   unite: string | null; reference: string | null; catalogueFamille: string | null; catalogueId: string | null; prixAchatUnitaireHt: Prisma.Decimal | null;
-  tempsPasse: boolean; tarifTempsPasse: string | null; minutesPrevuesUnite: Prisma.Decimal | null;
+  tempsPasse: boolean; tarifTempsPasse: string | null; minutesPrevuesUnite: Prisma.Decimal | null; forfaitMainOeuvre: string | null; tarifForfait: string | null;
 }) {
-  return { ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc, unite, reference, catalogueFamille, catalogueId, prixAchatUnitaireHt, tempsPasse, tarifTempsPasse, minutesPrevuesUnite };
+  return { ordre, designation, nature, quantite, prixUnitaireHt, tauxTva, totalHt, totalTtc, unite, reference, catalogueFamille, catalogueId, prixAchatUnitaireHt, tempsPasse, tarifTempsPasse, minutesPrevuesUnite, forfaitMainOeuvre, tarifForfait };
 }
 export async function verrouillerDevis(tx: Prisma.TransactionClient, id: string): Promise<boolean> {
   const lignes = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`SELECT "id" FROM "Devis" WHERE "id" = ${id} FOR UPDATE`);

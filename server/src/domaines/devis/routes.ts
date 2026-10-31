@@ -32,13 +32,14 @@ import {
   TempsPasseConflitError, TempsPasseSaisieError, exigerCoherenceTempsPasse, exigerQuantiteTempsPasse, reglagesTempsPasseDeLaSociete, reglagesTempsPasseDuDevis,
   dureeTempsPasse, type ReglagesTempsPasseDevis,
 } from './tempsPasse';
+import { ForfaitSaisieError, exigerForfaitHorsTempsPasse } from './forfaitMainOeuvre';
 import { rendreDocumentDevisPdf } from './document';
 import { annulerDevisEnCascade } from './annulation';
 import { chantierPourInterventionDuDevis, rattacherInterventionDuDevis } from './rattachement';
 import { DEVIS_A_ENVOYER, DestinataireInvalideError, enregistrerEnvoi, lireEnvois, propositionDestinataire, texteEnvoiDevis, validerDestinataire } from '../documents/envois';
 
 function devisErreur(res: express.Response, error: unknown) {
-  if (error instanceof DevisSaisieError || error instanceof TempsPasseSaisieError) return res.status(400).json({ error: error.message });
+  if (error instanceof DevisSaisieError || error instanceof TempsPasseSaisieError || error instanceof ForfaitSaisieError) return res.status(400).json({ error: error.message });
   if (error instanceof DevisConflitError || error instanceof TempsPasseConflitError) return res.status(409).json({ error: error.message });
   if (error instanceof DevisDroitError) return res.status(403).json({ error: error.message });
   if (error instanceof IdentiteEmetteurIncompleteError || error instanceof IdentiteClientIncompleteError) return res.status(409).json({ error: error.message });
@@ -67,6 +68,7 @@ const creerDevis: express.RequestHandler = async (req, res) => { try {
   if (!await prisma.client.findUnique({ where: { id: payload.clientId } })) throw new DevisSaisieError('Client introuvable.');
   const auTempsPasse = payload.auTempsPasse ?? false;
   exigerCoherenceTempsPasse(auTempsPasse, payload.references);
+  exigerForfaitHorsTempsPasse(auTempsPasse, payload.references);
   const reglagesTempsPasse = await reglagesTempsPasseDuDevis(prisma, auTempsPasse);
   exigerLigneAuPas(payload, reglagesTempsPasse);
   const lignes = await resoudreLignesDevis(prisma, payload, [], ecritPrixAchatDevis(req));
@@ -94,6 +96,7 @@ const modifierDevis: express.RequestHandler = async (req, res) => { try {
     // connexion.
     const auTempsPasse = payload.auTempsPasse ?? precedent.auTempsPasse;
     exigerCoherenceTempsPasse(auTempsPasse, payload.references);
+    exigerForfaitHorsTempsPasse(auTempsPasse, payload.references);
     const reglagesTempsPasse = await reglagesTempsPasseDuDevis(tx, auTempsPasse, precedent);
     exigerLigneAuPas(payload, reglagesTempsPasse);
     const acompte = await acompteDevisPayload(body, precedent);
@@ -477,9 +480,12 @@ export function enregistrerRoutesDevis(app: Express): void {
   // (jamais le technicien, qui ne l'a jamais). La recherche porte sur la référence et la
   // désignation ; 50 fiches au plus, triées par désignation (choix par défaut, à confirmer).
   // Devis au temps passé : une main d'œuvre expose aussi son prix à l'heure sous contrat, et son
-  // drapeau, pour le choix du tarif ; jamais ses forfaits jour ni ses heures par jour. `mainOeuvre=1`
-  // ne propose que les mains d'œuvre actives (prestations), toutes, sans la limite de 50 fiches : l'écran
-  // du devis au temps passé les liste sans recherche (choix par défaut, à confirmer).
+  // drapeau, pour le choix du tarif. Depuis la ligne au jour ou à la demi-journée (lot « budget et
+  // heures prévues du chantier », troisième PR), elle expose aussi ses forfaits jour et ses prix de la
+  // demi-journée, hors contrat et sous contrat (prix de vente, vides pour une demi-journée non réglée),
+  // pour le choix du forfait et du tarif ; jamais ses heures par jour, que le serveur copie seul en
+  // minutes prévues. `mainOeuvre=1` ne propose que les mains d'œuvre actives (prestations), toutes, sans
+  // la limite de 50 fiches : l'écran du devis les liste sans recherche (choix par défaut, à confirmer).
   app.get('/api/devis/catalogue', requireAuth, requirePermission('devis:write'), async (req, res) => {
     try {
       const recherche = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 100) : '';
@@ -497,7 +503,11 @@ export function enregistrerRoutesDevis(app: Express): void {
           famille: f, id: fiche.id, reference: fiche.reference, nom: fiche.nom,
           unite: (fiche.unite as string | undefined) ?? null, nature: NATURE_DEVIS_PAR_FAMILLE[f],
           prixVenteHt: fiche.prixVenteHt, tauxTva: fiche.tauxTva,
-          ...(fiche.estMainOeuvre === true ? { estMainOeuvre: true, prixHeureSousContratHt: fiche.prixHeureSousContratHt } : {}),
+          ...(fiche.estMainOeuvre === true ? {
+            estMainOeuvre: true, prixHeureSousContratHt: fiche.prixHeureSousContratHt,
+            prixJourHorsContratHt: fiche.prixJourHorsContratHt, prixJourSousContratHt: fiche.prixJourSousContratHt,
+            prixDemiJourneeHorsContratHt: fiche.prixDemiJourneeHorsContratHt ?? null, prixDemiJourneeSousContratHt: fiche.prixDemiJourneeSousContratHt ?? null,
+          } : {}),
           ...(voitPrixAchat ? { prixAchatHt: fiche.prixAchatHt ?? null } : {}),
         }));
       }))).flat().sort((a, b) => String(a.nom).localeCompare(String(b.nom), 'fr')).slice(0, mainsOeuvreSeules ? undefined : 50);

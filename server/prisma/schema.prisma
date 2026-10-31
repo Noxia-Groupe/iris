@@ -620,6 +620,17 @@ model DevisLigne {
   // En minutes, pour un compte exact : une durée en minutes ne s'écrit pas toujours en heures décimales.
   // Seule une ligne de main-d'œuvre compte des heures ; jamais imprimées ni signées.
   minutesPrevuesUnite Decimal? @db.Decimal(12, 2)
+  // Ligne de main d'œuvre au jour ou à la demi-journée (troisième PR du lot, réponse de Nelson du
+  // 30-10-2026, « Option de la main d'œuvre ») : reprise d'une main d'œuvre active du catalogue au forfait
+  // (forfaitMainOeuvre : JOUR | DEMI_JOURNEE) et au tarif choisis (tarifForfait : HORS_CONTRAT |
+  // SOUS_CONTRAT), au prix fixé par le serveur depuis la fiche (forfait jour, ou prix de la demi-journée,
+  // « Prix à part ») puis figé, l'unité « jour » ou « demi-journée », une quantité entière, au moins 1 (choix
+  // par défaut, à confirmer), et pour minutes prévues par unité les heures par jour de la main d'œuvre × 60,
+  // ou × 30 (point 16 de la nuit du 26 au 27-10-2026). Tous deux
+  // vides sur une autre ligne ; une contrainte CHECK les lie. Le PDF n'en imprime que l'unité ; le contenu
+  // signé les porte quand ils sont renseignés.
+  forfaitMainOeuvre   String?
+  tarifForfait        String?
 
   @@unique([devisId, ordre])
 }
@@ -1374,6 +1385,12 @@ model CataloguePrestation {
   prixHeureSousContratHt    Decimal?                @db.Decimal(12, 2)
   prixJourSousContratHt     Decimal?                @db.Decimal(12, 2)
   heuresParJour             Decimal?                @db.Decimal(4, 2)
+  // Prix de la demi-journée (lot « budget et heures prévues du chantier », réponse de Nelson du
+  // 30-10-2026, « Prix à part ») : deux PRIX DE VENTE de plus, hors contrat et sous contrat, pour la
+  // ligne de devis à la demi-journée. Facultatifs (choix par défaut, à confirmer) : une main d'œuvre
+  // sans ce prix ne se vend pas à la demi-journée. Une contrainte CHECK les réserve à une main d'œuvre.
+  prixDemiJourneeHorsContratHt Decimal?                @db.Decimal(12, 2)
+  prixDemiJourneeSousContratHt Decimal?                @db.Decimal(12, 2)
   rattachementsIntervenants IntervenantMainOeuvre[]
 
   // Cible de la clé étrangère composite des rattachements : seule une main d'œuvre est visée.

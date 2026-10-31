@@ -3330,9 +3330,12 @@ if (!TEST_DATABASE_URL) {
       const [entree, ...autres] = await journalMainOeuvre(fiche.id);
       assert.equal(autres.length, 0, 'une seule entrée');
       assert.deepEqual([entree.domaine, entree.action, entree.auteurId, entree.auteurNom, entree.cibleLibelle, entree.avant], ['REGLAGES', 'CREATION', adminId, nomSecours, `TEST-MO-ELEC-${suffixe} — TEST Main d’œuvre TEST-MO-ELEC-${suffixe}`, null]);
+      // Depuis la ligne au jour ou à la demi-journée (lot « budget et heures prévues du chantier »), la création
+      // journalise aussi les deux prix facultatifs de la demi-journée, vides ici.
       assert.deepEqual(entree.apres, {
         reference: `TEST-MO-ELEC-${suffixe}`, nom: `TEST Main d’œuvre TEST-MO-ELEC-${suffixe}`, description: 'Tarif électricien', categorie: `TEST Corps de métier ${suffixe}`,
         tauxTva: 20, prixVenteHt: 45.5, prixJourHorsContratHt: 320, prixHeureSousContratHt: 40, prixJourSousContratHt: 280.25, heuresParJour: 7.75, unite: 'heure', actif: true,
+        prixDemiJourneeHorsContratHt: null, prixDemiJourneeSousContratHt: null,
       });
       // Lecture : l'administration et une clé catalogue:read voient les quatre prix.
       for (const [qui, chemin, entetes] of [['administration', '/api/catalogue/prestations', admin], ['clé catalogue:read', '/api/v1/catalogue/prestations', parCle(cleLecture)]]) {
@@ -3766,15 +3769,16 @@ if (!TEST_DATABASE_URL) {
       const client = await envoyer('post', '/api/clients', admin, { raisonSociale: 'TEST Client devis main d’œuvre', siren });
       assert.equal(client.status, 201, JSON.stringify(client.body));
       // La recherche du catalogue des devis propose la main d'œuvre comme une prestation : son prix de
-      // vente (l'heure hors contrat) et l'heure, sans ses forfaits jour ni ses heures par jour. Depuis le
-      // lot « devis au temps passé », elle expose aussi son prix à l'heure sous contrat et son drapeau,
-      // pour le choix du tarif d'un devis au temps passé (changement de visibilité documenté dans
-      // docs/MODELE-DROITS-COMPTES.md).
+      // vente (l'heure hors contrat) et l'heure, sans ses heures par jour. Depuis le lot « devis au temps
+      // passé », elle expose aussi son prix à l'heure sous contrat et son drapeau, pour le choix du tarif
+      // d'un devis au temps passé ; depuis la ligne au jour ou à la demi-journée (lot « budget et heures
+      // prévues du chantier »), ses forfaits jour et ses prix de la demi-journée (changements de visibilité
+      // documentés dans docs/MODELE-DROITS-COMPTES.md).
       const recherche = await request(app).get('/api/devis/catalogue').query({ q: `TEST-MO-DEVIS-${suffixe}` }).set(enTete('commercial'));
       assert.equal(recherche.status, 200, JSON.stringify(recherche.body));
       assert.equal(recherche.body.length, 1);
       const [proposee] = recherche.body;
-      assert.deepEqual(Object.keys(proposee).sort(), ['estMainOeuvre', 'famille', 'id', 'nature', 'nom', 'prixHeureSousContratHt', 'prixVenteHt', 'reference', 'tauxTva', 'unite']);
+      assert.deepEqual(Object.keys(proposee).sort(), ['estMainOeuvre', 'famille', 'id', 'nature', 'nom', 'prixDemiJourneeHorsContratHt', 'prixDemiJourneeSousContratHt', 'prixHeureSousContratHt', 'prixJourHorsContratHt', 'prixJourSousContratHt', 'prixVenteHt', 'reference', 'tauxTva', 'unite']);
       assert.deepEqual([proposee.famille, proposee.nature, proposee.unite, proposee.prixVenteHt, proposee.prixHeureSousContratHt, proposee.estMainOeuvre], ['prestations', 'MAIN_OEUVRE', 'heure', 45.5, 40, true]);
       const corps = { clientId: client.body.id, objet: `TEST Devis main d’œuvre ${suffixe}`, lignes: [
         { designation: proposee.nom, nature: proposee.nature, quantite: '3', prixUnitaireHt: String(proposee.prixVenteHt), tauxTva: '20', unite: proposee.unite, catalogueFamille: 'prestations', catalogueId: proposee.id },
@@ -19743,17 +19747,20 @@ if (!TEST_DATABASE_URL) {
       assert.equal(directe.body.auTempsPasse, false);
     });
 
-    test('recherche du catalogue des devis : une main d’œuvre expose ses deux prix à l’heure, jamais ses forfaits jour ni ses heures par jour ; jamais au technicien', async () => {
+    // Depuis la ligne au jour ou à la demi-journée (lot « budget et heures prévues du chantier »), une main d'œuvre
+    // expose aussi ses forfaits jour et ses prix de la demi-journée (bloc « Ligne de main d’œuvre au jour ou à la
+    // demi-journée », plus bas) ; jamais ses heures par jour.
+    test('recherche du catalogue des devis : une main d’œuvre expose ses deux prix à l’heure, ses forfaits jour et ses prix de la demi-journée, jamais ses heures par jour ; jamais au technicien', async () => {
       const recherche = (query, qui = enTete('commercial')) => request(app).get('/api/devis/catalogue').query(query).set(qui);
       const pourCommercial = await recherche({ q: mo.elec.reference });
       assert.equal(pourCommercial.status, 200, JSON.stringify(pourCommercial.body));
       assert.equal(pourCommercial.body.length, 1);
       const [elec] = pourCommercial.body;
-      assert.deepEqual(Object.keys(elec).sort(), ['estMainOeuvre', 'famille', 'id', 'nature', 'nom', 'prixHeureSousContratHt', 'prixVenteHt', 'reference', 'tauxTva', 'unite']);
+      assert.deepEqual(Object.keys(elec).sort(), ['estMainOeuvre', 'famille', 'id', 'nature', 'nom', 'prixDemiJourneeHorsContratHt', 'prixDemiJourneeSousContratHt', 'prixHeureSousContratHt', 'prixJourHorsContratHt', 'prixJourSousContratHt', 'prixVenteHt', 'reference', 'tauxTva', 'unite']);
       assert.deepEqual([elec.estMainOeuvre, elec.famille, elec.nature, elec.unite, elec.prixVenteHt, elec.prixHeureSousContratHt, elec.tauxTva], [true, 'prestations', 'MAIN_OEUVRE', 'heure', 45.5, 40, 20]);
       // L'administration y ajoute le prix d'achat (aucun pour une main d'œuvre), et rien d'autre.
       const pourAdmin = (await recherche({ q: mo.elec.reference }, admin)).body[0];
-      assert.deepEqual(Object.keys(pourAdmin).sort(), ['estMainOeuvre', 'famille', 'id', 'nature', 'nom', 'prixAchatHt', 'prixHeureSousContratHt', 'prixVenteHt', 'reference', 'tauxTva', 'unite']);
+      assert.deepEqual(Object.keys(pourAdmin).sort(), ['estMainOeuvre', 'famille', 'id', 'nature', 'nom', 'prixAchatHt', 'prixDemiJourneeHorsContratHt', 'prixDemiJourneeSousContratHt', 'prixHeureSousContratHt', 'prixJourHorsContratHt', 'prixJourSousContratHt', 'prixVenteHt', 'reference', 'tauxTva', 'unite']);
       // Une prestation ordinaire n'a ni drapeau ni second prix.
       const [pose] = (await recherche({ q: fiches.pose.reference })).body;
       assert.deepEqual(Object.keys(pose).sort(), ['famille', 'id', 'nature', 'nom', 'prixVenteHt', 'reference', 'tauxTva', 'unite']);
@@ -19775,7 +19782,7 @@ if (!TEST_DATABASE_URL) {
       })) });
       const toutes = await recherche({ mainOeuvre: '1' });
       assert.equal(toutes.body.length, nombreAvant + 101);
-      assert.ok(toutes.body.every((f) => f.estMainOeuvre === true && !('prixJourHorsContratHt' in f) && !('heuresParJour' in f)));
+      assert.ok(toutes.body.every((f) => f.estMainOeuvre === true && !('heuresParJour' in f)));
       // La recherche générale garde sa limite de 50 fiches.
       assert.equal((await recherche({ q: 'TEST' })).body.length, 50);
       assert.equal((await recherche({ mainOeuvre: '1', famille: 'articles' })).status, 400);
@@ -25650,6 +25657,614 @@ if (!TEST_DATABASE_URL) {
       assert.equal(converti.status, 201, JSON.stringify(converti.body));
       assert.equal(converti.body.heuresVendues, 6);
       assert.equal(await heuresVenduesEnBase(converti.body.id), '6.00');
+    });
+  });
+
+  // Lot « budget et heures prévues du chantier », troisième PR (réponses de Nelson du 30-10-2026, « Option de la
+  // main d'œuvre » et « Prix à part » ; point 16 de la nuit du 26 au 27-10-2026, « Heures par jour de la MO ») :
+  // une ligne de devis reprend une main d'œuvre du catalogue au jour ou à la demi-journée, hors contrat ou sous
+  // contrat, au prix de la fiche fixé par le serveur et figé ; ses minutes prévues par unité sont les heures par
+  // jour × 60, ou × 30.
+  describe('Ligne de main d’œuvre au jour ou à la demi-journée : prix de la demi-journée au catalogue, prix fixé par Iris, heures prévues', () => {
+    let admin = {};
+    let adminId = '';
+    let commercial = {};
+    const suffixe = `${Date.now()}`;
+    let client = null;
+    const fiches = {};
+    const PRIX_MO = { prixVenteHt: '45', prixJourHorsContratHt: '300', prixHeureSousContratHt: '40', prixJourSousContratHt: '280', heuresParJour: '7.5' };
+    const corpsMainOeuvre = (cle, extra = {}) => ({ estMainOeuvre: true, reference: `TEST-FJ-${cle}-${suffixe}`, nom: `TEST Forfait jour ${cle} ${suffixe}`, tauxTva: '20', ...PRIX_MO, ...extra });
+    const envoyer = (methode, chemin, corps, enTete = admin) => request(app)[methode](chemin).set(enTete).send(corps);
+    const creerFiche = async (cle, corps) => {
+      const res = await envoyer('post', '/api/catalogue/prestations', corps);
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      fiches[cle] = res.body;
+      return res.body;
+    };
+    const journalMainOeuvre = (cibleId) => prisma.journalAdministration.findMany({ where: { type: 'MAIN_OEUVRE', cibleId }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
+    const forfait = (fiche, forfaitMainOeuvre, tarifForfait, extra = {}) => ({
+      forfaitMainOeuvre, tarifForfait, designation: `TEST ${fiche.nom} ${forfaitMainOeuvre} ${tarifForfait}`, quantite: 1, catalogueFamille: 'prestations', catalogueId: fiche.id, ...extra,
+    });
+    const corpsDevis = (objet, lignes, extra = {}) => ({ clientId: client.id, objet: `TEST Forfait jour ${objet} ${suffixe}`, lignes, ...extra });
+    const creerDevis = async (objet, lignes, extra = {}) => {
+      const res = await envoyer('post', '/api/devis', corpsDevis(objet, lignes, extra));
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      return res.body;
+    };
+    const signer = async (devisId) => {
+      const res = await envoyer('post', `/api/devis/${devisId}/signature`, { signataire: 'TEST Signataire forfait jour', confirme: true });
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      return res.body;
+    };
+    const nbDevis = () => prisma.devis.count({ where: { clientId: client.id } });
+    const lignesGardees = (devis) => devis.lignes.map((l) => ({ ligneId: l.id, designation: l.designation, nature: l.nature, quantite: l.quantite, prixUnitaireHt: l.prixUnitaireHt, tauxTva: l.tauxTva, unite: l.unite, ...(l.forfaitMainOeuvre ? { forfaitMainOeuvre: l.forfaitMainOeuvre } : {}) }));
+    const champs = (devis, ...noms) => devis.lignes.map((l) => noms.map((n) => l[n]));
+
+    before(async () => {
+      const secours = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
+      assert.equal(secours.status, 200);
+      admin = { Authorization: `Bearer ${secours.body.token}` };
+      adminId = secours.body.user.id;
+      const compte = await prisma.user.create({ data: { email: `forfait.jour.commercial.${suffixe}@iris.test`, name: 'TEST Commercial forfait jour', role: 'COMMERCIAL' } });
+      commercial = { Authorization: `Bearer ${jwt.sign({ id: compte.id }, process.env.JWT_SECRET)}` };
+      const cree = await envoyer('post', '/api/clients', { raisonSociale: `TEST Client forfait jour ${suffixe}`, siren: await sirenLibre() });
+      assert.equal(cree.status, 201, JSON.stringify(cree.body));
+      client = cree.body;
+      const site = await envoyer('post', `/api/clients/${client.id}/sites`, { nom: 'TEST Facturation forfait jour', adresse: '4 rue des Journées', codePostal: '14000', ville: 'Caen', estSiteFacturation: true });
+      assert.equal(site.status, 201, JSON.stringify(site.body));
+      // 7,5 h par jour : 450 minutes pour un jour, 225 pour une demi-journée.
+      await creerFiche('mo', corpsMainOeuvre('MO', { prixDemiJourneeHorsContratHt: '160', prixDemiJourneeSousContratHt: '150,50' }));
+      await creerFiche('sansDemi', corpsMainOeuvre('SANSDEMI'));
+      await creerFiche('pose', { reference: `TEST-FJ-POSE-${suffixe}`, nom: `TEST Forfait jour pose ${suffixe}`, unite: 'forfait', prixVenteHt: '250', tauxTva: '20' });
+    });
+
+    test('catalogue : les prix de la demi-journée sont facultatifs, au centime, journalisés à la création, à la modification et au retour en prestation ordinaire', async () => {
+      // Fiche avec ses prix de la demi-journée (virgule admise) : lus, en base au centime, au journal de création.
+      assert.deepEqual([fiches.mo.prixDemiJourneeHorsContratHt, fiches.mo.prixDemiJourneeSousContratHt, fiches.mo.heuresParJour], [160, 150.5, 7.5]);
+      const enBase = await prisma.cataloguePrestation.findUniqueOrThrow({ where: { id: fiches.mo.id } });
+      assert.deepEqual([enBase.prixDemiJourneeHorsContratHt.toString(), enBase.prixDemiJourneeSousContratHt.toString()], ['160', '150.5']);
+      const [creation] = await journalMainOeuvre(fiches.mo.id);
+      assert.deepEqual([creation.action, creation.auteurId, creation.avant, creation.apres.prixDemiJourneeHorsContratHt, creation.apres.prixDemiJourneeSousContratHt], ['CREATION', adminId, null, 160, 150.5]);
+      // Fiche sans : vides, et vides au journal.
+      assert.deepEqual([fiches.sansDemi.prixDemiJourneeHorsContratHt, fiches.sansDemi.prixDemiJourneeSousContratHt], [null, null]);
+      const creationSans = (await journalMainOeuvre(fiches.sansDemi.id))[0].apres;
+      assert.deepEqual(['prixDemiJourneeHorsContratHt' in creationSans, 'prixDemiJourneeSousContratHt' in creationSans, creationSans.prixDemiJourneeHorsContratHt, creationSans.prixDemiJourneeSousContratHt], [true, true, null, null]);
+      // Modification : ajouter un prix, puis le retirer (la fiche entière est remplacée) ; chaque changement est journalisé.
+      const fiche = await creerFiche('modif', corpsMainOeuvre('MODIF'));
+      const ajout = await envoyer('put', `/api/catalogue/prestations/${fiche.id}`, corpsMainOeuvre('MODIF', { prixDemiJourneeHorsContratHt: '120.05', prixDemiJourneeSousContratHt: '0' }));
+      assert.equal(ajout.status, 200, JSON.stringify(ajout.body));
+      assert.deepEqual([ajout.body.prixDemiJourneeHorsContratHt, ajout.body.prixDemiJourneeSousContratHt], [120.05, 0]);
+      let derniere = (await journalMainOeuvre(fiche.id)).at(-1);
+      assert.deepEqual([derniere.action, derniere.auteurId, derniere.avant, derniere.apres], ['MODIFICATION', adminId,
+        { prixDemiJourneeHorsContratHt: null, prixDemiJourneeSousContratHt: null }, { prixDemiJourneeHorsContratHt: 120.05, prixDemiJourneeSousContratHt: 0 }]);
+      // À l'identique : rien n'est écrit.
+      assert.equal((await envoyer('put', `/api/catalogue/prestations/${fiche.id}`, corpsMainOeuvre('MODIF', { prixDemiJourneeHorsContratHt: '120.05', prixDemiJourneeSousContratHt: '0' }))).status, 200);
+      assert.equal((await journalMainOeuvre(fiche.id)).length, 2);
+      const retrait = await envoyer('put', `/api/catalogue/prestations/${fiche.id}`, corpsMainOeuvre('MODIF', { prixDemiJourneeSousContratHt: '  ' }));
+      assert.equal(retrait.status, 200, JSON.stringify(retrait.body));
+      derniere = (await journalMainOeuvre(fiche.id)).at(-1);
+      assert.deepEqual([derniere.avant, derniere.apres], [{ prixDemiJourneeHorsContratHt: 120.05, prixDemiJourneeSousContratHt: 0 }, { prixDemiJourneeHorsContratHt: null, prixDemiJourneeSousContratHt: null }]);
+      // Retour en prestation ordinaire : les prix de la demi-journée sont vidés avec les autres, au journal aussi.
+      assert.equal((await envoyer('put', `/api/catalogue/prestations/${fiche.id}`, corpsMainOeuvre('MODIF', { prixDemiJourneeHorsContratHt: '99' }))).status, 200);
+      const ordinaire = await envoyer('put', `/api/catalogue/prestations/${fiche.id}`, { estMainOeuvre: false, reference: fiche.reference, nom: fiche.nom, unite: 'forfait', prixVenteHt: '45', tauxTva: '20' });
+      assert.equal(ordinaire.status, 200, JSON.stringify(ordinaire.body));
+      assert.deepEqual([ordinaire.body.estMainOeuvre, ordinaire.body.prixDemiJourneeHorsContratHt, ordinaire.body.prixDemiJourneeSousContratHt], [false, null, null]);
+      derniere = (await journalMainOeuvre(fiche.id)).at(-1);
+      assert.deepEqual([derniere.action, derniere.avant.prixDemiJourneeHorsContratHt, derniere.apres.prixDemiJourneeHorsContratHt], ['RETRAIT_MAIN_OEUVRE', 99, null]);
+    });
+
+    test('catalogue : prix de la demi-journée refusés hors du centime, pour une prestation ordinaire, à une clé d’intégration et à un compte non administrateur ; la base les garde aussi', async () => {
+      const avantFiches = await prisma.cataloguePrestation.count();
+      const avantJournal = await prisma.journalAdministration.count({ where: { type: 'MAIN_OEUVRE' } });
+      const avantMo = JSON.stringify(await prisma.cataloguePrestation.findUnique({ where: { id: fiches.mo.id } }));
+      const libelles = { prixDemiJourneeHorsContratHt: 'Prix de vente HT à la demi-journée, hors contrat', prixDemiJourneeSousContratHt: 'Prix de vente HT à la demi-journée, sous contrat' };
+      for (const [champ, libelle] of Object.entries(libelles)) {
+        for (const valeur of ['-1', '12.345', 'douze', '1e3', '12345678901']) {
+          const creation = await envoyer('post', '/api/catalogue/prestations', corpsMainOeuvre('REFUS', { [champ]: valeur }));
+          const maj = await envoyer('put', `/api/catalogue/prestations/${fiches.mo.id}`, corpsMainOeuvre('MO', { [champ]: valeur }));
+          for (const [ou, res] of [['création', creation], ['modification', maj]]) {
+            assert.equal(res.status, 400, `${ou}, ${champ} = ${valeur} : ${JSON.stringify(res.body)}`);
+            assert.equal(res.body.error, `${libelle} : montant facultatif, positif ou nul, au centime (deux décimales au plus) ; laissez-le vide pour ne pas vendre cette main d’œuvre à la demi-journée.`);
+          }
+        }
+      }
+      // Prestation ordinaire : refusés, à la création comme à la modification.
+      const REFUS_ORDINAIRE = 'Ces prix (heure, forfait jour, demi-journée) et ces heures par jour ne concernent qu’une main d’œuvre (« estMainOeuvre »).';
+      const ordinaire = { reference: `TEST-FJ-ORD-${suffixe}`, nom: 'TEST Ordinaire demi-journée', unite: 'forfait', prixVenteHt: '80', tauxTva: '20', prixDemiJourneeHorsContratHt: '40' };
+      const refusCreation = await envoyer('post', '/api/catalogue/prestations', ordinaire);
+      assert.deepEqual([refusCreation.status, refusCreation.body.error], [400, REFUS_ORDINAIRE]);
+      const refusMaj = await envoyer('put', `/api/catalogue/prestations/${fiches.pose.id}`, { reference: fiches.pose.reference, nom: fiches.pose.nom, unite: 'forfait', prixVenteHt: '250', tauxTva: '20', prixDemiJourneeSousContratHt: '40' });
+      assert.deepEqual([refusMaj.status, refusMaj.body.error], [400, REFUS_ORDINAIRE]);
+      // Clés d'intégration : l'écriture est refusée (403), la lecture catalogue:read voit les deux prix.
+      const cle = async (scopes) => {
+        const res = await envoyer('post', '/api/admin/api-keys', { nom: `TEST forfait jour ${scopes.join(' ')} ${suffixe}`, scopes });
+        assert.equal(res.status, 201, JSON.stringify(res.body));
+        return { Authorization: `Bearer ${res.body.apiKey}` };
+      };
+      const ecriture = await cle(['catalogue:read', 'catalogue:write']);
+      const cleOrdinaire = await envoyer('post', '/api/v1/catalogue/prestations', { ...ordinaire, reference: `TEST-FJ-ORD2-${suffixe}` }, ecriture);
+      assert.equal(cleOrdinaire.status, 403, JSON.stringify(cleOrdinaire.body));
+      const cleMaj = await envoyer('put', `/api/v1/catalogue/prestations/${fiches.mo.id}`, corpsMainOeuvre('MO', { prixDemiJourneeHorsContratHt: '1' }), ecriture);
+      assert.equal(cleMaj.status, 403, JSON.stringify(cleMaj.body));
+      const lue = (await request(app).get('/api/v1/catalogue/prestations').set(await cle(['catalogue:read']))).body.find((f) => f.id === fiches.mo.id);
+      assert.deepEqual([lue.prixDemiJourneeHorsContratHt, lue.prixDemiJourneeSousContratHt], [160, 150.5]);
+      // Compte non administrateur en session : refusé.
+      assert.equal((await envoyer('put', `/api/catalogue/prestations/${fiches.mo.id}`, corpsMainOeuvre('MO', { prixDemiJourneeHorsContratHt: '1' }), commercial)).status, 403);
+      assert.equal(await prisma.cataloguePrestation.count(), avantFiches);
+      assert.equal(await prisma.journalAdministration.count({ where: { type: 'MAIN_OEUVRE' } }), avantJournal);
+      assert.equal(JSON.stringify(await prisma.cataloguePrestation.findUnique({ where: { id: fiches.mo.id } })), avantMo);
+      // La base refuse un prix de la demi-journée négatif, ou porté par une prestation ordinaire.
+      await assert.rejects(prisma.$executeRaw`UPDATE "CataloguePrestation" SET "prixDemiJourneeHorsContratHt" = -1 WHERE "id" = ${fiches.mo.id}`, /CataloguePrestation_demi_journee_check/);
+      await assert.rejects(prisma.$executeRaw`UPDATE "CataloguePrestation" SET "prixDemiJourneeSousContratHt" = 10 WHERE "id" = ${fiches.pose.id}`, /CataloguePrestation_demi_journee_check/);
+    });
+
+    test('recherche du catalogue des devis : une main d’œuvre expose ses forfaits jour et ses prix de la demi-journée, jamais ses heures par jour', async () => {
+      const recherche = (q, enTete = commercial) => request(app).get('/api/devis/catalogue').query({ q }).set(enTete);
+      const [mo] = (await recherche(fiches.mo.reference)).body;
+      assert.deepEqual(Object.keys(mo).sort(), ['estMainOeuvre', 'famille', 'id', 'nature', 'nom', 'prixDemiJourneeHorsContratHt', 'prixDemiJourneeSousContratHt', 'prixHeureSousContratHt', 'prixJourHorsContratHt', 'prixJourSousContratHt', 'prixVenteHt', 'reference', 'tauxTva', 'unite']);
+      assert.deepEqual([mo.prixVenteHt, mo.prixHeureSousContratHt, mo.prixJourHorsContratHt, mo.prixJourSousContratHt, mo.prixDemiJourneeHorsContratHt, mo.prixDemiJourneeSousContratHt], [45, 40, 300, 280, 160, 150.5]);
+      const [sansDemi] = (await recherche(fiches.sansDemi.reference)).body;
+      assert.deepEqual([sansDemi.prixDemiJourneeHorsContratHt, sansDemi.prixDemiJourneeSousContratHt, 'heuresParJour' in sansDemi], [null, null, false]);
+      const toutes = await request(app).get('/api/devis/catalogue').query({ mainOeuvre: '1' }).set(commercial);
+      assert.ok(toutes.body.some((f) => f.id === fiches.mo.id) && toutes.body.every((f) => !('heuresParJour' in f)), JSON.stringify(toutes.body).slice(0, 500));
+      // Une prestation ordinaire n'a aucun de ces prix.
+      const [pose] = (await recherche(fiches.pose.reference)).body;
+      assert.deepEqual(Object.keys(pose).sort(), ['famille', 'id', 'nature', 'nom', 'prixVenteHt', 'reference', 'tauxTva', 'unite']);
+    });
+
+    test('les quatre prix (jour et demi-journée, hors et sous contrat) sont ceux de la fiche ; unités, totaux, minutes et heures prévues', async () => {
+      const devis = await creerDevis('quatre prix', [
+        forfait(fiches.mo, 'JOUR', 'HORS_CONTRAT', { quantite: 2, prixUnitaireHt: 300, tauxTva: 20, nature: 'MAIN_OEUVRE', unite: 'jour' }), // 600 €
+        forfait(fiches.mo, 'JOUR', 'SOUS_CONTRAT'), // 280 €
+        forfait(fiches.mo, 'DEMI_JOURNEE', 'HORS_CONTRAT', { prixUnitaireHt: '160.00', unite: 'demi-journée' }), // 160 €
+        forfait(fiches.mo, 'DEMI_JOURNEE', 'SOUS_CONTRAT', { quantite: '3' }), // 3 × 150,50 = 451,50 €
+      ]);
+      assert.deepEqual(champs(devis, 'forfaitMainOeuvre', 'tarifForfait', 'prixUnitaireHt', 'unite', 'totalHt', 'minutesPrevuesUnite'), [
+        ['JOUR', 'HORS_CONTRAT', 300, 'jour', 600, 450],
+        ['JOUR', 'SOUS_CONTRAT', 280, 'jour', 280, 450],
+        ['DEMI_JOURNEE', 'HORS_CONTRAT', 160, 'demi-journée', 160, 225],
+        ['DEMI_JOURNEE', 'SOUS_CONTRAT', 150.5, 'demi-journée', 451.5, 225],
+      ]);
+      assert.ok(devis.lignes.every((l) => l.nature === 'MAIN_OEUVRE' && l.reference === fiches.mo.reference && l.catalogueFamille === 'prestations' && l.catalogueId === fiches.mo.id && l.prixAchatUnitaireHt === null && l.tempsPasse === false && l.tauxTva === 20));
+      assert.deepEqual([devis.totalHt, devis.totalTva, devis.totalTtc], [1491.5, 298.3, 1789.8]);
+      // 2 × 7,5 h + 7,5 h + 3,75 h + 3 × 3,75 h.
+      assert.equal(devis.heuresPrevues, 37.5);
+      const enBase = await prisma.devisLigne.findMany({ where: { devisId: devis.id }, orderBy: { ordre: 'asc' } });
+      assert.deepEqual(enBase.map((l) => [l.forfaitMainOeuvre, l.tarifForfait, l.prixUnitaireHt.toString(), l.minutesPrevuesUnite.toString(), l.totalTtc.toString()]), [
+        ['JOUR', 'HORS_CONTRAT', '300', '450', '720'], ['JOUR', 'SOUS_CONTRAT', '280', '450', '336'],
+        ['DEMI_JOURNEE', 'HORS_CONTRAT', '160', '225', '192'], ['DEMI_JOURNEE', 'SOUS_CONTRAT', '150.5', '225', '541.8'],
+      ]);
+      // Heures par jour au quart d'heure : 7,75 h donnent 465 et 232,5 minutes, exactes.
+      const septTroisQuarts = await creerFiche('septTroisQuarts', corpsMainOeuvre('775', { heuresParJour: '7.75', prixDemiJourneeHorsContratHt: '150' }));
+      const quarts = await creerDevis('quart d’heure', [forfait(septTroisQuarts, 'JOUR', 'HORS_CONTRAT'), forfait(septTroisQuarts, 'DEMI_JOURNEE', 'HORS_CONTRAT', { quantite: 2 })]);
+      assert.deepEqual([champs(quarts, 'minutesPrevuesUnite'), quarts.heuresPrevues], [[[465], [232.5]], 15.5]);
+    });
+
+    test('refus sans rien écrire : prix ou TVA différents, prix d’achat, fiche ordinaire ou désactivée, demi-journée sans prix, forfait, tarif, unité, nature ou quantité invalides, ligne au temps passé', async () => {
+      const desactivee = await creerFiche('desactivee', corpsMainOeuvre('DESACT', { prixDemiJourneeHorsContratHt: '100' }));
+      assert.equal((await request(app).delete(`/api/catalogue/prestations/${desactivee.id}`).set(admin)).status, 200);
+      const article = await envoyer('post', '/api/catalogue/articles', { reference: `TEST-FJ-ART-${suffixe}`, nom: 'TEST Article forfait jour', unite: 'm', prixVenteHt: '10', tauxTva: '20' });
+      assert.equal(article.status, 201, JSON.stringify(article.body));
+      const avant = await nbDevis();
+      const cas = [
+        ['prix du jour différent', forfait(fiches.mo, 'JOUR', 'HORS_CONTRAT', { prixUnitaireHt: 299.99 }), 'Le prix de la ligne au jour est celui de la main d’œuvre, fixé par Iris : 300,00 € HT par jour (forfait jour hors contrat). Il ne se saisit pas.'],
+        ['prix de la demi-journée différent', forfait(fiches.mo, 'DEMI_JOURNEE', 'SOUS_CONTRAT', { prixUnitaireHt: '150' }), 'Le prix de la ligne à la demi-journée est celui de la main d’œuvre, fixé par Iris : 150,50 € HT par demi-journée (demi-journée sous contrat). Il ne se saisit pas.'],
+        ['TVA différente', forfait(fiches.mo, 'JOUR', 'SOUS_CONTRAT', { tauxTva: 10 }), 'La TVA de la ligne au jour est celle de la main d’œuvre : 20 %. Elle ne se saisit pas.'],
+        ['prix d’achat prévu', forfait(fiches.mo, 'JOUR', 'HORS_CONTRAT', { prixAchatUnitaireHt: '100' }), 'Une ligne au jour ou à la demi-journée n’a pas de prix d’achat prévu : une main d’œuvre n’en a pas, son coût est celui des heures des intervenants.'],
+        ['fiche ordinaire', forfait(fiches.pose, 'JOUR', 'HORS_CONTRAT'), 'Une ligne au jour ou à la demi-journée reprend une main d’œuvre du catalogue (prestation marquée main d’œuvre).'],
+        ['article', forfait(article.body, 'JOUR', 'HORS_CONTRAT', { catalogueFamille: 'articles' }), 'Une ligne au jour ou à la demi-journée reprend une main d’œuvre du catalogue (prestation marquée main d’œuvre).'],
+        ['sans fiche', { forfaitMainOeuvre: 'JOUR', tarifForfait: 'HORS_CONTRAT', designation: 'TEST Sans fiche', quantite: 1 }, 'Une ligne au jour ou à la demi-journée reprend une main d’œuvre du catalogue (prestation marquée main d’œuvre).'],
+        ['fiche désactivée', forfait(desactivee, 'JOUR', 'HORS_CONTRAT'), 'Main d’œuvre introuvable ou désactivée : choisissez une main d’œuvre active du catalogue.'],
+        ['demi-journée hors contrat sans prix', forfait(fiches.sansDemi, 'DEMI_JOURNEE', 'HORS_CONTRAT'), 'Cette main d’œuvre n’a pas de prix de la demi-journée hors contrat : elle ne se vend pas à la demi-journée tant que l’administration ne l’a pas saisi (Catalogue > Main d’œuvre).'],
+        ['demi-journée sous contrat sans prix', forfait(fiches.sansDemi, 'DEMI_JOURNEE', 'SOUS_CONTRAT'), 'Cette main d’œuvre n’a pas de prix de la demi-journée sous contrat : elle ne se vend pas à la demi-journée tant que l’administration ne l’a pas saisi (Catalogue > Main d’œuvre).'],
+        ['forfait inconnu', forfait(fiches.mo, 'SEMAINE', 'HORS_CONTRAT'), 'Forfait de la ligne de main d’œuvre : au jour (JOUR) ou à la demi-journée (DEMI_JOURNEE).'],
+        ['forfait non textuel', forfait(fiches.mo, true, 'HORS_CONTRAT'), 'Forfait de la ligne de main d’œuvre : au jour (JOUR) ou à la demi-journée (DEMI_JOURNEE).'],
+        ['tarif inconnu', forfait(fiches.mo, 'JOUR', 'FORFAIT'), 'Tarif de la ligne au jour ou à la demi-journée : hors contrat (HORS_CONTRAT) ou sous contrat (SOUS_CONTRAT).'],
+        ['tarif absent', forfait(fiches.mo, 'JOUR', null), 'Tarif de la ligne au jour ou à la demi-journée : hors contrat (HORS_CONTRAT) ou sous contrat (SOUS_CONTRAT).'],
+        ['unité d’un jour différente', forfait(fiches.mo, 'JOUR', 'HORS_CONTRAT', { unite: 'heure' }), 'L’unité de la ligne au jour est « jour ».'],
+        ['unité d’une demi-journée différente', forfait(fiches.mo, 'DEMI_JOURNEE', 'HORS_CONTRAT', { unite: 'jour' }), 'L’unité de la ligne à la demi-journée est « demi-journée ».'],
+        ['nature fourniture', forfait(fiches.mo, 'JOUR', 'HORS_CONTRAT', { nature: 'FOURNITURE' }), 'Une ligne au jour ou à la demi-journée est de la main-d’œuvre.'],
+        ['quantité nulle', forfait(fiches.mo, 'JOUR', 'HORS_CONTRAT', { quantite: 0 }), 'La quantité d’une ligne au jour ou à la demi-journée est un nombre entier de jours ou de demi-journées, au moins 1 : pour une demi-journée, ajoutez une ligne à la demi-journée.'],
+        ['quantité au dix-millième', forfait(fiches.mo, 'JOUR', 'HORS_CONTRAT', { quantite: '1.0001' }), 'La quantité d’une ligne au jour ou à la demi-journée est un nombre entier de jours ou de demi-journées, au moins 1 : pour une demi-journée, ajoutez une ligne à la demi-journée.'],
+        ['0,5 jour', forfait(fiches.mo, 'JOUR', 'HORS_CONTRAT', { quantite: 0.5 }), 'La quantité d’une ligne au jour ou à la demi-journée est un nombre entier de jours ou de demi-journées, au moins 1 : pour une demi-journée, ajoutez une ligne à la demi-journée.'],
+        ['1,5 demi-journée', forfait(fiches.mo, 'DEMI_JOURNEE', 'HORS_CONTRAT', { quantite: '1,5' }), 'La quantité d’une ligne au jour ou à la demi-journée est un nombre entier de jours ou de demi-journées, au moins 1 : pour une demi-journée, ajoutez une ligne à la demi-journée.'],
+        ['2,001 jours', forfait(fiches.mo, 'JOUR', 'SOUS_CONTRAT', { quantite: '2.001' }), 'La quantité d’une ligne au jour ou à la demi-journée est un nombre entier de jours ou de demi-journées, au moins 1 : pour une demi-journée, ajoutez une ligne à la demi-journée.'],
+        ['aussi au temps passé', forfait(fiches.mo, 'JOUR', 'HORS_CONTRAT', { tempsPasse: true }), 'Une ligne au temps passé n’est pas au jour ou à la demi-journée.'],
+      ];
+      for (const [quoi, ligne, message] of cas) {
+        const res = await envoyer('post', '/api/devis', corpsDevis(quoi, [ligne]));
+        assert.deepEqual([res.status, res.body.error], [400, message], quoi);
+      }
+      assert.equal(await nbDevis(), avant, 'aucun devis créé');
+    });
+
+    // Quantité entière, au moins 1 (choix par défaut, le plus restrictif, à confirmer : lecture de « Prix à part » et de
+    // « Un forfait compte pour un forfait ») : une ligne au jour de 0,5 vendrait une demi-journée à la moitié du prix du jour.
+    test('quantité entière, au moins 1 : 2 jours et 3 demi-journées acceptés ; 0,5 jour et 1,5 demi-journée refusés, à la modification aussi, et par la base', async () => {
+      const REFUS = 'La quantité d’une ligne au jour ou à la demi-journée est un nombre entier de jours ou de demi-journées, au moins 1 : pour une demi-journée, ajoutez une ligne à la demi-journée.';
+      const devis = await creerDevis('quantité entière', [
+        forfait(fiches.mo, 'JOUR', 'HORS_CONTRAT', { quantite: 2 }), // 600 €
+        forfait(fiches.mo, 'DEMI_JOURNEE', 'HORS_CONTRAT', { quantite: '3.000' }), // 480 €
+      ]);
+      assert.deepEqual([champs(devis, 'quantite', 'totalHt'), devis.totalHt, devis.heuresPrevues], [[[2, 600], [3, 480]], 1080, 26.25]);
+      // À la modification, une ligne gardée ne passe pas à 0,5 jour ni à 1,5 demi-journée ; rien n'est écrit.
+      const avant = JSON.stringify(await prisma.devisLigne.findMany({ where: { devisId: devis.id }, orderBy: { ordre: 'asc' } }));
+      const [jour, demi] = lignesGardees(devis);
+      for (const lignes of [[{ ...jour, quantite: 0.5 }, demi], [jour, { ...demi, quantite: 1.5 }]]) {
+        const res = await envoyer('patch', `/api/devis/${devis.id}`, corpsDevis('quantité entière', lignes));
+        assert.deepEqual([res.status, res.body.error], [400, REFUS], JSON.stringify(lignes.map((l) => l.quantite)));
+      }
+      assert.equal(JSON.stringify(await prisma.devisLigne.findMany({ where: { devisId: devis.id }, orderBy: { ordre: 'asc' } })), avant);
+      // La base refuse une quantité non entière ou nulle, totaux pourtant exacts ; elle accepte une quantité entière.
+      const [ligneJour, ligneDemi] = devis.lignes;
+      for (const [id, data] of [
+        [ligneJour.id, { quantite: 0.5, totalHt: 150, totalTtc: 180 }],
+        [ligneJour.id, { quantite: 2.5, totalHt: 750, totalTtc: 900 }],
+        [ligneDemi.id, { quantite: 1.5, totalHt: 240, totalTtc: 288 }],
+        [ligneDemi.id, { quantite: 0, totalHt: 0, totalTtc: 0 }],
+      ]) {
+        await assert.rejects(prisma.devisLigne.update({ where: { id }, data }), /DevisLigne_forfait_main_oeuvre_check/, JSON.stringify(data));
+      }
+      await prisma.devisLigne.update({ where: { id: ligneJour.id }, data: { quantite: 3, totalHt: 900, totalTtc: 1080 } });
+      assert.equal((await prisma.devisLigne.findUniqueOrThrow({ where: { id: ligneJour.id } })).quantite.toString(), '3');
+    });
+
+    test('pas de ligne au forfait sur un devis au temps passé, à la création comme au passage au temps passé', async () => {
+      const avant = await prisma.parametres.findUniqueOrThrow({ where: { id: 'singleton' } });
+      const REFUS = 'Un devis au temps passé ne porte pas de ligne au jour ou à la demi-journée : sa main d’œuvre est la ligne au temps passé.';
+      const ligneTp = { tempsPasse: true, designation: 'TEST Main d’œuvre au temps passé', quantite: 1, tarifTempsPasse: 'HORS_CONTRAT', catalogueFamille: 'prestations', catalogueId: fiches.mo.id };
+      try {
+        assert.equal((await envoyer('put', '/api/parametres', { pasTempsPasseMinutes: 15 })).status, 200);
+        const nombre = await nbDevis();
+        const creation = await envoyer('post', '/api/devis', corpsDevis('temps passé', [ligneTp, forfait(fiches.mo, 'JOUR', 'HORS_CONTRAT')], { auTempsPasse: true }));
+        assert.deepEqual([creation.status, creation.body.error], [400, REFUS]);
+        assert.equal(await nbDevis(), nombre);
+        const devis = await creerDevis('passage au temps passé', [forfait(fiches.mo, 'JOUR', 'HORS_CONTRAT')]);
+        const passage = await envoyer('patch', `/api/devis/${devis.id}`, corpsDevis('passage au temps passé', [ligneTp, ...lignesGardees(devis)], { auTempsPasse: true }));
+        assert.deepEqual([passage.status, passage.body.error], [400, REFUS]);
+        const relu = await prisma.devis.findUniqueOrThrow({ where: { id: devis.id }, include: { lignes: true } });
+        assert.deepEqual([relu.auTempsPasse, relu.lignes.length, relu.lignes[0].forfaitMainOeuvre], [false, 1, 'JOUR']);
+      } finally {
+        assert.equal((await envoyer('put', '/api/parametres', { pasTempsPasseMinutes: avant.pasTempsPasseMinutes ?? '' })).status, 200);
+      }
+    });
+
+    test('copie figée : la fiche modifiée ou désactivée après l’ajout ne change ni la ligne gardée, ni la révision, ni la duplication ; ni forfait, ni tarif, ni fiche, ni nature ne changent', async () => {
+      const fiche = await creerFiche('figee', corpsMainOeuvre('FIGEE', { prixDemiJourneeHorsContratHt: '170' }));
+      const devis = await creerDevis('copie figée', [
+        forfait(fiche, 'JOUR', 'HORS_CONTRAT', { quantite: 2 }),
+        { designation: 'TEST Ligne ordinaire', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 50, tauxTva: 20 },
+      ]);
+      assert.deepEqual([champs(devis, 'prixUnitaireHt', 'minutesPrevuesUnite'), devis.heuresPrevues], [[[300, 450], [50, null]], 16]);
+      // La fiche change de prix et d'heures par jour.
+      const maj = await envoyer('put', `/api/catalogue/prestations/${fiche.id}`, corpsMainOeuvre('FIGEE', { prixJourHorsContratHt: '320', heuresParJour: '8', prixDemiJourneeHorsContratHt: '180' }));
+      assert.equal(maj.status, 200, JSON.stringify(maj.body));
+      const [ligneForfait, ligneOrdinaire] = lignesGardees(devis);
+      // Ligne gardée (sans tarif : elle garde le sien) et nouvelle ligne au prix et aux heures du jour.
+      const modifie = await envoyer('patch', `/api/devis/${devis.id}`, corpsDevis('copie figée', [{ ...ligneForfait, quantite: 3 }, ligneOrdinaire, forfait(fiche, 'DEMI_JOURNEE', 'HORS_CONTRAT')]));
+      assert.equal(modifie.status, 200, JSON.stringify(modifie.body));
+      assert.deepEqual(champs(modifie.body, 'forfaitMainOeuvre', 'tarifForfait', 'prixUnitaireHt', 'minutesPrevuesUnite', 'totalHt'), [
+        ['JOUR', 'HORS_CONTRAT', 300, 450, 900], [null, null, 50, null, 50], ['DEMI_JOURNEE', 'HORS_CONTRAT', 180, 240, 180],
+      ]);
+      // 3 × 7,5 h + 1 h + 4 h.
+      assert.deepEqual([modifie.body.totalHt, modifie.body.heuresPrevues], [1130, 27.5]);
+      // La ligne gardée n'impose pas le nouveau prix de la fiche, et ne change ni de forfait, ni de tarif, ni de fiche.
+      const gardees = lignesGardees(modifie.body);
+      const refus = [
+        ['prix du jour de la fiche', [{ ...gardees[0], prixUnitaireHt: 320 }], 'Le prix de la ligne au jour est celui de la main d’œuvre, fixé par Iris : 300,00 € HT par jour (forfait jour hors contrat). Il ne se saisit pas.'],
+        ['autre forfait', [{ ...gardees[0], forfaitMainOeuvre: 'DEMI_JOURNEE', unite: 'demi-journée' }], 'La ligne au jour ou à la demi-journée garde sa main d’œuvre, son forfait, son tarif et son prix : pour en changer, retirez-la et ajoutez-en une nouvelle.'],
+        ['autre tarif', [{ ...gardees[0], tarifForfait: 'SOUS_CONTRAT' }], 'La ligne au jour ou à la demi-journée garde sa main d’œuvre, son forfait, son tarif et son prix : pour en changer, retirez-la et ajoutez-en une nouvelle.'],
+        ['autre fiche', [{ ...gardees[0], catalogueFamille: 'prestations', catalogueId: fiches.mo.id }], 'La ligne au jour ou à la demi-journée garde sa main d’œuvre, son forfait, son tarif et son prix : pour en changer, retirez-la et ajoutez-en une nouvelle.'],
+        ['ligne au forfait devenue ordinaire', [{ ...gardees[0], forfaitMainOeuvre: undefined, unite: 'jour' }], 'Une ligne existante garde sa nature : une ligne ordinaire ne devient pas une ligne au jour ou à la demi-journée, ni l’inverse. Retirez-la et ajoutez-en une nouvelle.'],
+        ['ligne ordinaire devenue forfait', [gardees[0], { ...gardees[1], forfaitMainOeuvre: 'JOUR', tarifForfait: 'HORS_CONTRAT', unite: null, prixUnitaireHt: undefined, catalogueFamille: 'prestations', catalogueId: fiche.id }], 'Une ligne existante garde sa nature : une ligne ordinaire ne devient pas une ligne au jour ou à la demi-journée, ni l’inverse. Retirez-la et ajoutez-en une nouvelle.'],
+      ];
+      const avantRefus = JSON.stringify(await prisma.devisLigne.findMany({ where: { devisId: devis.id }, orderBy: { ordre: 'asc' } }));
+      for (const [quoi, lignes, message] of refus) {
+        const res = await envoyer('patch', `/api/devis/${devis.id}`, corpsDevis('copie figée', lignes));
+        assert.deepEqual([res.status, res.body.error], [400, message], quoi);
+      }
+      assert.equal(JSON.stringify(await prisma.devisLigne.findMany({ where: { devisId: devis.id }, orderBy: { ordre: 'asc' } })), avantRefus, 'lignes inchangées');
+      // La fiche désactivée : la ligne gardée reste, la duplication et la révision copient forfait, tarif, prix, unité et minutes.
+      assert.equal((await request(app).delete(`/api/catalogue/prestations/${fiche.id}`).set(admin)).status, 200);
+      try {
+        const garde = await envoyer('patch', `/api/devis/${devis.id}`, corpsDevis('copie figée', gardees));
+        assert.equal(garde.status, 200, JSON.stringify(garde.body));
+        const attendu = champs(modifie.body, 'forfaitMainOeuvre', 'tarifForfait', 'prixUnitaireHt', 'unite', 'minutesPrevuesUnite', 'reference', 'totalHt');
+        assert.deepEqual(champs(garde.body, 'forfaitMainOeuvre', 'tarifForfait', 'prixUnitaireHt', 'unite', 'minutesPrevuesUnite', 'reference', 'totalHt'), attendu);
+        const duplicata = await envoyer('post', `/api/devis/${devis.id}/duplication`);
+        assert.equal(duplicata.status, 201, JSON.stringify(duplicata.body));
+        assert.deepEqual([champs(duplicata.body, 'forfaitMainOeuvre', 'tarifForfait', 'prixUnitaireHt', 'unite', 'minutesPrevuesUnite', 'reference', 'totalHt'), duplicata.body.totalHt, duplicata.body.heuresPrevues], [attendu, 1130, 27.5]);
+        await signer(devis.id);
+        const revision = await envoyer('post', `/api/devis/${devis.id}/revisions`);
+        assert.equal(revision.status, 201, JSON.stringify(revision.body));
+        assert.deepEqual([champs(revision.body, 'forfaitMainOeuvre', 'tarifForfait', 'prixUnitaireHt', 'unite', 'minutesPrevuesUnite', 'reference', 'totalHt'), revision.body.totalHt, revision.body.heuresPrevues], [attendu, 1130, 27.5]);
+        // La révision se modifie en gardant ses lignes au forfait, même avec une fiche désactivée.
+        const revisee = await envoyer('patch', `/api/devis/${revision.body.id}`, corpsDevis('copie figée', lignesGardees(revision.body)));
+        assert.equal(revisee.status, 200, JSON.stringify(revisee.body));
+        assert.deepEqual(champs(revisee.body, 'forfaitMainOeuvre', 'tarifForfait', 'prixUnitaireHt', 'unite', 'minutesPrevuesUnite', 'reference', 'totalHt'), attendu);
+      } finally {
+        assert.equal((await envoyer('put', `/api/catalogue/prestations/${fiche.id}`, { ...corpsMainOeuvre('FIGEE'), actif: true })).status, 200);
+      }
+    });
+
+    test('contenu signé : le forfait et le tarif entrent dans l’empreinte avec leur ligne ; celle d’un devis sans ligne au forfait ne change pas ; le PDF imprime l’unité', async () => {
+      const devis = await creerDevis('contenu signé', [
+        forfait(fiches.mo, 'DEMI_JOURNEE', 'SOUS_CONTRAT', { designation: 'TEST Demi-journée signée', quantite: 2 }),
+        { designation: 'TEST Réglage saisi à la main', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 50, tauxTva: 20 },
+      ]);
+      const signature = await signer(devis.id);
+      const base = {
+        devisId: devis.id, dossierId: devis.dossierId, numero: devis.numero, version: 1, clientId: client.id, objet: devis.objet,
+        acompteExige: false, tauxAcompte: null, totalHt: '351.00', totalTva: '70.20', totalTtc: '421.20',
+      };
+      const ligneForfait = { ordre: 0, designation: 'TEST Demi-journée signée', nature: 'MAIN_OEUVRE', reference: fiches.mo.reference, unite: 'demi-journée', quantite: '2.000', prixUnitaireHt: '150.50', tauxTva: '20.00', totalHt: '301.00', totalTtc: '361.20' };
+      const ligneOrdinaire = { ordre: 1, designation: 'TEST Réglage saisi à la main', nature: 'MAIN_OEUVRE', reference: null, unite: null, quantite: '1.000', prixUnitaireHt: '50.00', tauxTva: '20.00', totalHt: '50.00', totalTtc: '60.00' };
+      const empreinte = (contenu) => createHash('sha256').update(JSON.stringify(contenu), 'utf8').digest('hex');
+      assert.equal(signature.empreinte, empreinte({ ...base, lignes: [{ ...ligneForfait, forfaitMainOeuvre: 'DEMI_JOURNEE', tarifForfait: 'SOUS_CONTRAT' }, ligneOrdinaire] }));
+      assert.notEqual(signature.empreinte, empreinte({ ...base, lignes: [ligneForfait, ligneOrdinaire] }), 'sans les deux champs, l’empreinte serait autre');
+      // Un devis sans ligne au forfait : contenu d'avant ce lot, sans ces champs.
+      const sans = await creerDevis('sans forfait', [{ designation: 'TEST Réglage seul', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 50, tauxTva: 20 }]);
+      const signatureSans = await signer(sans.id);
+      assert.equal(signatureSans.empreinte, empreinte({
+        devisId: sans.id, dossierId: sans.dossierId, numero: sans.numero, version: 1, clientId: client.id, objet: sans.objet,
+        acompteExige: false, tauxAcompte: null, totalHt: '50.00', totalTva: '10.00', totalTtc: '60.00',
+        lignes: [{ ordre: 0, designation: 'TEST Réglage seul', nature: 'MAIN_OEUVRE', reference: null, unite: null, quantite: '1.000', prixUnitaireHt: '50.00', tauxTva: '20.00', totalHt: '50.00', totalTtc: '60.00' }],
+      }));
+      // Une ligne d'un devis signé reste figée en base, forfait compris.
+      await assert.rejects(prisma.devisLigne.updateMany({ where: { devisId: devis.id, ordre: 0 }, data: { tarifForfait: 'HORS_CONTRAT' } }), /figées/);
+      // Le PDF imprime la quantité et l'unité, rien d'autre de la ligne au forfait.
+      const pdf = await request(app).get(`/api/devis/${devis.id}/document.pdf`).set(admin).buffer(true)
+        .parse((reponse, fin) => { const morceaux = []; reponse.on('data', (m) => morceaux.push(m)); reponse.on('end', () => fin(null, Buffer.concat(morceaux))); });
+      assert.equal(pdf.status, 200, String(pdf.body));
+      const lecteur = new PDFParse({ data: pdf.body });
+      const { text } = await lecteur.getText();
+      await lecteur.destroy();
+      for (const attendu of ['2 demi-journée', '150,50 €', '301,00 €', `Réf. ${fiches.mo.reference}`, 'Total TTC : 421,20 €']) assert.ok(text.includes(attendu), `absent du PDF : ${attendu}\n${text}`);
+      // Ni le forfait, ni le tarif, ni les heures prévues (le nom du client et l'objet, eux, contiennent « forfait »).
+      assert.doesNotMatch(text, /DEMI_JOURNEE|SOUS_CONTRAT|minutes|heures? prévues?\s*:/i);
+    });
+
+    test('conversion en chantier : 2 jours et une demi-journée à 7,5 h font 18,75 h vendues, et la main-d’œuvre vendue', async () => {
+      const devis = await creerDevis('conversion', [
+        forfait(fiches.mo, 'JOUR', 'HORS_CONTRAT', { quantite: 2 }), // 600 €, 15 h
+        forfait(fiches.mo, 'DEMI_JOURNEE', 'HORS_CONTRAT'), // 160 €, 3,75 h
+        { designation: 'TEST Fourniture forfait jour', nature: 'FOURNITURE', quantite: 4, prixUnitaireHt: 25, tauxTva: 20 }, // 100 €
+      ]);
+      assert.deepEqual([devis.totalHt, devis.heuresPrevues], [860, 18.75]);
+      await signer(devis.id);
+      const conversion = await envoyer('post', `/api/devis/${devis.id}/convertir`, { cible: 'CHANTIER' });
+      assert.equal(conversion.status, 201, JSON.stringify(conversion.body));
+      assert.deepEqual([conversion.body.heuresVendues, conversion.body.budgetMainOeuvreVendu, conversion.body.budgetMaterielVendu, conversion.body.budgetGlobalVendu, conversion.body.coutMaterielPrevu], [18.75, 760, 100, 860, 0]);
+      const chantier = await prisma.chantier.findUniqueOrThrow({ where: { id: conversion.body.id } });
+      assert.deepEqual([chantier.heuresVendues.toFixed(2), chantier.budgetMainOeuvreVendu.toFixed(2)], ['18.75', '760.00']);
+    });
+
+    test('clés d’intégration : devis:read lit forfait, tarif et heures prévues ; devis:write ajoute une ligne au forfait au prix d’Iris, sans pouvoir en imposer un autre', async () => {
+      const cle = async (scopes) => {
+        const res = await envoyer('post', '/api/admin/api-keys', { nom: `TEST forfait jour devis ${scopes.join(' ')} ${suffixe}`, scopes });
+        assert.equal(res.status, 201, JSON.stringify(res.body));
+        return { Authorization: `Bearer ${res.body.apiKey}` };
+      };
+      const ecriture = await cle(['devis:read', 'devis:write']);
+      const refus = await envoyer('post', '/api/v1/devis', corpsDevis('clé', [forfait(fiches.mo, 'JOUR', 'HORS_CONTRAT', { prixUnitaireHt: 1 })]), ecriture);
+      assert.deepEqual([refus.status, refus.body.error], [400, 'Le prix de la ligne au jour est celui de la main d’œuvre, fixé par Iris : 300,00 € HT par jour (forfait jour hors contrat). Il ne se saisit pas.']);
+      const cree = await envoyer('post', '/api/v1/devis', corpsDevis('clé', [forfait(fiches.mo, 'DEMI_JOURNEE', 'HORS_CONTRAT', { quantite: 2 })]), ecriture);
+      assert.equal(cree.status, 201, JSON.stringify(cree.body));
+      const devis = cree.body;
+      assert.deepEqual([devis.totalHt, devis.heuresPrevues, devis.lignes[0].prixUnitaireHt], [320, 7.5, 160]);
+      const lu = await request(app).get('/api/v1/devis').set(await cle(['devis:read']));
+      assert.equal(lu.status, 200, JSON.stringify(lu.body));
+      const vu = lu.body.find((d) => d.id === devis.id);
+      assert.deepEqual([vu.heuresPrevues, champs(vu, 'forfaitMainOeuvre', 'tarifForfait', 'unite', 'minutesPrevuesUnite', 'prixUnitaireHt'), vu.lignes.some((l) => 'prixAchatUnitaireHt' in l)],
+        [7.5, [['DEMI_JOURNEE', 'HORS_CONTRAT', 'demi-journée', 225, 160]], false]);
+    });
+
+    test('la base lie le forfait et le tarif à une ligne de main d’œuvre du catalogue, ni au temps passé ni sans minutes prévues', async () => {
+      const devis = await creerDevis('base', [forfait(fiches.mo, 'JOUR', 'HORS_CONTRAT'), { designation: 'TEST Fourniture base', nature: 'FOURNITURE', quantite: 1, prixUnitaireHt: 10, tauxTva: 20 }]);
+      const [ligneForfait, fourniture] = devis.lignes;
+      const ecarts = [
+        [ligneForfait.id, { tarifForfait: null }], [ligneForfait.id, { forfaitMainOeuvre: null }], [ligneForfait.id, { forfaitMainOeuvre: 'SEMAINE' }],
+        [ligneForfait.id, { tarifForfait: 'FORFAIT' }], [ligneForfait.id, { unite: 'demi-journée' }], [ligneForfait.id, { minutesPrevuesUnite: null }],
+        [ligneForfait.id, { minutesPrevuesUnite: 0 }], [ligneForfait.id, { prixAchatUnitaireHt: 10 }], [ligneForfait.id, { nature: 'FOURNITURE' }],
+        [ligneForfait.id, { totalHt: 299 }], [ligneForfait.id, { catalogueFamille: 'articles' }],
+        [fourniture.id, { forfaitMainOeuvre: 'JOUR', tarifForfait: 'HORS_CONTRAT' }],
+      ];
+      for (const [id, data] of ecarts) {
+        await assert.rejects(prisma.devisLigne.update({ where: { id }, data }), /DevisLigne_forfait_main_oeuvre_check/, JSON.stringify(data));
+      }
+    });
+
+    // Audit n° 1 de #379 (montants) : la TVA d'une ligne au forfait est celle de la fiche, et non le taux par défaut d'une
+    // ligne saisie (20 %) ; toutes les fiches des tests précédents sont à 20 %. Elle est contrôlée comme un taux français à
+    // l'ajout (une fiche enregistrée avant le lot « TVA française » peut porter un autre taux), puis figée : ni la fiche
+    // modifiée, ni une TVA envoyée pour la ligne gardée, ni la duplication, ni la révision ne la changent.
+    test('TVA de la fiche à 10 % ou 5,5 % : ligne et totaux du devis exacts ; taux non français refusé ; TVA figée sur la ligne gardée, la duplication et la révision', async () => {
+      const dix = await creerFiche('tva10', corpsMainOeuvre('TVA10', { tauxTva: '10' }));
+      const cinq = await creerFiche('tva55', corpsMainOeuvre('TVA55', { tauxTva: '5.5', prixDemiJourneeSousContratHt: '155.55' }));
+      const devis = await creerDevis('TVA de la fiche', [
+        forfait(dix, 'JOUR', 'HORS_CONTRAT', { quantite: 2 }), // 600 € à 10 %
+        forfait(cinq, 'DEMI_JOURNEE', 'SOUS_CONTRAT', { quantite: 3, tauxTva: '5,5' }), // 466,65 € à 5,5 %, TVA envoyée à la virgule
+        { designation: 'TEST Fourniture TVA forfait', nature: 'FOURNITURE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }, // 100 € à 20 %
+      ]);
+      assert.deepEqual(champs(devis, 'tauxTva', 'totalHt', 'totalTtc'), [[10, 600, 660], [5.5, 466.65, 492.32], [20, 100, 120]]);
+      // TVA arrondie sur la base de chaque taux : 60,00 + 25,67 (466,65 × 5,5 % = 25,66575) + 20,00 ; 2 × 7,5 h + 3 × 3,75 h.
+      assert.deepEqual([devis.totalHt, devis.totalTva, devis.totalTtc, devis.heuresPrevues], [1166.65, 105.67, 1272.32, 26.25]);
+      // Une TVA envoyée qui n'est pas celle de la fiche est refusée, au taux de la fiche dans le message ; une fiche d'un taux
+      // non français ne se vend pas au forfait. Rien n'est écrit.
+      const nombre = await nbDevis();
+      const refusCinq = await envoyer('post', '/api/devis', corpsDevis('TVA différente', [forfait(cinq, 'DEMI_JOURNEE', 'SOUS_CONTRAT', { tauxTva: 20 })]));
+      assert.deepEqual([refusCinq.status, refusCinq.body.error], [400, 'La TVA de la ligne à la demi-journée est celle de la main d’œuvre : 5,5 %. Elle ne se saisit pas.']);
+      await prisma.cataloguePrestation.update({ where: { id: cinq.id }, data: { tauxTva: 7 } });
+      try {
+        const refusSept = await envoyer('post', '/api/devis', corpsDevis('TVA non française', [forfait(cinq, 'JOUR', 'HORS_CONTRAT')]));
+        assert.deepEqual([refusSept.status, refusSept.body.error], [400, 'TVA de la main d’œuvre non acceptée pour un devis (0 %, 5,5 %, 10 % ou 20 %) : corrigez la fiche du catalogue.']);
+      } finally {
+        await prisma.cataloguePrestation.update({ where: { id: cinq.id }, data: { tauxTva: 5.5 } });
+      }
+      assert.equal(await nbDevis(), nombre, 'aucun devis créé');
+      // La fiche à 10 % passe à 20 % : la ligne gardée, modifiée, garde 10 % ; une nouvelle ligne prend 20 %.
+      const maj = await envoyer('put', `/api/catalogue/prestations/${dix.id}`, corpsMainOeuvre('TVA10', { tauxTva: '20' }));
+      assert.equal(maj.status, 200, JSON.stringify(maj.body));
+      const [jour, demi, fourniture] = lignesGardees(devis);
+      const modifie = await envoyer('patch', `/api/devis/${devis.id}`, corpsDevis('TVA de la fiche', [{ ...jour, quantite: 3 }, demi, fourniture, forfait(dix, 'JOUR', 'HORS_CONTRAT')]));
+      assert.equal(modifie.status, 200, JSON.stringify(modifie.body));
+      const attendu = [[10, 900, 990], [5.5, 466.65, 492.32], [20, 100, 120], [20, 300, 360]];
+      assert.deepEqual(champs(modifie.body, 'tauxTva', 'totalHt', 'totalTtc'), attendu);
+      // 90,00 + 25,67 + 80,00.
+      assert.deepEqual([modifie.body.totalHt, modifie.body.totalTva, modifie.body.totalTtc], [1766.65, 195.67, 1962.32]);
+      // Une TVA envoyée pour la ligne gardée, fût-elle le nouveau taux de la fiche, est refusée ; rien n'est écrit.
+      const avantRefus = JSON.stringify(await prisma.devisLigne.findMany({ where: { devisId: devis.id }, orderBy: { ordre: 'asc' } }));
+      const gardees = lignesGardees(modifie.body);
+      const refusGardee = await envoyer('patch', `/api/devis/${devis.id}`, corpsDevis('TVA de la fiche', [{ ...gardees[0], tauxTva: 20 }, ...gardees.slice(1)]));
+      assert.deepEqual([refusGardee.status, refusGardee.body.error], [400, 'La TVA de la ligne au jour est celle de la main d’œuvre : 10 %. Elle ne se saisit pas.']);
+      assert.equal(JSON.stringify(await prisma.devisLigne.findMany({ where: { devisId: devis.id }, orderBy: { ordre: 'asc' } })), avantRefus, 'lignes inchangées');
+      // La duplication et la révision copient la TVA de chaque ligne, et non celle du jour de la fiche.
+      const duplicata = await envoyer('post', `/api/devis/${devis.id}/duplication`);
+      assert.equal(duplicata.status, 201, JSON.stringify(duplicata.body));
+      assert.deepEqual([champs(duplicata.body, 'tauxTva', 'totalHt', 'totalTtc'), duplicata.body.totalTva, duplicata.body.totalTtc], [attendu, 195.67, 1962.32]);
+      await signer(devis.id);
+      const revision = await envoyer('post', `/api/devis/${devis.id}/revisions`);
+      assert.equal(revision.status, 201, JSON.stringify(revision.body));
+      assert.deepEqual([champs(revision.body, 'tauxTva', 'totalHt', 'totalTtc'), revision.body.totalTva, revision.body.totalTtc], [attendu, 195.67, 1962.32]);
+    });
+
+    // Audit n° 1 de #379 (montants) : une ligne au forfait garde sa copie quand sa fiche est ramenée en prestation ordinaire,
+    // puis revient en main d'œuvre à d'autres prix et heures par jour ; à côté, une ligne ordinaire de la même main d'œuvre
+    // relibellée « journée » compte toujours sa quantité en heures (note N4 des audits n° 8 à 10 de #376). Jusqu'au chantier,
+    // dont les heures vendues viennent des minutes copiées, et non des heures par jour du moment.
+    test('fiche ramenée en prestation ordinaire puis revenue en main d’œuvre : les lignes au forfait gardent leur copie, à côté d’une ligne relibellée « journée », en modification, duplication et révision, jusqu’au chantier', async () => {
+      const fiche = await creerFiche('allerRetour', corpsMainOeuvre('ALLER', { prixDemiJourneeHorsContratHt: '160', prixDemiJourneeSousContratHt: '150' }));
+      const devis = await creerDevis('aller-retour', [
+        forfait(fiche, 'JOUR', 'SOUS_CONTRAT', { quantite: 2 }), // 2 × 280 €, 2 × 7,5 h
+        forfait(fiche, 'DEMI_JOURNEE', 'HORS_CONTRAT'), // 160 €, 3,75 h
+        { designation: 'TEST Journée saisie en ligne ordinaire', nature: 'MAIN_OEUVRE', quantite: 2, prixUnitaireHt: 45, tauxTva: 20, unite: 'journée', catalogueFamille: 'prestations', catalogueId: fiche.id }, // 2 h
+      ]);
+      assert.deepEqual([champs(devis, 'minutesPrevuesUnite'), devis.totalHt, devis.heuresPrevues], [[[450], [225], [null]], 810, 20.75]);
+      const COPIE = ['forfaitMainOeuvre', 'tarifForfait', 'prixUnitaireHt', 'tauxTva', 'unite', 'minutesPrevuesUnite', 'reference', 'totalHt'];
+      const lignesEnBase = async (devisId) => JSON.stringify(await prisma.devisLigne.findMany({ where: { devisId }, orderBy: { ordre: 'asc' } }));
+      // La fiche devient une prestation ordinaire à durée indicative (90 min) : ses prix de la demi-journée sont vidés.
+      const ordinaire = await envoyer('put', `/api/catalogue/prestations/${fiche.id}`, { estMainOeuvre: false, reference: fiche.reference, nom: fiche.nom, tauxTva: '20', unite: 'forfait', prixVenteHt: '99', dureeIndicativeMin: 90 });
+      assert.equal(ordinaire.status, 200, JSON.stringify(ordinaire.body));
+      assert.deepEqual([ordinaire.body.estMainOeuvre, ordinaire.body.heuresParJour, ordinaire.body.prixDemiJourneeHorsContratHt], [false, null, null]);
+      const [jour, demi, journee] = lignesGardees(devis);
+      const modifie = await envoyer('patch', `/api/devis/${devis.id}`, corpsDevis('aller-retour', [{ ...jour, quantite: 3 }, { ...demi, designation: 'TEST Demi-journée renommée' }, { ...journee, quantite: 4 }]));
+      assert.equal(modifie.status, 200, JSON.stringify(modifie.body));
+      const attendu = [
+        ['JOUR', 'SOUS_CONTRAT', 280, 20, 'jour', 450, fiche.reference, 840],
+        ['DEMI_JOURNEE', 'HORS_CONTRAT', 160, 20, 'demi-journée', 225, fiche.reference, 160],
+        [null, null, 45, 20, 'journée', null, fiche.reference, 180],
+      ];
+      // 3 × 7,5 h + 3,75 h + 4 h : la ligne ordinaire compte sa quantité, et non 4 × 90 min.
+      assert.deepEqual([champs(modifie.body, ...COPIE), modifie.body.totalHt, modifie.body.heuresPrevues], [attendu, 1180, 30.25]);
+      // Une nouvelle ligne au forfait de cette fiche, devenue ordinaire, est refusée ; rien n'est écrit.
+      const avant = await lignesEnBase(devis.id);
+      const refus = await envoyer('patch', `/api/devis/${devis.id}`, corpsDevis('aller-retour', [...lignesGardees(modifie.body), forfait(fiche, 'JOUR', 'HORS_CONTRAT')]));
+      assert.deepEqual([refus.status, refus.body.error], [400, 'Une ligne au jour ou à la demi-journée reprend une main d’œuvre du catalogue (prestation marquée main d’œuvre).']);
+      assert.equal(await lignesEnBase(devis.id), avant, 'lignes inchangées');
+      // Duplication et révision, la fiche toujours ordinaire : copies à l'identique.
+      const duplicata = await envoyer('post', `/api/devis/${devis.id}/duplication`);
+      assert.equal(duplicata.status, 201, JSON.stringify(duplicata.body));
+      assert.deepEqual([champs(duplicata.body, ...COPIE), duplicata.body.totalHt, duplicata.body.heuresPrevues], [attendu, 1180, 30.25]);
+      await signer(devis.id);
+      const revision = await envoyer('post', `/api/devis/${devis.id}/revisions`);
+      assert.equal(revision.status, 201, JSON.stringify(revision.body));
+      assert.deepEqual([champs(revision.body, ...COPIE), revision.body.totalHt, revision.body.heuresPrevues], [attendu, 1180, 30.25]);
+      // La fiche revient en main d'œuvre, à 8 h par jour et à d'autres forfaits jour, sans prix de la demi-journée.
+      const retour = await envoyer('put', `/api/catalogue/prestations/${fiche.id}`, corpsMainOeuvre('ALLER', { prixJourHorsContratHt: '320', prixJourSousContratHt: '300', heuresParJour: '8' }));
+      assert.equal(retour.status, 200, JSON.stringify(retour.body));
+      assert.deepEqual([retour.body.estMainOeuvre, retour.body.prixDemiJourneeHorsContratHt, retour.body.prixDemiJourneeSousContratHt], [true, null, null]);
+      // Une demi-journée ne se vend plus tant que son prix n'est pas ressaisi ; rien n'est écrit.
+      const avantRevision = await lignesEnBase(revision.body.id);
+      const sansDemi = await envoyer('patch', `/api/devis/${revision.body.id}`, corpsDevis('aller-retour', [...lignesGardees(revision.body), forfait(fiche, 'DEMI_JOURNEE', 'HORS_CONTRAT')]));
+      assert.deepEqual([sansDemi.status, sansDemi.body.error], [400, 'Cette main d’œuvre n’a pas de prix de la demi-journée hors contrat : elle ne se vend pas à la demi-journée tant que l’administration ne l’a pas saisi (Catalogue > Main d’œuvre).']);
+      assert.equal(await lignesEnBase(revision.body.id), avantRevision, 'révision inchangée');
+      // Les lignes gardées de la révision gardent leur copie ; une nouvelle ligne au jour prend le prix et les heures du moment.
+      const complete = await envoyer('patch', `/api/devis/${revision.body.id}`, corpsDevis('aller-retour', [...lignesGardees(revision.body), forfait(fiche, 'JOUR', 'SOUS_CONTRAT')]));
+      assert.equal(complete.status, 200, JSON.stringify(complete.body));
+      assert.deepEqual(champs(complete.body, ...COPIE), [...attendu, ['JOUR', 'SOUS_CONTRAT', 300, 20, 'jour', 480, fiche.reference, 300]]);
+      // 22,5 h + 3,75 h + 4 h + 8 h.
+      assert.deepEqual([complete.body.totalHt, complete.body.heuresPrevues], [1480, 38.25]);
+      await signer(revision.body.id);
+      const conversion = await envoyer('post', `/api/devis/${revision.body.id}/convertir`, { cible: 'CHANTIER' });
+      assert.equal(conversion.status, 201, JSON.stringify(conversion.body));
+      assert.deepEqual([conversion.body.heuresVendues, conversion.body.budgetMainOeuvreVendu, conversion.body.budgetMaterielVendu], [38.25, 1480, 0]);
+      const chantier = await prisma.chantier.findUniqueOrThrow({ where: { id: conversion.body.id } });
+      assert.equal(chantier.heuresVendues.toFixed(2), '38.25');
+    });
+
+    // Audit n° 1 de #379 (montants) : un devis déjà au temps passé, modifié sans « auTempsPasse » dans le corps (ou avec une
+    // valeur nulle), garde son marqueur, et refuse donc aussi une ligne au forfait, que sa facture au temps passé reprendrait
+    // sinon à sa quantité et à son prix. Le test « pas de ligne au forfait sur un devis au temps passé » n'éprouve que la
+    // création et le passage au temps passé, le marqueur étant chaque fois dans le corps.
+    test('pas de ligne au forfait sur un devis déjà au temps passé, modifié sans « auTempsPasse » dans le corps ou avec une valeur nulle', async () => {
+      const avant = await prisma.parametres.findUniqueOrThrow({ where: { id: 'singleton' } });
+      const REFUS = 'Un devis au temps passé ne porte pas de ligne au jour ou à la demi-journée : sa main d’œuvre est la ligne au temps passé.';
+      try {
+        assert.equal((await envoyer('put', '/api/parametres', { pasTempsPasseMinutes: 15 })).status, 200);
+        const devis = await creerDevis('déjà au temps passé', [{ tempsPasse: true, designation: 'TEST Main d’œuvre au temps passé', quantite: 1, tarifTempsPasse: 'HORS_CONTRAT', catalogueFamille: 'prestations', catalogueId: fiches.mo.id }], { auTempsPasse: true });
+        const [tp] = devis.lignes;
+        const gardee = { ligneId: tp.id, tempsPasse: true, designation: tp.designation, quantite: tp.quantite, prixUnitaireHt: tp.prixUnitaireHt, tauxTva: tp.tauxTva };
+        const avantLignes = JSON.stringify(await prisma.devisLigne.findMany({ where: { devisId: devis.id }, orderBy: { ordre: 'asc' } }));
+        for (const extra of [{}, { auTempsPasse: null }]) {
+          const res = await envoyer('patch', `/api/devis/${devis.id}`, corpsDevis('déjà au temps passé', [gardee, forfait(fiches.mo, 'JOUR', 'HORS_CONTRAT')], extra));
+          assert.deepEqual([res.status, res.body.error], [400, REFUS], JSON.stringify(extra));
+        }
+        assert.equal(JSON.stringify(await prisma.devisLigne.findMany({ where: { devisId: devis.id }, orderBy: { ordre: 'asc' } })), avantLignes, 'lignes inchangées');
+        // Sans la ligne au forfait, la même modification passe, et le devis reste au temps passé.
+        const sansForfait = await envoyer('patch', `/api/devis/${devis.id}`, corpsDevis('déjà au temps passé', [gardee]));
+        assert.equal(sansForfait.status, 200, JSON.stringify(sansForfait.body));
+        assert.deepEqual([sansForfait.body.auTempsPasse, sansForfait.body.lignes.length], [true, 1]);
+      } finally {
+        assert.equal((await envoyer('put', '/api/parametres', { pasTempsPasseMinutes: avant.pasTempsPasseMinutes ?? '' })).status, 200);
+      }
+    });
+
+    // Audit n° 1 de #379 (montants) : chaque prix de la demi-journée vaut pour son seul tarif ; sans prix sous contrat, la
+    // demi-journée sous contrat est refusée même si le prix hors contrat existe, et inversement (aucun repli d'un tarif sur
+    // l'autre). Un prix réglé à 0 € est un prix, et non une absence. Les fiches des tests précédents ont les deux prix, ou aucun.
+    test('demi-journée : chaque tarif a son prix, sans repli sur l’autre ; un prix de 0 € se vend, à 0 €, et compte ses heures', async () => {
+      const zeroHc = await creerFiche('demiZeroHc', corpsMainOeuvre('DEMI0', { prixDemiJourneeHorsContratHt: '0' }));
+      const seulSc = await creerFiche('demiSeulSc', corpsMainOeuvre('DEMISC', { prixDemiJourneeSousContratHt: '140' }));
+      const nombre = await nbDevis();
+      for (const [ligne, message] of [
+        [forfait(zeroHc, 'DEMI_JOURNEE', 'SOUS_CONTRAT'), 'Cette main d’œuvre n’a pas de prix de la demi-journée sous contrat : elle ne se vend pas à la demi-journée tant que l’administration ne l’a pas saisi (Catalogue > Main d’œuvre).'],
+        [forfait(seulSc, 'DEMI_JOURNEE', 'HORS_CONTRAT'), 'Cette main d’œuvre n’a pas de prix de la demi-journée hors contrat : elle ne se vend pas à la demi-journée tant que l’administration ne l’a pas saisi (Catalogue > Main d’œuvre).'],
+      ]) {
+        const res = await envoyer('post', '/api/devis', corpsDevis('demi-journée sans prix', [ligne]));
+        assert.deepEqual([res.status, res.body.error], [400, message], ligne.designation);
+      }
+      assert.equal(await nbDevis(), nombre, 'aucun devis créé');
+      // La recherche du catalogue des devis montre 0 €, et non un prix non réglé.
+      const [propose] = (await request(app).get('/api/devis/catalogue').query({ q: zeroHc.reference }).set(commercial)).body;
+      assert.deepEqual([propose.prixDemiJourneeHorsContratHt, propose.prixDemiJourneeSousContratHt], [0, null]);
+      const devis = await creerDevis('demi-journée à 0 €', [forfait(zeroHc, 'DEMI_JOURNEE', 'HORS_CONTRAT', { quantite: 2, prixUnitaireHt: '0' }), forfait(seulSc, 'DEMI_JOURNEE', 'SOUS_CONTRAT')]);
+      assert.deepEqual(champs(devis, 'prixUnitaireHt', 'totalHt', 'totalTtc', 'minutesPrevuesUnite'), [[0, 0, 0, 225], [140, 140, 168, 225]]);
+      // 2 × 3,75 h + 3,75 h.
+      assert.deepEqual([devis.totalHt, devis.totalTva, devis.totalTtc, devis.heuresPrevues], [140, 28, 168, 11.25]);
+    });
+
+    // Audit n° 1 de #379 : la quantité d'une ligne au forfait se saisit comme celle des autres lignes, la virgule admise
+    // (« 2,0 », « 3,000 »), à la création comme à la modification ; au-delà de ce que porte une ligne (9 999 999 999,99 € TTC),
+    // la ligne est refusée par son propre message, et le plafond porte sur son TTC.
+    test('quantité à la virgule acceptée, entière ; plafond du montant d’une ligne au forfait, sur son TTC', async () => {
+      const devis = await creerDevis('quantité à la virgule', [
+        forfait(fiches.mo, 'JOUR', 'HORS_CONTRAT', { quantite: '2,0' }), // 600 €
+        forfait(fiches.mo, 'DEMI_JOURNEE', 'SOUS_CONTRAT', { quantite: ' 3,000 ' }), // 451,50 €
+      ]);
+      assert.deepEqual([champs(devis, 'quantite', 'totalHt'), devis.totalHt, devis.heuresPrevues], [[[2, 600], [3, 451.5]], 1051.5, 26.25]);
+      const [jour, demi] = lignesGardees(devis);
+      const modifie = await envoyer('patch', `/api/devis/${devis.id}`, corpsDevis('quantité à la virgule', [{ ...jour, quantite: '4,00' }, demi]));
+      assert.equal(modifie.status, 200, JSON.stringify(modifie.body));
+      assert.deepEqual([champs(modifie.body, 'quantite', 'totalHt'), modifie.body.totalHt, modifie.body.heuresPrevues], [[[4, 1200], [3, 451.5]], 1651.5, 41.25]);
+      // 27 777 777 jours à 300 € font 9 999 999 720,00 € TTC : acceptés ; un jour de plus dépasse le plafond de la ligne.
+      const auPlafond = await creerDevis('plafond', [forfait(fiches.mo, 'JOUR', 'HORS_CONTRAT', { quantite: '27777777' })]);
+      assert.deepEqual([auPlafond.lignes[0].totalHt, auPlafond.lignes[0].totalTtc, auPlafond.totalTtc], [8333333100, 9999999720, 9999999720]);
+      const nombre = await nbDevis();
+      for (const quantite of ['27777778', '999999999']) {
+        const res = await envoyer('post', '/api/devis', corpsDevis('au-delà du plafond', [forfait(fiches.mo, 'JOUR', 'HORS_CONTRAT', { quantite })]));
+        assert.deepEqual([res.status, res.body.error], [400, 'Montant de ligne hors des limites acceptées.'], quantite);
+      }
+      assert.equal(await nbDevis(), nombre, 'aucun devis créé');
     });
   });
 }
