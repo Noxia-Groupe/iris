@@ -178,9 +178,9 @@ test.describe('écrans sur téléphone et tablette (320 à 1024 px)', () => {
 
 // Sur tablette et grand écran, la barre d'actions de la fiche ne recouvre jamais un nom d'affaire long. Lot
 // 6a-4c (cadrage, « Écran », N5) : l'administration y a désormais trois boutons, « Modifier », « Rapport
-// interne (PDF) » (la capture, autrefois « PDF ») et « Rapport client (PDF) », et le retrait du titre est
-// recalculé pour eux ; la barre reprend sa place en haut à droite à partir de 1 280 px, et reste au-dessus du
-// titre en deçà, dont 700 px.
+// interne (PDF) » (la capture, autrefois « PDF ») et « Rapport client (PDF) ». La barre reste au-dessus du
+// titre à toute largeur, sans retrait du titre, pour que la capture du rapport interne, mise en page sur la
+// largeur d'une page A4, ne l'écrase pas (contrôle de cohérence de #397, B1).
 test('fiche chantier sur grand écran : le titre ne passe pas sous les boutons', async ({ allerSurPageAdmin, request, session, creerClient }) => {
   const headers = { Authorization: `Bearer ${session.token}` };
   const envoyer = async (methode: 'post' | 'put', path: string, data: object) => {
@@ -205,6 +205,88 @@ test('fiche chantier sur grand écran : le titre ne passe pas sous les boutons',
       await expect(barre.getByRole('button', { name: nom, exact: true }), `${nom} à ${largeur} px`).toBeVisible();
     }
     expect(await defautsAffichage(page), `à ${largeur} px`).toEqual({ coupes: [], recouverts: [] });
+  }
+});
+
+// Contrôle de cohérence de #397, B1 (passation, lot 6a-4c, puce « Barre d'actions de la fiche », choix de mise en
+// œuvre, à confirmer) : la barre d'actions reste dans le flux, au-dessus du titre, et l'en-tête n'a aucun retrait, à
+// toute largeur. Le « Rapport interne (PDF) » (html2pdf) met la fiche en page sur la largeur d'une page A4 moins ses
+// marges (7,27 pouces, environ 698 px), mais avec les règles CSS de la largeur de l'écran : le retrait réservé à la
+// barre à partir de 1 280 px y écrasait l'en-tête (date et référence coupées en deux). L'en-tête est donc mesuré à
+// l'écran, puis dans la mise en page de la capture : sur le clone de la fiche que html2pdf insère dans la page, dès
+// son insertion, avant de le dessiner puis de le retirer.
+type MiseEnPageCapture = { largeurZone: number; largeurUtile: number; largeurEntete: number; retraitEntete: string; barreAuDessusDuTitre: boolean };
+type FenetreMesuree = { miseEnPageCapture: Promise<MiseEnPageCapture> };
+
+test('fiche chantier, de 375 à 1 920 px : barre d’actions au-dessus du titre et en-tête sans retrait, à l’écran et dans la capture du rapport interne', async ({ allerSurPageAdmin, request, session, creerClient }) => {
+  test.slow();
+  const headers = { Authorization: `Bearer ${session.token}` };
+  const envoyer = async (methode: 'post' | 'put', path: string, data: object) => {
+    const reponse = await request[methode](`${api}${path}`, { headers, data });
+    expect(reponse.ok(), `${path} : ${await reponse.text()}`).toBeTruthy();
+    return reponse.json();
+  };
+  const client = await creerClient('barre dans le flux');
+  const devis = await envoyer('post', '/devis', { clientId: client.id, objet: `Rénovation complète de la chaufferie ${Date.now()}`, lignes: [{ designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }] }) as { id: string };
+  await envoyer('put', `/devis/${devis.id}/statut`, { statut: 'ENVOYE' });
+  await envoyer('post', `/devis/${devis.id}/signature`, { signataire: 'Client E2E', confirme: true });
+  const chantier = await envoyer('post', `/devis/${devis.id}/convertir`, { cible: 'CHANTIER' }) as { id: string; nom: string };
+  const page = await allerSurPageAdmin(`/chantiers/${chantier.id}`);
+  const titre = page.getByRole('heading', { name: chantier.nom, exact: true });
+  const rapportInterne = page.getByRole('button', { name: 'Rapport interne (PDF)', exact: true });
+  // La barre d'actions : le plus petit bloc qui porte les deux rapports, comme dans le parcours précédent. L'en-tête :
+  // le bloc du titre, de son statut et des lignes qui le suivent (date de démarrage, référence du devis).
+  const barre = page.locator('div')
+    .filter({ has: rapportInterne })
+    .filter({ has: page.getByRole('button', { name: 'Rapport client (PDF)', exact: true }) }).last();
+  const entete = titre.locator('xpath=../..');
+  for (const largeur of [375, 1024, 1280, 1536, 1920]) {
+    await page.setViewportSize({ width: largeur, height: 900 });
+    await expect(titre).toBeVisible();
+    expect(await barre.evaluate((e) => getComputedStyle(e).position), `barre à ${largeur} px`).toBe('static');
+    expect(await entete.evaluate((e) => getComputedStyle(e).paddingRight), `retrait de l’en-tête à ${largeur} px`).toBe('0px');
+
+    await page.evaluate((nom) => {
+      (window as unknown as FenetreMesuree).miseEnPageCapture = new Promise((resolve) => {
+        const observateur = new MutationObserver((mutations) => {
+          for (const ajout of mutations.flatMap((mutation) => Array.from(mutation.addedNodes))) {
+            const titreCopie = ajout instanceof HTMLElement ? Array.from(ajout.querySelectorAll('h2')).find((h) => h.textContent?.trim() === nom) : undefined;
+            if (!titreCopie) continue;
+            observateur.disconnect();
+            const enteteCopie = titreCopie.parentElement!.parentElement!;
+            const zone = enteteCopie.parentElement!;
+            const libelles = (e: Element) => Array.from(e.querySelectorAll('button')).map((b) => b.textContent?.trim());
+            const barreCopie = Array.from(zone.querySelectorAll('div'))
+              .filter((d) => libelles(d).includes('Rapport interne (PDF)') && libelles(d).includes('Rapport client (PDF)')).pop()!;
+            const utile = (e: Element) => { const style = getComputedStyle(e); return e.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight); };
+            resolve({
+              largeurZone: zone.getBoundingClientRect().width,
+              largeurUtile: utile(zone),
+              largeurEntete: utile(enteteCopie),
+              retraitEntete: getComputedStyle(enteteCopie).paddingRight,
+              barreAuDessusDuTitre: barreCopie.getBoundingClientRect().bottom <= titreCopie.getBoundingClientRect().top,
+            });
+            return;
+          }
+        });
+        observateur.observe(document.body, { childList: true });
+      });
+    }, chantier.nom);
+    const telechargement = page.waitForEvent('download');
+    await rapportInterne.click();
+    await telechargement;
+    // Le fichier n'arrive qu'après le retrait du clone : un clone jamais vu échoue ici, sans attendre la fin du délai.
+    const mesure = await page.evaluate(() => Promise.race([(window as unknown as FenetreMesuree).miseEnPageCapture, new Promise<null>((resolve) => setTimeout(() => resolve(null), 1_000))]));
+    expect(mesure, `clone de la fiche inséré par la capture à ${largeur} px`).not.toBeNull();
+    const capture = mesure!;
+    // La capture est mise en page sur une page A4 moins ses marges, et non sur la largeur de l'écran ; l'en-tête y
+    // occupe toute la largeur utile de la fiche (au pixel près, arrondi du rendu), sans retrait, sous la barre.
+    expect({
+      pageA4: capture.largeurZone <= 700,
+      retraitEntete: capture.retraitEntete,
+      enteteSurTouteLaLargeur: Math.abs(capture.largeurEntete - capture.largeurUtile) <= 1,
+      barreAuDessusDuTitre: capture.barreAuDessusDuTitre,
+    }, `capture à ${largeur} px : ${JSON.stringify(capture)}`).toEqual({ pageA4: true, retraitEntete: '0px', enteteSurTouteLaLargeur: true, barreAuDessusDuTitre: true });
   }
 });
 

@@ -684,9 +684,9 @@ const ChantierDetail = () => {
         {/* Zone exportable en PDF */}
         <div ref={printRef} className="bg-white p-6 sm:p-8 rounded-2xl shadow-md border border-gray-100 relative">
 
-          {/* Barre d'actions : dans le flux sous 1 280 px, au-dessus du titre (trois boutons n'y tiennent pas à côté) ; en haut à
-              droite au-delà, où le titre lui laisse sa place (xl:pr-148 pour trois boutons, xl:pr-92 pour deux, xl:pr-60 pour un). */}
-          <div className="mb-4 flex flex-wrap justify-end gap-2 xl:absolute xl:top-6 xl:right-6 xl:mb-0">
+          {/* Barre d'actions : dans le flux à toute largeur, au-dessus du titre. Le « Rapport interne (PDF) » met la fiche en page sur
+              la largeur d'une page A4 (environ 700 px) avec les règles de la largeur de l'écran : un retrait du titre l'y écraserait. */}
+          <div className="mb-4 flex flex-wrap justify-end gap-2">
             {canEditChantier && (
               <button
                 onClick={startEditChantier}
@@ -701,7 +701,7 @@ const ChantierDetail = () => {
             <RapportClientChantier chantier={chantier} />
           </div>
 
-          <div className={`mb-8 ${isAdminRole(userRole) ? 'xl:pr-148' : canEditChantier ? 'xl:pr-92' : 'xl:pr-60'}`}>
+          <div className="mb-8">
             <div className="flex items-center gap-3 flex-wrap mb-2">
               <h2 className="text-3xl font-extrabold text-primary-dark tracking-tight m-0">{chantier.nom}</h2>
               <span className={`text-xs font-bold uppercase tracking-wide px-2.5 py-1 rounded-full ${isTermine ? 'bg-gray-100 text-gray-500' : 'bg-blue-100 text-accent'}`}>
