@@ -493,9 +493,13 @@ if (!TEST_DATABASE_URL) {
         '7,25', '7.25', 'TEST commentaire des heures', '57,89', '57.89', '419,70', '419.7',
         // Matériel : description, fournisseur, montant (123,45 €), et le total des coûts (543,15 €).
         'TEST Matériel confidentiel', 'TEST Fournisseur confidentiel', '123,45', '123.45', '543,15', '543.15',
-        // Montant vendu de l'affaire rattachée.
-        '98 765', '98765', '98 765,43',
       ]) assert.ok(!plat.includes(absent), `imprimé à tort : ${absent}\n${texte}`);
+      // Montant vendu de l'affaire rattachée (98 765,43 €), sous toutes ses écritures (98 765, 98765, 98 765,43,
+      // 98.765,43, et 9876543 en centimes), cherché comme un nombre borné, et non comme une simple sous-chaîne (#412) :
+      // le PDF imprime des libellés suffixés par Date.now() (demande, client, intervenant, auteur), dont la suite de
+      // chiffres peut contenir « 98765 », ainsi que l'empreinte hexadécimale de la signature. Borné comme nombreTemoin
+      // (rapport-chantier-pdf.test.mjs) : ni chiffre ni lettre avant, aucun chiffre après.
+      assert.doesNotMatch(plat, /(?<![\p{L}\d])98[\s.,\u00a0\u2009\u202f]?765(?:[,.]?43)?(?!\d)/u, `montant vendu imprimé à tort\n${texte}`);
     });
 
     // Cadrage, « Refus » : 404 hors du périmètre, comme la fiche ; 404 pour une intervention annulée,
