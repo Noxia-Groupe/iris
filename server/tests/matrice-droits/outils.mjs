@@ -250,7 +250,9 @@ export const trier = (lignes) => [...lignes].sort((a, b) => (a < b ? -1 : a > b 
 // donné, et le message d'échec imprime les premières lignes du diff (60 au plus), le fichier temporaire étant
 // perdu en CI. Le diff est fait par clé (compte, route, cible, contexte) : une réponse changée se lit en deux
 // lignes, « - » la référence, « + » l'obtenu. Avec `resumer` (matrice des données, D1a-3, dont les lignes sont
-// longues), une ligne changée se lit en une seule, « ~ », sa clé et ce qui a changé.
+// longues), une ligne changée se lit en une seule, « ~ », sa clé et ce qui a changé. Un diff de plus de 60 lignes
+// est précédé d'un résumé : le nombre de lignes de diff par groupe des `champsResume` premiers champs (compte et
+// route par défaut), pour qu'un écart large ne se lise pas sur un seul compte (note N6 de l'audit des droits de #433).
 export function lireReference(chemin) {
   try { return readFileSync(chemin, 'utf8'); } catch { return null; }
 }
@@ -268,7 +270,19 @@ export function diffParCle(lignesReference, lignesObtenues, champsCle = 4, resum
   }
   return diff;
 }
-export function comparerAvecReference(lignesObtenues, cheminReference, nomTemporaire, { champsCle = 4, resumer = null } = {}) {
+function resumeDuDiff(diff, champsResume) {
+  if (diff.length <= 60) return '';
+  const groupes = new Map();
+  for (const ligne of diff) {
+    const cle = ligne.slice(2).split(SEPARATEUR).slice(0, champsResume).join(SEPARATEUR).split(' : ')[0];
+    groupes.set(cle, (groupes.get(cle) ?? 0) + 1);
+  }
+  const tries = [...groupes].sort(([a, na], [b, nb]) => nb - na || (a < b ? -1 : a > b ? 1 : 0));
+  const extrait = tries.slice(0, 30).map(([cle, n]) => `  ${cle} : ${n}`).join('\n');
+  const suite = tries.length > 30 ? `\n  … ${tries.length - 30} groupe(s) de plus.` : '';
+  return `Lignes de diff par groupe des ${champsResume} premiers champs (${tries.length} groupe(s)) :\n${extrait}${suite}\n`;
+}
+export function comparerAvecReference(lignesObtenues, cheminReference, nomTemporaire, { champsCle = 4, resumer = null, champsResume = 2 } = {}) {
   const texteObtenu = `${trier(lignesObtenues).join('\n')}\n`;
   const texteReference = lireReference(cheminReference);
   if (texteReference === texteObtenu) return;
@@ -283,7 +297,7 @@ export function comparerAvecReference(lignesObtenues, cheminReference, nomTempor
   const extrait = diff.slice(0, 60).join('\n');
   const suite = diff.length > 60 ? `\n… ${diff.length - 60} ligne(s) de diff de plus.` : '';
   const ordre = diff.length === 0 ? '\n(Mêmes lignes, ordre ou fin de fichier différents.)' : '';
-  assert.fail(`${entete}\nMatrice obtenue : ${cheminObtenu}\nPour l’adopter dans la PR qui change volontairement un droit : cp ${cheminObtenu} ${cheminReference}\n${extrait}${suite}${ordre}`);
+  assert.fail(`${entete}\nMatrice obtenue : ${cheminObtenu}\nPour l’adopter dans la PR qui change volontairement un droit : cp ${cheminObtenu} ${cheminReference}\n${resumeDuDiff(diff, champsResume)}${extrait}${suite}${ordre}`);
 }
 
 // --- Routes de l'application importée ---
