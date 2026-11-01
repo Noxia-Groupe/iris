@@ -134,8 +134,8 @@ export function enregistrerLecturesInterventions(app: Express): void {
   app.get('/api/interventions/:id/document.pdf', requireAuth, blockCommercial, async (req: AuthRequest, res) => {
     try {
       if (req.user!.role === ROLE_TECHNICIEN) return res.status(403).json({ error: 'Le PDF du compte rendu n’est pas ouvert au technicien.' });
-      repondrePdf(res, await produirePdf((tx) => lireCompteRenduPdf(tx, {
-        AND: [{ id: paramId(req) }, getInterventionFilterForUser(req.user!), { statut: { not: 'ANNULEE' } }],
+      repondrePdf(res, await produirePdf((tx) => lireCompteRenduPdf(tx, paramId(req), {
+        AND: [getInterventionFilterForUser(req.user!), { statut: { not: 'ANNULEE' } }],
       }), rendreFichierCompteRenduPdf, { isolationLevel: 'RepeatableRead' }));
     } catch (error) {
       console.error('Erreur PDF compte rendu intervention SAV', error);

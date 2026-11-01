@@ -7,6 +7,19 @@ import { journaliserAdministration, purgerJournalAdministration } from './commun
 import { upsertSingleton } from './domaines/parametres/metier';
 import { normalizeEmail } from './domaines/authentification/sso';
 import { libelleCompteJournal, delierFicheSiPlusTechnicien, journaliserDroitsCompte, lireCompteVerrouille, ISOLATION_RETRAIT } from './domaines/utilisateurs/comptes';
+import { adresseGraph } from './domaines/documents/microsoftGraph';
+
+// --- Configuration refusée au démarrage ---
+// Comme un JWT_SECRET absent en production (http/auth.ts), une configuration dangereuse arrête le
+// serveur avant qu'il n'écoute. MICROSOFT_GRAPH_URL (lot 6b-1b, réservée aux tests) hors des adresses
+// admises (domaines/documents/microsoftGraph.ts) porterait les jetons Microsoft des utilisateurs
+// ailleurs que chez Microsoft ou que sur le poste de test : aucun appel n'est fait, et le démarrage est
+// refusé. La valeur refusée n'est pas recopiée dans le message : elle pourrait porter des identifiants.
+export function verifierConfigurationDemarrage(): void {
+  if (adresseGraph() === null) {
+    throw new Error('MICROSOFT_GRAPH_URL refusée : seules https://graph.microsoft.com/… et, pour les tests, http://127.0.0.1:<port>… ou http://localhost:<port>… sont admises. Retirez-la de server/.env en production.');
+  }
+}
 
 // --- Comptes super administrateurs de départ ---
 // La liste vient EXCLUSIVEMENT de SUPERADMIN_EMAILS (emails séparés par des virgules).

@@ -4,14 +4,15 @@ import { type DonneesPdf, type PdfProduit, identiteActuelleOuRefus, refusPdf } f
 import { INTERVENTION_IMPRIMEE, rendreCompteRenduPdf } from './document';
 
 // PDF du compte rendu d'intervention (lot 6a-4a), en deux étapes (lot 6b-1a ; cf.
-// documents/productionPdf.ts), sans droit ni verrou. L'intervention lue est celle que désigne `filtre`,
-// avec le périmètre et les exclusions que l'appelant y met : la lecture n'en ajoute aucun. La route
-// « PDF » y met l'identifiant, le périmètre SAV de la fiche et l'exclusion des interventions annulées,
-// après avoir refusé le technicien.
+// documents/productionPdf.ts), sans droit ni verrou. L'intervention lue est celle de l'identifiant `id`,
+// dans le `perimetre` que l'appelant donne toujours, exclusions comprises : la lecture n'en ajoute aucun.
+// La route « PDF » y met le périmètre SAV de la fiche et l'exclusion des interventions annulées, après
+// avoir refusé le technicien. Un appelant qui a déjà vérifié le périmètre sous verrou passe `{}`, en
+// toutes lettres : l'oubli du périmètre ne compile pas, et l'identifiant est toujours un critère.
 // Refus de la lecture : 404 « Intervention introuvable. » ; 409 « Aucun compte rendu à imprimer. » ;
 // 409 si l'identité de la société est incomplète (« … avant d’imprimer un compte rendu »).
-export async function lireCompteRenduPdf(tx: Prisma.TransactionClient, filtre: Prisma.InterventionWhereInput) {
-  const intervention = await tx.intervention.findFirst({ where: filtre, select: INTERVENTION_IMPRIMEE });
+export async function lireCompteRenduPdf(tx: Prisma.TransactionClient, id: string, perimetre: Prisma.InterventionWhereInput) {
+  const intervention = await tx.intervention.findFirst({ where: { AND: [{ id }, perimetre] }, select: INTERVENTION_IMPRIMEE });
   if (!intervention) return refusPdf(404, 'Intervention introuvable.');
   if (!intervention.rapports.length) return refusPdf(409, 'Aucun compte rendu à imprimer.');
   const identite = await identiteActuelleOuRefus(tx, 'd’imprimer un compte rendu');

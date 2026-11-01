@@ -6,11 +6,13 @@ import { paramId } from '../../http/requete';
 import { decimalToNumber } from '../../commun/montants';
 import { exposerIntervention } from '../interventions/metier';
 import { IdentiteEmetteurIncompleteError } from '../documents/identite';
-import { DestinataireInvalideError, enregistrerEnvoi, lireEnvois, propositionDestinataire, texteEnvoiContrat, validerDestinataire } from '../documents/envois';
+import { SaisieEnvoiInvalideError, lireDemandeEnvoi, lireEnvois, propositionDestinataire, repondreEnvoi, texteEnvoiContrat } from '../documents/envois';
+import { envoyerDocument, propositionMicrosoft365 } from '../documents/envoiMicrosoft365';
 import { GenerationVisitesDesactivee, etatGenerationVisites, executerGenerationVisites } from './generation';
 import { journaliserContrat, motifContratValide, lirePolitiqueCouverture, verrouillerContratMaintenance, lireSaisieContrat, creerContratMaintenance, SaisieContratInvalide, visiteDeLEcheance, creerVisiteContrat, avancerEcheanceContrat, VISITE_INCLUDE } from './metier';
 import { produirePdf, repondrePdf } from '../documents/productionPdf';
 import { lireContratPdf, rendreFichierContratPdf } from './productionPdf';
+import { envoiContrat } from './envois';
 
 // Un contrat annulé avec son devis (lot 4 suite) ne se modifie, ne se suspend, ne se clôt ni ne se
 // réactive plus ; la base le refuse aussi (trigger contrat_annule_fige). La suspension et la clôture
@@ -34,15 +36,16 @@ const imprimerContrat: RequestHandler = async (req, res) => {
 // Envoi du contrat de maintenance par la messagerie de l'utilisateur, et journal de ses envois
 // (lot 6a-4d), sur le modèle du lot 6a-3 (cf. documents/envois.ts) : réservés à l'administration, en
 // session, comme le PDF du contrat. Lecture : destinataire, objet et texte proposés, et envois déjà
-// préparés, du plus récent au plus ancien, dans une même photo de la base. Un contrat annulé garde son
-// journal et sa proposition lisibles ; l'écran ne lui affiche pas de bouton « Envoyer ».
+// préparés, du plus récent au plus ancien, dans une même photo de la base ; microsoft365 : l'envoi par
+// Microsoft 365 est proposé (lot 6b-1b). Un contrat annulé garde son journal et sa proposition
+// lisibles ; l'écran ne lui affiche pas de bouton « Envoyer ».
 const lireEnvoisContrat: RequestHandler = async (req, res) => {
   try {
     const lu = await transactionVerifiee(async (tx) => {
       const contrat = await tx.contratMaintenance.findUnique({ where: { id: paramId(req) }, select: { id: true, titre: true, clientId: true } });
       if (!contrat) return null;
       const { objet, corps } = await texteEnvoiContrat(tx, contrat);
-      return { proposition: { destinataire: await propositionDestinataire(tx, contrat.clientId), objet, corps }, envois: await lireEnvois(tx, { contratMaintenanceId: contrat.id }) };
+      return { proposition: { destinataire: await propositionDestinataire(tx, contrat.clientId), objet, corps, microsoft365: await propositionMicrosoft365(tx) }, envois: await lireEnvois(tx, { contratMaintenanceId: contrat.id }) };
     }, { isolationLevel: 'RepeatableRead' });
     if (!lu) return void res.status(404).json({ error: 'Contrat de maintenance introuvable.' });
     res.json(lu);
@@ -53,28 +56,15 @@ const lireEnvoisContrat: RequestHandler = async (req, res) => {
   }
 };
 
-// Enregistrement de l'envoi préparé, sous un verrou partagé du contrat, pris par une requête directe :
-// verrouillerContratMaintenance prend un verrou exclusif, dont un envoi n'a pas besoin. Une annulation
-// en cours est attendue, puis refuse l'envoi (409, comme un devis annulé ; choix par défaut, à
-// confirmer) ; son PDF reste disponible. Un contrat suspendu ou terminé s'envoie, avec le statut que
-// son PDF imprime. Un envoi ne change aucun statut, et un refus n'écrit rien. L'écran télécharge le PDF
-// avant cet appel.
+// Enregistrement de l'envoi, sous un verrou partagé du contrat (./envois.ts) : préparé par la
+// messagerie (l'écran télécharge le PDF avant cet appel), ou fait par Microsoft 365 (lot 6b-1b). Une
+// annulation en cours est attendue, puis refuse l'envoi (409). Un envoi ne change aucun statut, et un
+// refus n'écrit rien.
 const envoyerContrat: RequestHandler = async (req, res) => {
   try {
-    const destinataire = validerDestinataire(req.body?.destinataire);
-    const resultat = await transactionVerifiee(async (tx) => {
-      await tx.$queryRaw`SELECT 1 FROM "ContratMaintenance" WHERE "id" = ${paramId(req)} FOR SHARE`;
-      const contrat = await tx.contratMaintenance.findUnique({ where: { id: paramId(req) }, select: { id: true, titre: true, statut: true } });
-      if (!contrat) return { refus: { statut: 404, error: 'Contrat de maintenance introuvable.' } };
-      if (contrat.statut === 'ANNULE') return { refus: { statut: 409, error: 'Un contrat annulé ne s’envoie pas.' } };
-      const { objet, corps } = await texteEnvoiContrat(tx, contrat);
-      const envoi = await enregistrerEnvoi(tx, { contratMaintenanceId: contrat.id }, { destinataire, objet }, (req as AuthRequest).user!);
-      return { envoi: { envoi, objet, corps } };
-    });
-    if (resultat.refus) return void res.status(resultat.refus.statut).json({ error: resultat.refus.error });
-    res.status(201).json(resultat.envoi);
+    repondreEnvoi(res, await envoyerDocument(req as AuthRequest, lireDemandeEnvoi(req.body), envoiContrat(paramId(req))));
   } catch (error) {
-    if (error instanceof DestinataireInvalideError) return void res.status(400).json({ error: error.message });
+    if (error instanceof SaisieEnvoiInvalideError) return void res.status(400).json({ error: error.message });
     if (error instanceof IdentiteEmetteurIncompleteError) return void res.status(409).json({ error: error.message });
     console.error('Contrat de maintenance, envoi :', error);
     res.status(500).json({ error: 'Enregistrement de l’envoi du contrat de maintenance impossible.' });

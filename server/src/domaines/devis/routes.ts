@@ -35,16 +35,18 @@ import {
 import { ForfaitSaisieError, exigerForfaitHorsTempsPasse } from './forfaitMainOeuvre';
 import { annulerDevisEnCascade } from './annulation';
 import { chantierPourInterventionDuDevis, rattacherInterventionDuDevis } from './rattachement';
-import { DEVIS_A_ENVOYER, DestinataireInvalideError, enregistrerEnvoi, lireEnvois, propositionDestinataire, texteEnvoiDevis, validerDestinataire } from '../documents/envois';
+import { DEVIS_A_ENVOYER, SaisieEnvoiInvalideError, lireDemandeEnvoi, lireEnvois, propositionDestinataire, repondreEnvoi, texteEnvoiDevis } from '../documents/envois';
+import { envoyerDocument, propositionMicrosoft365 } from '../documents/envoiMicrosoft365';
 import { produirePdf, repondrePdf } from '../documents/productionPdf';
 import { lireDevisPdf, rendreFichierDevisPdf } from './productionPdf';
+import { envoiDevis } from './envois';
 
 function devisErreur(res: express.Response, error: unknown) {
   if (error instanceof DevisSaisieError || error instanceof TempsPasseSaisieError || error instanceof ForfaitSaisieError) return res.status(400).json({ error: error.message });
   if (error instanceof DevisConflitError || error instanceof TempsPasseConflitError) return res.status(409).json({ error: error.message });
   if (error instanceof DevisDroitError) return res.status(403).json({ error: error.message });
   if (error instanceof IdentiteEmetteurIncompleteError || error instanceof IdentiteClientIncompleteError) return res.status(409).json({ error: error.message });
-  if (error instanceof DestinataireInvalideError) return res.status(400).json({ error: error.message });
+  if (error instanceof SaisieEnvoiInvalideError) return res.status(400).json({ error: error.message });
   if ((error as { code?: string })?.code === 'P2002') return res.status(409).json({ error: 'Une révision concurrente vient d’être créée, réessayez.' });
   console.error('Devis:', error); return res.status(500).json({ error: 'Opération devis impossible.' });
 }
@@ -174,41 +176,24 @@ const imprimerDevis: express.RequestHandler = async (req, res) => { try {
 // Envoi du devis par la messagerie de l'utilisateur (lot 6a-3) : destinataire, objet et texte
 // proposés, et envois déjà préparés, du plus récent au plus ancien. La raison sociale de l'objet est
 // celle du PDF : un devis non signé exige donc, comme son PDF, l'identité complète de la société.
-// Une même photo de la base pour le devis, l'identité et le journal.
+// Une même photo de la base pour le devis, l'identité et le journal. microsoft365 : l'envoi par
+// Microsoft 365 est proposé (lot 6b-1b, documents/envoiMicrosoft365.ts).
 const lireEnvoisDevis: express.RequestHandler = async (req, res) => { try {
   const lu = await transactionVerifiee(async tx => {
     const devis = await tx.devis.findUnique({ where: { id: paramId(req) }, include: DEVIS_A_ENVOYER });
     if (!devis) return null;
     const { objet, corps } = await texteEnvoiDevis(tx, devis);
-    return { proposition: { destinataire: await propositionDestinataire(tx, devis.clientId), objet, corps }, envois: await lireEnvois(tx, { devisId: devis.id }) };
+    return { proposition: { destinataire: await propositionDestinataire(tx, devis.clientId), objet, corps, microsoft365: await propositionMicrosoft365(tx) }, envois: await lireEnvois(tx, { devisId: devis.id }) };
   }, { isolationLevel: 'RepeatableRead' });
   if (!lu) return void res.status(404).json({ error: 'Devis introuvable.' });
   res.json(lu);
 } catch (error) { devisErreur(res, error); } };
 
-// Enregistre l'envoi préparé, sous le verrou du devis : une annulation ou un refus en cours est
-// attendu, puis refuse l'envoi. Un brouillon passe « envoyé » dans la même transaction (décision
-// de Nelson du 23-10-2026, lot 6a-3 bis) ; un devis dans un autre statut le garde. Un refus n'écrit
-// rien, statut compris. La réponse porte le statut du devis après l'envoi, que l'écran affiche.
-// L'écran télécharge le PDF avant cet appel.
+// Enregistre l'envoi, sous le verrou du devis (./envois.ts) : préparé par la messagerie (l'écran
+// télécharge le PDF avant cet appel), ou fait par Microsoft 365 (lot 6b-1b). Un brouillon passe
+// « envoyé » (décision de Nelson du 23-10-2026, lot 6a-3 bis) ; un refus n'écrit rien, statut compris.
 const envoyerDevis: express.RequestHandler = async (req, res) => { try {
-  const destinataire = validerDestinataire(req.body?.destinataire);
-  const auteur = (req as AuthRequest).user!;
-  const resultat = await transactionVerifiee(async tx => {
-    if (!await verrouillerDevis(tx, paramId(req))) return null;
-    const devis = await tx.devis.findUniqueOrThrow({ where: { id: paramId(req) }, include: DEVIS_A_ENVOYER });
-    if (devis.statut === 'ANNULE' || devis.statut === 'REFUSE') throw new DevisConflitError('Un devis annulé ou refusé ne s’envoie pas.');
-    const { objet, corps } = await texteEnvoiDevis(tx, devis);
-    const envoi = await enregistrerEnvoi(tx, { devisId: devis.id }, { destinataire, objet }, auteur);
-    // Un brouillon n'est jamais signé ni converti (la signature le fait passer « accepté ») : son
-    // passage à « envoyé » est celui du bouton « Marquer envoyé » (TRANSITIONS_DEVIS).
-    const statutDevis = devis.statut === 'BROUILLON'
-      ? (await tx.devis.update({ where: { id: devis.id }, data: { statut: 'ENVOYE' }, select: { statut: true } })).statut
-      : devis.statut;
-    return { envoi, objet, corps, statutDevis };
-  });
-  if (!resultat) return void res.status(404).json({ error: 'Devis introuvable.' });
-  res.status(201).json(resultat);
+  repondreEnvoi(res, await envoyerDocument(req as AuthRequest, lireDemandeEnvoi(req.body), envoiDevis(paramId(req))));
 } catch (error) { devisErreur(res, error); } };
 
 // Cycle de vie d'un devis. `ANNULE` ne figure dans aucune liste de destinations : on n'y
