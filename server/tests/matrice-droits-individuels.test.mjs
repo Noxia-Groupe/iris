@@ -828,14 +828,28 @@ if (!TEST_DATABASE_URL) {
     // sous leur réglage : chaque réglage concerné est changé seul, puis remis ; chaque type rejoue les lectures de ces
     // montants qu'il obtient, et celles où le réglage change ce qu'il voit sont rejouées avec chaque droit, comparées à la
     // même lecture sans droit, sous le même réglage.
-    test('réglages : les montants de la liste fermée qu’un réglage seul masque, joués sous ce réglage par chaque type avec chaque droit individuel', async () => {
+    // Les trois destinataires de la rentabilité sont joués aussi pour leurs montants qu'un autre type lit masqués par
+    // défaut : chacun coupe une branche de voitRentabilite (directeur, titulaire, responsable de la branche ;
+    // chantiers/droits.ts:29-33) qui reste ouverte par défaut. Par défaut, ces montants ne sont joués avec un droit que
+    // sur des types que voitRentabilite écarte toujours (commercial, comptable, assistante, directeur commercial,
+    // technicien) : un droit qui rendrait la rentabilité au directeur ou au titulaire que la société en a retiré n'y
+    // serait pas vu (CIBLE §8.1 : « Un droit enregistré sans effet, comme `finances:read` sur un compte, ne doit pas en
+    // gagner un, par exemple les marges »). Ces lectures-là sont jouées comme au test de la matrice : la sonde de tous
+    // les droits d'abord, puis chaque droit seul sur les lectures qu'elle change. Chaque branche doit être sondée par le
+    // type qu'elle concerne.
+    const DESTINATAIRES_RENTABILITE = { 'rentabiliteDirecteurs=non': 'DIR', 'rentabiliteConducteur=non': 'CT', 'rentabiliteHierarchie=non': 'RESP' };
+    test('réglages : les montants de la liste fermée qu’un réglage seul masque, et ceux des destinataires de la rentabilité, joués sous ce réglage par chaque type avec chaque droit individuel', async (t) => {
       const masquesParDefaut = rangsMasquesSansDroit();
-      const aJouer = MONTANTS_MASQUES.map((entree, rang) => ({ entree, rang })).filter(({ entree, rang }) => !masquesParDefaut.has(rang) && entree.reglages.length);
-      const contextes = trier(new Set(aJouer.flatMap(({ entree }) => entree.reglages)));
+      const aJouer = MONTANTS_MASQUES.map((entree, rang) => ({ entree, rang, reglages: entree.reglages.filter((reglage) => !masquesParDefaut.has(rang) || reglage in DESTINATAIRES_RENTABILITE) })).filter(({ reglages }) => reglages.length);
+      const contextes = trier(new Set(aJouer.flatMap(({ reglages }) => reglages)));
+      assert.deepEqual(Object.keys(DESTINATAIRES_RENTABILITE).filter((contexte) => !contextes.includes(contexte)), [], 'destinataires de la rentabilité joués sous leur réglage');
+      const sondes = new Map(contextes.map((contexte) => [contexte, []]));
       for (const contexte of contextes) {
         const [, cleReglage] = /^([A-Za-z]+)=non$/.exec(contexte) ?? [];
         assert.ok(cleReglage, `contexte de réglage : ${contexte}`);
-        const routes = new Set(aJouer.filter(({ entree }) => entree.reglages.includes(contexte)).flatMap(({ entree }) => routesDuMontant(entree)));
+        const routes = new Set(aJouer.filter(({ reglages }) => reglages.includes(contexte)).flatMap(({ entree }) => routesDuMontant(entree)));
+        // Routes des montants qu'aucun type ne lit masqués par défaut : leurs lectures sont rejouées droit par droit.
+        const routesDirectes = new Set(aJouer.filter(({ rang, reglages }) => !masquesParDefaut.has(rang) && reglages.includes(contexte)).flatMap(({ entree }) => routesDuMontant(entree)));
         assert.equal((await api(SA, 'GET', '/api/parametres'))[cleReglage], true, `${cleReglage} : valeur par défaut`);
         await reglerParametre({ [cleReglage]: false });
         try {
@@ -853,14 +867,27 @@ if (!TEST_DATABASE_URL) {
             for (const { cas, description } of sousReglage) {
               for (const { rang, element, statuts } of description.montants) if (!statuts.includes(PRESENT)) masquesSansDroit.add(cleMontant(type, contexte, cas.route, cas.nomCible, element, rang));
             }
+            const directes = sousReglage.filter(({ cas }) => routesDirectes.has(cas.route));
+            let parSonde = sousReglage.filter(({ cas }) => !routesDirectes.has(cas.route));
+            if (parSonde.length) {
+              const sonde = await avecSonde(type, droits, `tous les droits, ${contexte}`, () => jouerLot(type, [], parSonde));
+              sondes.get(contexte).push(`${type} (${parSonde.length} lecture(s))`);
+              parSonde = parSonde.filter((lecture, rang) => !memeLecture(lecture, sonde.lectures[rang]));
+            }
+            const rejouees = [...directes, ...parSonde];
+            if (!rejouees.length) continue;
             for (const droit of droits) {
-              const joue = await avecDroit(type, droit, () => jouerLot(type, [], sousReglage));
-              sousReglage.forEach((lecture, rang) => comparerLecture({ type, droit, contexte, cas: lecture.cas, avant: lecture, res: joue.lectures[rang] }));
+              const joue = await avecDroit(type, droit, () => jouerLot(type, [], rejouees));
+              rejouees.forEach((lecture, rang) => comparerLecture({ type, droit, contexte, cas: lecture.cas, avant: lecture, res: joue.lectures[rang] }));
             }
           }
         } finally {
           await reglerParametre({ [cleReglage]: true });
         }
+      }
+      t.diagnostic(`types sondés avec tous les droits, par réglage :\n${[...sondes].map(([contexte, types]) => `${contexte} : ${types.join(', ') || 'aucun'}`).join('\n')}`);
+      for (const [contexte, type] of Object.entries(DESTINATAIRES_RENTABILITE)) {
+        assert.ok(sondes.get(contexte).some((sonde) => sonde.startsWith(`${type} (`)), `${contexte} : ${type}, que ce réglage prive de la rentabilité, sondé avec tous les droits (${sondes.get(contexte).join(', ') || 'aucun'})`);
       }
       assert.deepEqual(ecrituresInattendues, [], 'lectures qui ont écrit');
     });
