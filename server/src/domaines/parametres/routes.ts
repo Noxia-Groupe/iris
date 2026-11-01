@@ -111,8 +111,8 @@ export function enregistrerRoutesRemunerationEtReglages(app: Express): void {
     }
   });
 
-  // N'écrit QUE les réglages de marge, d'acompte, d'alertes, d'anticipation des visites et du temps passé (pas, minimum) : l'activation des modules (planningActif) est
-  // réservée au superadmin et passe par PUT /api/modules — un ADMIN ne doit pas pouvoir la
+  // N'écrit QUE les réglages de marge, d'acompte, d'alertes, d'anticipation des visites et du temps passé (pas, minimum) : l'activation des modules (planningActif) et le
+  // mode d'envoi des documents (modeEnvoi) sont réservés au superadmin et passent par PUT /api/modules — un ADMIN ne doit pas pouvoir les
   // modifier, même en glissant le champ dans le corps de cette requête.
   app.put('/api/parametres', requireAuth, requireAdmin, async (req, res) => {
     try {
