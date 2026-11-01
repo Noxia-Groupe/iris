@@ -838,11 +838,15 @@ if (!TEST_DATABASE_URL) {
     // les droits d'abord, puis chaque droit seul sur les lectures qu'elle change. Chaque branche doit être sondée par le
     // type qu'elle concerne.
     const DESTINATAIRES_RENTABILITE = { 'rentabiliteDirecteurs=non': 'DIR', 'rentabiliteConducteur=non': 'CT', 'rentabiliteHierarchie=non': 'RESP' };
+    // La marge commerciale coupée retire de même les marges d'un chantier à tous ceux qui les lisent par défaut
+    // (administration, directeur, titulaire, responsable de la branche ; chantiers/suivi.ts:139) : elle est sondée de
+    // même, par le directeur au moins.
+    const REGLAGES_SONDES = { ...DESTINATAIRES_RENTABILITE, 'margeCommercialeActive=non': 'DIR' };
     test('réglages : les montants de la liste fermée qu’un réglage seul masque, et ceux des destinataires de la rentabilité, joués sous ce réglage par chaque type avec chaque droit individuel', async (t) => {
       const masquesParDefaut = rangsMasquesSansDroit();
-      const aJouer = MONTANTS_MASQUES.map((entree, rang) => ({ entree, rang, reglages: entree.reglages.filter((reglage) => !masquesParDefaut.has(rang) || reglage in DESTINATAIRES_RENTABILITE) })).filter(({ reglages }) => reglages.length);
+      const aJouer = MONTANTS_MASQUES.map((entree, rang) => ({ entree, rang, reglages: entree.reglages.filter((reglage) => !masquesParDefaut.has(rang) || reglage in REGLAGES_SONDES) })).filter(({ reglages }) => reglages.length);
       const contextes = trier(new Set(aJouer.flatMap(({ reglages }) => reglages)));
-      assert.deepEqual(Object.keys(DESTINATAIRES_RENTABILITE).filter((contexte) => !contextes.includes(contexte)), [], 'destinataires de la rentabilité joués sous leur réglage');
+      assert.deepEqual(Object.keys(REGLAGES_SONDES).filter((contexte) => !contextes.includes(contexte)), [], 'destinataires de la rentabilité et marge commerciale joués sous leur réglage');
       const sondes = new Map(contextes.map((contexte) => [contexte, []]));
       for (const contexte of contextes) {
         const [, cleReglage] = /^([A-Za-z]+)=non$/.exec(contexte) ?? [];
@@ -886,7 +890,7 @@ if (!TEST_DATABASE_URL) {
         }
       }
       t.diagnostic(`types sondés avec tous les droits, par réglage :\n${[...sondes].map(([contexte, types]) => `${contexte} : ${types.join(', ') || 'aucun'}`).join('\n')}`);
-      for (const [contexte, type] of Object.entries(DESTINATAIRES_RENTABILITE)) {
+      for (const [contexte, type] of Object.entries(REGLAGES_SONDES)) {
         assert.ok(sondes.get(contexte).some((sonde) => sonde.startsWith(`${type} (`)), `${contexte} : ${type}, que ce réglage prive de la rentabilité, sondé avec tous les droits (${sondes.get(contexte).join(', ') || 'aucun'})`);
       }
       assert.deepEqual(ecrituresInattendues, [], 'lectures qui ont écrit');
