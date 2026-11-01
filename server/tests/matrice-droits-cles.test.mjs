@@ -300,7 +300,13 @@ if (!TEST_DATABASE_URL) {
           const pileJumelle = couches.get(jumelle)?.route.stack;
           if (!pileJumelle || pileJumelle.at(-1).handle !== pile.at(-1).handle) { sansJumelle.push(cle); continue; }
           const resume = (d) => ({ famille: d.famille, lecture: !!d.lecture, ecriture: d.ecriture ?? null, validationAvantDroit: !!d.validationAvantDroit });
-          if (JSON.stringify(resume(definition)) !== JSON.stringify(resume(ROUTES_SESSION[jumelle]))) ecarts.push(`${cle} : classement différent de sa jumelle ${jumelle}`);
+          const attendu = resume(ROUTES_SESSION[jumelle]);
+          // Marque propre à la clé (VAD_CLE, routes.mjs) : un contrôle de droit que seule la porte /api/v1 subit.
+          if (definition.validationAvantDroitPropreALaCle) {
+            if (attendu.validationAvantDroit) ecarts.push(`${cle} : marque propre à la clé, alors que sa jumelle ${jumelle} porte déjà validation-avant-droit`);
+            attendu.validationAvantDroit = true;
+          }
+          if (JSON.stringify(resume(definition)) !== JSON.stringify(attendu)) ecarts.push(`${cle} : classement différent de sa jumelle ${jumelle}`);
         }
       } finally {
         session.disconnect();
@@ -326,8 +332,8 @@ if (!TEST_DATABASE_URL) {
       // après la première, les suivantes sont abandonnées, pour ne pas attendre le délai à chaque appel admis.
       let usageEnPanne = false;
       const attendreSansCouper = async (id, envoi, contexte) => {
-        if (usageEnPanne) return;
-        try { await attendreUsage(id, envoi, contexte); } catch (erreur) { usageEnPanne = true; usagesEnEcart.push(erreur.message); }
+        if (usageEnPanne) return null;
+        try { return await attendreUsage(id, envoi, contexte); } catch (erreur) { usageEnPanne = true; usagesEnEcart.push(erreur.message); return null; }
       };
       for (const cle of Object.keys(ROUTES_CLES).sort()) {
         const [methode, chemin] = cle.split(' ');
@@ -340,7 +346,12 @@ if (!TEST_DATABASE_URL) {
         // l'écriture différée de la dernière utilisation. Les chaînes des 13 clés tournent en parallèle.
         const parCle = await enParallele(clesParScope.map((k) => async () => {
           const sorties = [];
+          // Dernière utilisation connue de la clé. L'envoi de l'appel suivant lui est strictement postérieur (même
+          // horloge, à la milliseconde) : l'attente ne peut donc pas prendre l'écriture de l'appel précédent, déjà en
+          // base, pour celle de cet appel, encore en cours.
+          let derniere = usagesAvant[k.id] ?? null;
           for (const cible of cibles) {
+            while (derniere !== null && Date.now() <= derniere) await pause(1);
             const envoi = Date.now();
             const { res, ligne } = await jouer({ compte: k.nom, autorisation: k.autorisation, methode, chemin, definition, cible });
             sorties.push(ligne);
@@ -349,7 +360,7 @@ if (!TEST_DATABASE_URL) {
             } else {
               admises.add(k.id);
               admisesAuMoinsUneFois.add(k.id);
-              await attendreSansCouper(k.id, envoi, `${cle} ${cible.nom} (${k.nom}, ${res.status})`);
+              derniere = (await attendreSansCouper(k.id, envoi, `${cle} ${cible.nom} (${k.nom}, ${res.status})`)) ?? derniere;
             }
           }
           return sorties;

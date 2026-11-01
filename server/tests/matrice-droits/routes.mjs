@@ -257,6 +257,10 @@ export const ROUTES_SESSION = {
 // Les scopes chantiers:write, chantiers:archive et finances:read n'ouvrent aucune route /api/v1 : finances:read
 // démasque des montants dans les réponses (lot D1a-3), les deux autres ne servent à rien aujourd'hui (CIBLE §4.2).
 const K = (scope, definition) => ({ ...definition, scope });
+// Validation avant droit propre à la porte /api/v1 : le gestionnaire valide le corps avant un contrôle de droit qui
+// ne vise que les clés, si bien qu'une clé reçoit 400 là où ce contrôle la refuserait. Sa jumelle de session, gardée
+// avant le gestionnaire, n'a pas ce contrôle ; le test de couverture admet ce seul écart à la jumelle.
+const VAD_CLE = { validationAvantDroit: true, validationAvantDroitPropreALaCle: true };
 export const ROUTES_CLES = {
   // --- Chantiers et saisies Travaux (routeMixte, sans garde de rôle côté session) ---
   'GET /api/v1/chantiers': K('chantiers:read', L()),
@@ -283,7 +287,9 @@ export const ROUTES_CLES = {
   'POST /api/v1/catalogue/categories': K('catalogue:write', A()),
   'GET /api/v1/catalogue/:family': K('catalogue:read', L()),
   'POST /api/v1/catalogue/:family': K('catalogue:write', A()),
-  'PUT /api/v1/catalogue/:family/:id': K('catalogue:write', A('fiche-catalogue')),
+  // Une clé reçoit 403 sur une main d'œuvre existante (catalogue/main-oeuvre.ts, modifierPrestation), après la
+  // validation du corps : à corps vide, 400 (choix par défaut, passation section 4, « Main d'œuvre au catalogue »).
+  'PUT /api/v1/catalogue/:family/:id': K('catalogue:write', A('fiche-catalogue', VAD_CLE)),
   'DELETE /api/v1/catalogue/:family/:id': K('catalogue:write', B('fiche-catalogue')),
   // --- Devis ---
   'GET /api/v1/devis': K('devis:read', L()),

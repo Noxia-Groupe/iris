@@ -147,8 +147,8 @@ CLE catalogue:write | POST /api/v1/devis/:id/convertir | devis-converti | défau
 CLE catalogue:write | POST /api/v1/devis/:id/convertir | devis-signe | défaut | 403 « Scope requis : devis:write »
 CLE catalogue:write | POST /api/v1/devis/:id/convertir | inexistant | défaut | 403 « Scope requis : devis:write »
 CLE catalogue:write | POST /api/v1/devis/:id/revisions | inexistant | défaut | 403 « Scope requis : devis:write »
-CLE catalogue:write | PUT /api/v1/catalogue/:family/:id | inexistant | défaut | 400
-CLE catalogue:write | PUT /api/v1/catalogue/:family/:id | prestation-catalogue | défaut | 400
+CLE catalogue:write | PUT /api/v1/catalogue/:family/:id | inexistant | défaut | 400 validation-avant-droit
+CLE catalogue:write | PUT /api/v1/catalogue/:family/:id | prestation-catalogue | défaut | 400 validation-avant-droit
 CLE catalogue:write | PUT /api/v1/clients/:clientId/contacts/:id | contact-autre-client | défaut | 403 « Scope requis : clients:write »
 CLE catalogue:write | PUT /api/v1/clients/:clientId/contacts/:id | contact-client-actif | défaut | 403 « Scope requis : clients:write »
 CLE catalogue:write | PUT /api/v1/clients/:clientId/contacts/:id | inexistant | défaut | 403 « Scope requis : clients:write »
