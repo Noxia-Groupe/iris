@@ -74,7 +74,7 @@ server/
                               après elle), dateHeure.ts
                               (date et heure au fuseau de la société), envois.ts (envoi du compte
                               rendu par la messagerie ou Microsoft 365, et journal de ses envois)
-    domaines/contrats/        routes.ts (dont le PDF et l'envoi du contrat par la messagerie),
+    domaines/contrats/        routes.ts (dont le PDF et l'envoi du contrat, par la messagerie ou Microsoft 365),
                               metier.ts (couverture, échéances, visites, verrou), generation.ts
                               (passage quotidien des visites, alerte, minuteur), document.ts
                               (PDF du contrat), productionPdf.ts (PDF du contrat : lecture dans une
