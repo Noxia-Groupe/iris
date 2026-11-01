@@ -106,7 +106,7 @@ Les variables préfixées `VITE_` sont intégrées dans le JavaScript du navigat
 
 | Variable | Requise | Usage |
 |---|---:|---|
-| `TEST_DATABASE_URL` | seulement tests API locaux | PostgreSQL jetable pour les tests HTTP/backend, sur `localhost` ou `127.0.0.1` ; les tests de migration et les fichiers de tests propres à un lot y créent leurs propres bases (droit CREATEDB) |
+| `TEST_DATABASE_URL` | seulement tests API locaux | PostgreSQL jetable pour les tests HTTP/backend, sur `localhost` ou `127.0.0.1` ; les tests de migration et les fichiers de tests propres à un lot y créent leurs propres bases (droit CREATEDB) ; les matrices des écritures réelles (lot D1a-5, `matrice-droits-ecritures-*.test.mjs`) remettent en plus leur base à l'état de référence sous `session_replication_role` : rôle super-utilisateur, ou qui a reçu `GRANT SET ON PARAMETER session_replication_role` (PostgreSQL 15 et plus) ; sinon ces fichiers échouent avec un message clair, sans `SKIP` |
 | `E2E_DATABASE_URL` | seulement E2E locaux | PostgreSQL jetable Playwright |
 | `E2E_BASE_URL` | non | URL frontend E2E, défaut `http://127.0.0.1:5199` |
 | `E2E_API_PORT` | non | port API E2E, défaut `3001` |
@@ -133,7 +133,7 @@ Pour lancer en même temps les parcours de deux copies de travail, donner à cha
 
 Si le Chromium installé ne correspond pas à la version attendue par `@playwright/test` (« Executable doesn't exist »), par exemple dans un conteneur fourni avec une autre révision, ne modifiez pas la configuration versionnée : utilisez une surcouche non versionnée qui importe `playwright.config.ts` et fixe `use.launchOptions.executablePath` vers le Chromium disponible. Les chemins de la configuration versionnée (`testDir`, `cwd` des serveurs web) se résolvent depuis le dossier du fichier de configuration chargé : placée hors de `client/`, la surcouche les redéfinit en chemins absolus. Après la préparation de `test:e2e:local` (`node scripts/preparer-e2e.mjs`), lancer `npx playwright test -c <surcouche>` depuis `client/`. Pour l'outil de comparaison du rendu, la variable `RELEVE_CHROMIUM` joue ce rôle.
 
-En CI, les travaux « Backend — tests » et « Frontend — parcours utilisateur » démarrent le PostgreSQL 16 préinstallé du runner Ubuntu 24.04, et non un conteneur tiré d'un registre public, dont les refus (`toomanyrequests`) faisaient échouer des jobs avant tout test. Le script `.github/scripts/postgresql-runner.sh` crée le rôle `iris` et la base jetable en UTF-8 et `C.UTF-8`. Il affiche puis vérifie la version majeure (16), le fuseau du serveur (UTC) ainsi que l'encodage et la collation de la base et de `template1`. En cas d'échec, le job affiche la fin du journal du serveur PostgreSQL.
+En CI, les travaux « Backend — tests » et « Frontend — parcours utilisateur » démarrent le PostgreSQL 16 préinstallé du runner Ubuntu 24.04, et non un conteneur tiré d'un registre public, dont les refus (`toomanyrequests`) faisaient échouer des jobs avant tout test. Le script `.github/scripts/postgresql-runner.sh` crée le rôle `iris`, super-utilisateur (`SUPERUSER`), comme l'exigent les matrices des écritures réelles du lot D1a-5 (`session_replication_role`), et la base jetable en UTF-8 et `C.UTF-8`. Il affiche puis vérifie la version majeure (16), le fuseau du serveur (UTC) ainsi que l'encodage et la collation de la base et de `template1`. En cas d'échec, le job affiche la fin du journal du serveur PostgreSQL.
 
 #### Comparaison du rendu (découpage des écrans)
 
