@@ -255,7 +255,9 @@ export const ROUTES_SESSION = {
 // montée par routeMixte a le gestionnaire, la famille et le classement de sa jumelle de session. Une route /api/v1
 // ajoutée sans entrée, ou une entrée sans route, fait échouer ce test.
 // Les scopes chantiers:write, chantiers:archive et finances:read n'ouvrent aucune route /api/v1 : finances:read
-// démasque des montants dans les réponses (lot D1a-3), les deux autres ne servent à rien aujourd'hui (CIBLE §4.2).
+// démasque des montants dans les réponses (lot D1a-3) ; les deux autres ne servent à rien à une clé d'intégration
+// aujourd'hui (CIBLE §4.2), alors qu'en session ils ouvrent la saisie et l'archivage Travaux (requireTravauxWrite,
+// requireTravauxArchive), par le type de compte ou accordés individuellement.
 const K = (scope, definition) => ({ ...definition, scope });
 // Validation avant droit propre à la porte /api/v1 : le gestionnaire valide le corps avant un contrôle de droit qui
 // ne vise que les clés, si bien qu'une clé reçoit 400 là où ce contrôle la refuserait. Sa jumelle de session, gardée

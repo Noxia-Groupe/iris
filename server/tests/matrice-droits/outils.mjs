@@ -103,16 +103,16 @@ export async function chargerApplication(base) {
 
 // Appel HTTP réel, par node:http et un agent qui garde les connexions ouvertes. `jeton` : chaîne (en-tête
 // Bearer), ou null pour un appel sans session ; `autorisation` : en-tête Authorization donné tel quel, pour un en-tête
-// qui ne suit pas la forme « Bearer <jeton> » (matrice des clés d'intégration, D1a-2). Le corps est toujours envoyé
-// en JSON pour une écriture (un objet vide pour un « corps vide », cadrage §2.4) ; rien pour une lecture. Pourquoi
-// pas `fetch` : sur les quelque 11 000 appels de la matrice d'entrée, `fetch` coûte environ 25 % de processeur de
-// plus que node:http, qui en retire donc environ 20 % (mesures du 01-11-2026 : 41,4 et 43,3 s de processeur avec
-// `fetch`, de 33,5 à 34,3 s avec node:http) ; la CI partage ce processeur avec les autres fichiers de tests, que la
-// matrice ralentit d'autant.
+// qui ne suit pas la forme « Bearer <jeton> » (matrice des clés d'intégration, D1a-2) ; `octets` : garder le corps
+// brut d'une réponse qui n'est pas du JSON (logo de la société, matrice des données visibles, D1a-3), rendu dans
+// `octets`. Le corps est toujours envoyé en JSON pour une écriture (un objet vide pour un « corps vide », cadrage
+// §2.4) ; rien pour une lecture. Pourquoi pas `fetch` : sur les quelque 11 000 appels de la matrice d'entrée, `fetch`
+// coûte environ 25 % de processeur de plus que node:http, qui en retire donc environ 20 % ; la CI partage ce
+// processeur avec les autres fichiers de tests, que la matrice ralentit d'autant.
 const agentHttp = new Agent({ keepAlive: true, maxSockets: 16 });
 // Une route qui ne répond jamais fait échouer l'appel au lieu de suspendre le fichier (fetch abandonnait après 300 s).
 const DELAI_APPEL_MS = 60_000;
-export function appeler(adresse, methode, chemin, { jeton = null, autorisation = null, corps, requete } = {}) {
+export function appeler(adresse, methode, chemin, { jeton = null, autorisation = null, corps, requete, octets = false } = {}) {
   const url = new URL(chemin, adresse);
   for (const [cle, valeur] of Object.entries(requete ?? {})) url.searchParams.set(cle, valeur);
   const entetes = {};
@@ -128,8 +128,9 @@ export function appeler(adresse, methode, chemin, { jeton = null, autorisation =
       const type = reponse.headers['content-type'] ?? '';
       const json = type.includes('application/json');
       const morceaux = [];
-      // PDF, CSV : lus puis jetés, le contenu n'entre jamais dans la matrice d'entrée (code seul pour un 2xx).
-      reponse.on('data', (morceau) => { if (json) morceaux.push(morceau); });
+      // PDF, CSV : lus puis jetés, le contenu n'entre jamais dans la matrice d'entrée (code seul pour un 2xx), sauf
+      // demande expresse (`octets`).
+      reponse.on('data', (morceau) => { if (json || octets) morceaux.push(morceau); });
       reponse.on('error', ko);
       reponse.on('end', () => {
         const texte = json ? Buffer.concat(morceaux).toString('utf8') : '';
@@ -137,7 +138,7 @@ export function appeler(adresse, methode, chemin, { jeton = null, autorisation =
         if (json) {
           try { corpsLu = JSON.parse(texte); } catch { corpsLu = null; }
         }
-        ok({ status: reponse.statusCode, body: corpsLu, texte, type });
+        ok({ status: reponse.statusCode, body: corpsLu, texte, type, ...(octets ? { octets: Buffer.concat(morceaux) } : {}) });
       });
     });
     requeteHttp.on('error', ko);
@@ -238,7 +239,9 @@ export function ligneMatrice({ compte, methode, chemin, cible, contexte = CONTEX
   for (const champ of champs) assert.ok(!String(champ).includes('|') && String(champ) === String(champ).trim() && !/\n/.test(champ), `champ de ligne invalide : ${champ}`);
   return champs.join(SEPARATEUR);
 }
-export const cleDeLigne = (ligne) => ligne.split(SEPARATEUR).slice(0, 4).join(SEPARATEUR);
+// Clé d'une ligne : ses quatre premiers champs (compte, route, cible, contexte), ou davantage pour une matrice dont
+// la ligne porte un champ de plus (matrice des données visibles, D1a-3 : l'objet décrit).
+export const cleDeLigne = (ligne, champsCle = 4) => ligne.split(SEPARATEUR).slice(0, champsCle).join(SEPARATEUR);
 // Tri au code de caractère près, indépendant de la langue de la machine.
 export const trier = (lignes) => [...lignes].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 
@@ -246,24 +249,26 @@ export const trier = (lignes) => [...lignes].sort((a, b) => (a < b ? -1 : a > b 
 // En cas d'écart : la matrice obtenue est écrite dans un fichier temporaire hors du dépôt, dont le chemin est
 // donné, et le message d'échec imprime les premières lignes du diff (60 au plus), le fichier temporaire étant
 // perdu en CI. Le diff est fait par clé (compte, route, cible, contexte) : une réponse changée se lit en deux
-// lignes, « - » la référence, « + » l'obtenu.
+// lignes, « - » la référence, « + » l'obtenu. Avec `resumer` (matrice des données, D1a-3, dont les lignes sont
+// longues), une ligne changée se lit en une seule, « ~ », sa clé et ce qui a changé.
 export function lireReference(chemin) {
   try { return readFileSync(chemin, 'utf8'); } catch { return null; }
 }
-export function diffParCle(lignesReference, lignesObtenues) {
-  const reference = new Map(lignesReference.map((ligne) => [cleDeLigne(ligne), ligne]));
-  const obtenues = new Map(lignesObtenues.map((ligne) => [cleDeLigne(ligne), ligne]));
+export function diffParCle(lignesReference, lignesObtenues, champsCle = 4, resumer = null) {
+  const reference = new Map(lignesReference.map((ligne) => [cleDeLigne(ligne, champsCle), ligne]));
+  const obtenues = new Map(lignesObtenues.map((ligne) => [cleDeLigne(ligne, champsCle), ligne]));
   const cles = trier([...new Set([...reference.keys(), ...obtenues.keys()])]);
   const diff = [];
   for (const cle of cles) {
     const avant = reference.get(cle); const apres = obtenues.get(cle);
     if (avant === apres) continue;
+    if (resumer && avant !== undefined && apres !== undefined) { diff.push(`~ ${cle} : ${resumer(avant, apres)}`); continue; }
     if (avant !== undefined) diff.push(`- ${avant}`);
     if (apres !== undefined) diff.push(`+ ${apres}`);
   }
   return diff;
 }
-export function comparerAvecReference(lignesObtenues, cheminReference, nomTemporaire) {
+export function comparerAvecReference(lignesObtenues, cheminReference, nomTemporaire, { champsCle = 4, resumer = null } = {}) {
   const texteObtenu = `${trier(lignesObtenues).join('\n')}\n`;
   const texteReference = lireReference(cheminReference);
   if (texteReference === texteObtenu) return;
@@ -271,7 +276,7 @@ export function comparerAvecReference(lignesObtenues, cheminReference, nomTempor
   const cheminObtenu = join(dossier, nomTemporaire);
   writeFileSync(cheminObtenu, texteObtenu);
   const lignesReference = texteReference === null ? [] : texteReference.split('\n').filter((ligne) => ligne !== '');
-  const diff = diffParCle(lignesReference, trier(lignesObtenues));
+  const diff = diffParCle(lignesReference, trier(lignesObtenues), champsCle, resumer);
   const entete = texteReference === null
     ? `Référence absente : ${cheminReference}.`
     : `La matrice obtenue diffère de la référence ${cheminReference} (${diff.length} ligne(s) de diff).`;
