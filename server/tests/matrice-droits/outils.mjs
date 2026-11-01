@@ -173,15 +173,20 @@ export async function tablesDeLaBase(prisma) {
 // `colonnesIgnorees` (table → noms de colonnes) retire des colonnes du contenu résumé : la matrice des clés
 // d'intégration (D1a-2) en retire la dernière utilisation d'une clé, écrite sans attente par la porte /api/v1, et la
 // contrôle à part, clé par clé (voir matrice-droits-cles.test.mjs). Sans elle, l'empreinte est celle de D1a-1.
-export async function empreinteBase(prisma, tables, { colonnesIgnorees = {} } = {}) {
+export async function empreinteBase(prisma, tables, options = {}) {
+  const [ligne] = await prisma.$queryRawUnsafe(requeteEmpreinte(tables, options));
+  return ligne;
+}
+// La requête seule : l'outil de remise en état des matrices d'écritures (D1a-5, remise-en-etat.mjs) la joue par sa
+// propre connexion pg, et non par Prisma ; l'empreinte est la même, au caractère près.
+export function requeteEmpreinte(tables, { colonnesIgnorees = {} } = {}) {
   const contenu = (table) => {
     const ignorees = colonnesIgnorees[table] ?? [];
     for (const colonne of ignorees) assert.match(colonne, /^[A-Za-z]+$/, `colonne ignorée : ${colonne}`);
     return ignorees.length ? `(row_to_json(t)::jsonb${ignorees.map((colonne) => ` - '${colonne}'`).join('')})::text` : 'row_to_json(t)::text';
   };
   const colonnes = tables.map((table) => `(SELECT count(*)::text || ':' || coalesce(md5(string_agg(${contenu(table)}, '|' ORDER BY ${contenu(table)})), '') FROM "${table}" t) AS "${table}"`);
-  const [ligne] = await prisma.$queryRawUnsafe(`SELECT ${colonnes.join(', ')}`);
-  return ligne;
+  return `SELECT ${colonnes.join(', ')}`;
 }
 // Tables dont l'empreinte a changé, pour nommer l'écriture dans un message d'échec.
 export function tablesChangees(avant, apres) {
@@ -212,13 +217,15 @@ export function normaliserTexte(texte) {
 //  - tout autre code (401, 403, 404, 409, 410, et un éventuel 500) : le code, le champ `code` du corps s'il en
 //    porte un, puis le message exact, normalisé. Un corps qui porte d'autres champs les nomme, sans leur valeur ;
 //  - pour une écriture (c) du cadrage §2.4, suivi de « écrit » ou « inchangé » selon l'empreinte de la base.
-export function formaterReponse(res, { validationAvantDroit = false, ecriture = null } = {}) {
-  const reponse = reponseSansEcriture(res, validationAvantDroit);
+// `messageDu400` (matrices des écritures réelles, D1a-5, jouées avec un corps valide) : un 400 s'écrit comme un refus,
+// avec son message, car il ne vient plus d'un corps mal formé mais de l'état de la cible ou d'un refus rendu en 400.
+export function formaterReponse(res, { validationAvantDroit = false, ecriture = null, messageDu400 = false } = {}) {
+  const reponse = reponseSansEcriture(res, validationAvantDroit, messageDu400);
   return ecriture ? `${reponse} ${ecriture}` : reponse;
 }
-function reponseSansEcriture(res, validationAvantDroit) {
+function reponseSansEcriture(res, validationAvantDroit, messageDu400) {
   if (res.status >= 200 && res.status < 300) return String(res.status);
-  if (res.status === 400) return validationAvantDroit ? '400 validation-avant-droit' : '400';
+  if (res.status === 400 && !messageDu400) return validationAvantDroit ? '400 validation-avant-droit' : '400';
   const corps = res.body;
   if (!corps || typeof corps !== 'object' || Array.isArray(corps)) {
     return `${res.status} (corps non JSON${res.texte ? ` : ${normaliserTexte(res.texte).slice(0, 120)}` : ''})`;
