@@ -34,8 +34,8 @@ GET /api/factures/chronologie requireAuth#07b983da0ce5 > requireAdmin#72440b3191
 GET /api/factures/a-regler requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#da27e52f58a3
 GET /api/factures requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#bb316d5281c8
 GET /api/factures/:id/document.pdf requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#7f2413f4ae09
-GET /api/factures/:id/envois requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#3c864ba42010
-POST /api/factures/:id/envois requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#9623ed8b265a
+GET /api/factures/:id/envois requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#79ccafa7712f
+POST /api/factures/:id/envois requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#966e52bd8dc9
 GET /api/factures/:id/journal requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#90d251d8d096
 GET /api/factures/:id/tracabilite requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#4d3a959b39f5
 POST /api/factures requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#b51a3d739f0d
@@ -69,8 +69,8 @@ GET /api/contrats-maintenance/generation-visites requireAuth#07b983da0ce5 > requ
 POST /api/contrats-maintenance/generation-visites requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#1e9928683461
 GET /api/contrats-maintenance/:id/journal-saisies requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#3f95c0d7c799
 GET /api/contrats-maintenance/:id/document.pdf requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > imprimerContrat#66662fc8c94e
-GET /api/contrats-maintenance/:id/envois requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > lireEnvoisContrat#5d497359adf0
-POST /api/contrats-maintenance/:id/envois requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > envoyerContrat#edffbb1a5f35
+GET /api/contrats-maintenance/:id/envois requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > lireEnvoisContrat#c5e2c38e52c5
+POST /api/contrats-maintenance/:id/envois requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > envoyerContrat#aa51e57bc40f
 POST /api/contrats-maintenance requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#cb003fe48a0c
 PATCH /api/contrats-maintenance/:id requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#d207d7ce9fc0
 PATCH /api/contrats-maintenance/:id/statut requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#288570ca26c3
@@ -80,7 +80,7 @@ POST /api/interventions requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 
 GET /api/interventions requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#3367306260fa
 GET /api/interventions/journee requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#c20552bc49ac
 GET /api/interventions/:id requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#4d7dee0b11a1
-GET /api/interventions/:id/document.pdf requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#e936d5457d4c
+GET /api/interventions/:id/document.pdf requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#540caccce552
 GET /api/interventions/:id/couts requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#cf770672fe56
 POST /api/interventions/:id/couts/heures requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#857c638bde3f
 POST /api/interventions/:id/couts/achats requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#ecb2f2a84911
@@ -95,8 +95,8 @@ PUT /api/interventions/:id/planning requireAuth#07b983da0ce5 > blockCommercial#e
 POST /api/interventions/:id/remise-a-planifier requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > blockTechnicien#2b927a462cc3 > requirePlanningActif#20945635a340 > <anonymous>#c275a1579ba9
 PUT /api/interventions/:id/a-suivre requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > <anonymous>#4d746e2fe3f6
 POST /api/interventions/:id/suites requireAuth#07b983da0ce5 > blockCommercialEtAssimiles#342378890e96 > <anonymous>#d5ed850bbae1
-GET /api/interventions/:id/envois requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > refuserTechnicien#ac4a6f5390df > <anonymous>{permission="clients:read"}#c4dc4769916b > lireEnvoisCompteRendu#c7093022541c
-POST /api/interventions/:id/envois requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > refuserTechnicien#ac4a6f5390df > <anonymous>{permission="clients:read"}#c4dc4769916b > envoyerCompteRendu#11bc5940fe77
+GET /api/interventions/:id/envois requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > refuserTechnicien#ac4a6f5390df > <anonymous>{permission="clients:read"}#c4dc4769916b > lireEnvoisCompteRendu#a238f9a230ae
+POST /api/interventions/:id/envois requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > refuserTechnicien#ac4a6f5390df > <anonymous>{permission="clients:read"}#c4dc4769916b > envoyerCompteRendu#ec11561c1a9f
 GET /api/health <anonymous>#8e6d60bb30d8
 GET /api/config <anonymous>#8496550e7475
 POST /api/auth/sso <anonymous>#29d388e00d09
@@ -109,8 +109,8 @@ GET /api/v1/chantiers <anonymous>{scope="chantiers:read"}#4aeb6d464b38 > listerC
 GET /api/chantiers/:id requireAuth#07b983da0ce5 > <anonymous>#47b737c19cf3
 GET /api/chantiers/:id/journal-saisies requireAuth#07b983da0ce5 > <anonymous>#4373de266aea
 GET /api/chantiers/:id/document.pdf requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > imprimerRapportChantier#a1c8ca5e6196
-GET /api/chantiers/:id/envois requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > lireEnvoisRapportChantier#c22e9c533f8c
-POST /api/chantiers/:id/envois requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > envoyerRapportChantier#251cb99af820
+GET /api/chantiers/:id/envois requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > lireEnvoisRapportChantier#686d69fd2e44
+POST /api/chantiers/:id/envois requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > envoyerRapportChantier#b8c79c1eee9b
 POST /api/chantiers requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#5a2a6ae542c5
 PATCH /api/chantiers/:id requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#3653fa783163
 DELETE /api/chantiers/:id requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#c4bcd35fe13f
@@ -223,8 +223,8 @@ POST /api/devis/:id/revisions requireAuth#07b983da0ce5 > <anonymous>{permission=
 POST /api/v1/devis/:id/revisions <anonymous>{scope="devis:write"}#4aeb6d464b38 > creerRevision#0b37377b1190
 POST /api/devis/:id/signature requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > signerDevis#aac29183a21a
 GET /api/devis/:id/document.pdf requireAuth#07b983da0ce5 > <anonymous>{permission="devis:read"}#c4dc4769916b > imprimerDevis#1a5d3834cffa
-GET /api/devis/:id/envois requireAuth#07b983da0ce5 > <anonymous>{permission="devis:read"}#c4dc4769916b > lireEnvoisDevis#2f968ae9a8f2
-POST /api/devis/:id/envois requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > envoyerDevis#a62f429280b0
+GET /api/devis/:id/envois requireAuth#07b983da0ce5 > <anonymous>{permission="devis:read"}#c4dc4769916b > lireEnvoisDevis#6c5946c461d1
+POST /api/devis/:id/envois requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > envoyerDevis#08cbf1915d21
 PUT /api/devis/:id/statut requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > changerStatutDevis#bae4b07f199b
 PUT /api/v1/devis/:id/statut <anonymous>{scope="devis:write"}#4aeb6d464b38 > changerStatutDevis#bae4b07f199b
 POST /api/devis/:id/convertir requireAuth#07b983da0ce5 > <anonymous>{permission="devis:write"}#c4dc4769916b > convertirDevis#f4b6379f3274
@@ -241,8 +241,8 @@ DELETE /api/company/logo requireAuth#07b983da0ce5 > requireSuperAdmin#f8122bc14e
 GET /api/parametres/remuneration requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#61efeee81638
 PUT /api/parametres/remuneration requireAuth#07b983da0ce5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#98b0a30737c8
 PUT /api/parametres requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#a80855948896
-GET /api/modules requireAuth#07b983da0ce5 > <anonymous>#409f48a66fe8
-PUT /api/modules requireAuth#07b983da0ce5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#8f2e5db809d0
+GET /api/modules requireAuth#07b983da0ce5 > <anonymous>#5ce022aee134
+PUT /api/modules requireAuth#07b983da0ce5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#033ce6e42c33
 GET /api/journal-administration requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#38867022b71f
 GET /api/journal-administration/export.csv requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#72c377372775
 PUT /api/journal-administration/conservation requireAuth#07b983da0ce5 > requireSuperAdmin#f8122bc14e34 > <anonymous>#3483eb2d5d53

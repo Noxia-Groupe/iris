@@ -59,7 +59,7 @@ import { weekBoundsFrom, periodBounds } from './src/domaines/statistiques/metier
 import { enregistrerRoutesStatistiques } from './src/domaines/statistiques/routes';
 import { commissionBaremeProgressif } from './src/domaines/commissions/metier';
 import { enregistrerRoutesCommissions } from './src/domaines/commissions/routes';
-import { initDb, ensureSuperAdmins, reglerDelaisConnexion } from './src/demarrage';
+import { initDb, ensureSuperAdmins, reglerDelaisConnexion, verifierConfigurationDemarrage } from './src/demarrage';
 
 const port = process.env.PORT || 3001;
 
@@ -167,6 +167,14 @@ enregistrerRoutesAnalyseChantier(app);
 // peuvent alors tourner en parallèle sans se disputer le 3001, et aucun test n'oublie de
 // fermer un serveur derrière lui.
 if (require.main === module) {
+  // Une configuration refusée (MICROSOFT_GRAPH_URL hors des adresses admises) arrête le processus
+  // avant toute écoute, avec son message.
+  try {
+    verifierConfigurationDemarrage();
+  } catch (error) {
+    console.error('[DÉMARRAGE] Configuration refusée :', error instanceof Error ? error.message : error);
+    process.exit(1);
+  }
   reglerDelaisConnexion(app.listen(port, async () => {
     // Une initialisation impossible (base injoignable, par exemple) est signalée explicitement et
     // arrête le processus, au lieu d'un rejet non géré sans contexte (#231). Les comptes de départ,

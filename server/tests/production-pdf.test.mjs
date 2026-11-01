@@ -801,5 +801,77 @@ if (!TEST_DATABASE_URL) {
         ], f.noms);
       });
     });
+
+    // P1 et transactions (audit droits-sécurité n° 1 de #405) : produirePdf lit dans la transaction, aux options que
+    // lui donne la route, puis rend le PDF une fois la transaction validée : pendant le rendu, le client de la
+    // transaction est clos, aucune connexion n'est tenue. Un refus n'appelle pas le rendu. identiteActuelleOuRefus ne
+    // change en refus que l'identité incomplète : toute autre erreur remonte, et la route la rend en 500, sans détail.
+    test('production commune : lecture dans la transaction, rendu après sa validation ; un refus n’appelle pas le rendu ; seule l’identité incomplète devient un refus', async () => {
+      const { produirePdf, refusPdf, identiteActuelleOuRefus } = (await import('../dist/src/domaines/documents/productionPdf.js')).default;
+      let clientTransaction; let isolation;
+      const produit = await produirePdf(async (tx) => {
+        clientTransaction = tx;
+        [{ transaction_isolation: isolation }] = await tx.$queryRaw`SHOW transaction_isolation`;
+        return { valeur: 'lue' };
+      }, async (lu) => {
+        assert.deepEqual(lu, { valeur: 'lue' });
+        await assert.rejects(clientTransaction.$queryRaw`SELECT 1`, /closed|committed/i, 'la transaction est validée avant le rendu');
+        return { pdf: Buffer.from('%PDF-'), nomFichier: 'essai.pdf' };
+      }, { isolationLevel: 'RepeatableRead' });
+      assert.equal(isolation, 'repeatable read', 'la lecture suit le niveau d’isolement de la route');
+      assert.equal(produit.nomFichier, 'essai.pdf');
+      let rendu = false;
+      const refus = await produirePdf(async () => refusPdf(404, 'Introuvable.'), async () => { rendu = true; return { pdf: Buffer.alloc(0), nomFichier: '' }; }, {});
+      assert.deepEqual(refus, { statut: 404, error: 'Introuvable.' });
+      assert.equal(rendu, false, 'un refus n’appelle pas le rendu');
+      const panne = new Error('détail interne de la base');
+      await assert.rejects(identiteActuelleOuRefus({ companySettings: { findUnique: async () => { throw panne; } } }, AVANT.devis), (erreur) => erreur === panne, 'une panne n’est pas un refus 409');
+      assert.deepEqual(await identiteActuelleOuRefus({ companySettings: { findUnique: async () => null } }, AVANT.devis), { statut: 409, ...identiteIncomplete('raison sociale, SIRET, adresse, code postal, ville', AVANT.devis) });
+    });
+
+    // P1 : le périmètre du PDF est celui de la fiche (getInterventionFilterForUser), sans rien y ajouter. Le créateur
+    // d'une intervention ordinaire n'y entre que s'il est conducteur de travaux ; les autres comptes, s'ils ne sont ni
+    // affectés ni responsables de son chantier, ne l'impriment pas (404 exact), même créateurs.
+    test('compte rendu : le créateur d’une intervention ordinaire ne l’imprime que s’il est conducteur de travaux ; les autres en reçoivent le 404 exact', async () => {
+      const c = f.comptes;
+      const sav = await creerIntervention({ clientId: f.client.id, titre: 'TEST SAV créé par un autre compte 6b1a' });
+      await demarrer(sav.id);
+      await ajouterCompteRendu(sav.id, 'TEST Compte rendu d’un SAV attribué 6b1a.');
+      const nom = `Compte-rendu-${sav.reference}.pdf`;
+      try {
+        for (const [libelle, compte, attendu] of [
+          ['CONDUCTEUR_TRAVAUX tiers', c.conducteurTiers, 200],
+          ['RESPONSABLE tiers', c.responsableTiers, [404, INTERVENTION_INTROUVABLE]],
+          ['ASSISTANTE_COMMERCIALE', c.assistante, [404, INTERVENTION_INTROUVABLE]],
+          ['COMPTABLE', c.comptable, [404, INTERVENTION_INTROUVABLE]],
+          ['DIRECTEUR_COMMERCIAL', c.directeurCommercial, [404, INTERVENTION_INTROUVABLE]],
+        ]) {
+          await prisma.intervention.update({ where: { id: sav.id }, data: { createdById: compte.id } });
+          await jouerMatrice('compteRendu', [['sav attribué', sav.id]], [[`${libelle}, créateur`, parCompte(compte), [attendu]]], { 'sav attribué': nom });
+        }
+      } finally {
+        await prisma.intervention.update({ where: { id: sav.id }, data: { createdById: null } });
+      }
+    });
+
+    // Un rendu qui échoue, après la transaction (ici, un logo illisible de la société), rend le 500 générique de chaque
+    // route, sans détail interne, et n'écrit rien ; le devis signé et la facture émise, imprimés depuis leurs copies, ne
+    // lisent pas le logo actuel.
+    test('rendu impossible : 500 exact de chaque route, sans détail interne, rien n’est écrit ; les copies figées n’en dépendent pas', async () => {
+      const contenu = Buffer.from('TEST pas une image 6b1a');
+      const logo = await prisma.logoDocument.create({ data: { contenu, typeMime: 'image/png', empreinte: `test-6b1a-${randomUUID()}`, taille: contenu.length } });
+      await avecSociete({ logoDocumentId: logo.id }, async () => {
+        const avant = await etatBase();
+        for (const [chemin, corps] of [
+          [CHEMINS.devis(f.devisBrouillon.id), { error: 'Opération devis impossible.' }],
+          [CHEMINS.compteRendu(f.avecCompteRendu.id), { error: 'Impression du compte rendu impossible.' }],
+          [CHEMINS.contrat(f.contratActif.id), { error: 'Impression du contrat de maintenance impossible.' }],
+          [CHEMINS.chantier(f.chantier.id), { error: 'Impression du rapport de chantier impossible.' }],
+        ]) verifierRefus(await lire(chemin), 500, corps, `${chemin}, logo illisible`);
+        verifierPdf(await lire(CHEMINS.devis(f.devisSigne.id)), f.noms.devisSigne, 'devis signé, logo actuel illisible');
+        verifierPdf(await lire(CHEMINS.facture(f.factureEmise.id)), f.noms.factureEmise, 'facture émise, logo actuel illisible');
+        assert.deepEqual(await etatBase(), avant, 'un rendu impossible n’écrit rien');
+      });
+    });
   });
 }

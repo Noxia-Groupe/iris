@@ -8,6 +8,7 @@ import { paramId } from '../../http/requete';
 import { API_SCOPES, type ApiScope, apiKeyHash, requireApiKey } from '../../http/cles-api';
 import { changementsJournal, journaliserAdministration, verrouillerReglage } from '../../commun/journal-administration';
 import { getParametres, getReglesRemuneration } from '../parametres/metier';
+import { MODES_ENVOI } from '../documents/envoiMicrosoft365';
 import { companySettingsPayload, getCompanySettings } from './metier';
 
 function publicApiKey(key: { id: string; nom: string; prefixe: string; scopes: string[]; actif: boolean; expireLe: Date | null; dernierUsageLe: Date | null; creeLe: Date; revoqueLe: Date | null }) {
@@ -133,16 +134,17 @@ export function enregistrerRoutesModules(app: Express): void {
   // Lecture : accessible à TOUT compte authentifié — le client en a besoin pour savoir
   // quelles entrées de menu afficher. On renvoie la visibilité EFFECTIVE pour le compte
   // connecté : un superadmin garde toujours accès au planning, même désactivé (c'est lui
-  // qui le pilote), les autres suivent le réglage global.
+  // qui le pilote), les autres suivent le réglage global. Le mode d'envoi des documents (lot 6b-1b)
+  // est rendu tel quel.
   app.get('/api/modules', requireAuth, async (req, res) => {
     try {
-      const { planningActif } = await getParametres();
+      const { planningActif, modeEnvoi } = await getParametres();
       const isSuper = isSuperAdminRole((req as AuthRequest).user?.role);
       // Le libellé du barème réduit voyage avec les modules : c'est le seul réglage lu par
       // TOUS les comptes (la route /parametres/remuneration, elle, est réservée aux admins),
       // et il s'affiche sur la fiche chantier comme sur les écrans commerciaux.
       const { libelleBaremeReduit } = await getReglesRemuneration();
-      res.json({ planningActif: isSuper || planningActif, planningActifGlobal: planningActif, libelleBaremeReduit });
+      res.json({ planningActif: isSuper || planningActif, planningActifGlobal: planningActif, libelleBaremeReduit, modeEnvoi });
     } catch (error) {
       res.status(500).json({ error: 'Error fetching modules' });
     }
@@ -150,22 +152,39 @@ export function enregistrerRoutesModules(app: Express): void {
 
   // Écriture : superadmin uniquement. Désactiver le planning ne supprime RIEN — les
   // affectations et types d'événements restent en base et réapparaissent à la réactivation.
+  // Réglage champ par champ (lot 6b-1b, V2 du cadrage) : un champ absent garde sa valeur, comme dans
+  // PUT /api/parametres ; un champ présent mais invalide est refusé (400), sans rien écrire.
+  //   - planningActif : un vrai booléen (choix le plus restrictif, à confirmer, comme PUT /api/parametres) ;
+  //   - modeEnvoi : le mode d'envoi des documents, MICROSOFT_365 ou MESSAGERIE (lot 6b-1b ; réglé par le
+  //     super administrateur seul, choix le plus restrictif, à confirmer).
+  // Chaque réglage changé a sa propre ligne au journal d'administration.
   app.put('/api/modules', requireAuth, requireSuperAdmin, async (req, res) => {
     try {
-      const planningActif = !!req.body.planningActif;
+      const corps = req.body ?? {};
+      const data: { planningActif?: boolean; modeEnvoi?: string } = {};
+      if ('planningActif' in corps) {
+        if (typeof corps.planningActif !== 'boolean') return res.status(400).json({ error: 'L’activation du planning se règle par oui ou non.' });
+        data.planningActif = corps.planningActif;
+      }
+      if ('modeEnvoi' in corps) {
+        if (!MODES_ENVOI.includes(corps.modeEnvoi)) return res.status(400).json({ error: 'Mode d’envoi des documents inconnu : choisissez MICROSOFT_365 ou MESSAGERIE.' });
+        data.modeEnvoi = corps.modeEnvoi;
+      }
       const p = await transactionVerifiee(async (tx) => {
         await verrouillerReglage(tx, 'Parametres');
         const avant = await tx.parametres.findUnique({ where: { id: 'singleton' } });
         const apres = await tx.parametres.upsert({
           where: { id: 'singleton' },
-          update: { planningActif },
-          create: { id: 'singleton', planningActif },
+          update: data,
+          create: { id: 'singleton', ...data },
         });
-        const changements = changementsJournal(avant, apres, ['planningActif']);
-        if (changements) await journaliserAdministration(tx, req as AuthRequest, { domaine: 'REGLAGES', type: 'MODULES', action: planningActif ? 'ACTIVATION' : 'DESACTIVATION', cibleLibelle: 'Planning', ...changements });
+        const planning = changementsJournal(avant, apres, ['planningActif']);
+        if (planning) await journaliserAdministration(tx, req as AuthRequest, { domaine: 'REGLAGES', type: 'MODULES', action: apres.planningActif ? 'ACTIVATION' : 'DESACTIVATION', cibleLibelle: 'Planning', ...planning });
+        const mode = changementsJournal(avant, apres, ['modeEnvoi']);
+        if (mode) await journaliserAdministration(tx, req as AuthRequest, { domaine: 'REGLAGES', type: 'MODULES', action: 'MODIFICATION', cibleLibelle: 'Mode d’envoi des documents', ...mode });
         return apres;
       });
-      res.json({ planningActif: true, planningActifGlobal: p.planningActif });
+      res.json({ planningActif: true, planningActifGlobal: p.planningActif, modeEnvoi: p.modeEnvoi });
     } catch (error) {
       res.status(500).json({ error: 'Error updating modules' });
     }

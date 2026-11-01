@@ -41,9 +41,14 @@ const CHANTIER_ANNULE = 'Un chantier annulé ne s’envoie pas.';
 const CHANTIER_INTROUVABLE = 'Chantier introuvable';
 const REFUS_ADMINISTRATION = 'Accès réservé aux administrateurs';
 const identiteIncomplete = (champs) => `Identité de la société incomplète : renseignez ${champs} dans l’écran Société avant d’envoyer un rapport de chantier.`;
-// Lot 6a-3, inchangés : validerDestinataire et les champs exposés d'un envoi.
+// Lot 6a-3, inchangés : validerDestinataire et les champs exposés d'un envoi, qui portent aussi l'expéditeur depuis le
+// lot 6b-1b, nul pour la messagerie (cadrage du lot 6b, V3 bis, point 2).
 const REFUS_DESTINATAIRE = 'Adresse du destinataire invalide : indiquez une seule adresse électronique, de la forme nom@domaine.fr.';
-const CHAMPS_ENVOI = ['auteurNom', 'canal', 'createdAt', 'destinataire', 'id', 'objet'];
+const CHAMPS_ENVOI = ['auteurNom', 'canal', 'createdAt', 'destinataire', 'expediteur', 'id', 'objet'];
+// Lot 6b-1b (cadrage du lot 6b, V3 bis, point 3) : la proposition dit si l'envoi par Microsoft 365 est possible. Il ne
+// l'est pas ici : la connexion Microsoft n'est pas configurée dans l'environnement des tests (AZURE_TENANT_ID et
+// AZURE_CLIENT_ID absents, comme en CI) ; le mode d'envoi garde sa valeur par défaut, MICROSOFT_365.
+const MICROSOFT_365_PROPOSE = false;
 const ROLES_NON_ADMINISTRATEURS = ['CONDUCTEUR_TRAVAUX', 'COMMERCIAL', 'ASSISTANTE_COMMERCIALE', 'TECHNICIEN', 'COMPTABLE', 'DIRECTEUR_COMMERCIAL', 'RESPONSABLE', 'DIRECTEUR'];
 const TOUS_LES_SCOPES = ['clients:read', 'clients:write', 'catalogue:read', 'catalogue:write', 'equipements:read', 'equipements:write', 'devis:read', 'devis:write', 'company:read', 'chantiers:read', 'chantiers:write', 'chantiers:archive', 'finances:read'];
 
@@ -342,7 +347,7 @@ if (!TEST_DATABASE_URL) {
       assert.equal(chantierA.nom, `TEST Chantier principal ${s}`);
       const luA = await sansEcriture(() => lire(chantierA.id), 200, 'lecture A');
       assert.deepEqual(luA.body, {
-        proposition: { destinataire: 'principal@client-6a4e.test', objet: objetRapport(chantierA.nom, SOCIETE.raisonSociale), corps: corpsRapport(chantierA.nom, SOCIETE.raisonSociale) },
+        proposition: { destinataire: 'principal@client-6a4e.test', objet: objetRapport(chantierA.nom, SOCIETE.raisonSociale), corps: corpsRapport(chantierA.nom, SOCIETE.raisonSociale), microsoft365: MICROSOFT_365_PROPOSE },
         envois: [],
       });
       // `{nom}` est celui que le PDF imprime, dans son titre « Rapport de chantier {nom} ».
@@ -372,7 +377,7 @@ if (!TEST_DATABASE_URL) {
       const sansFiche = await creerChantier({ nom: `TEST Chantier sans fiche ${s}`, client: `TEST Ancien libellé ${s}` });
       const luSansFiche = await sansEcriture(() => lire(sansFiche.id), 200, 'lecture sans fiche client');
       assert.deepEqual(luSansFiche.body, {
-        proposition: { destinataire: '', objet: objetRapport(sansFiche.nom, SOCIETE.raisonSociale), corps: corpsRapport(sansFiche.nom, SOCIETE.raisonSociale) },
+        proposition: { destinataire: '', objet: objetRapport(sansFiche.nom, SOCIETE.raisonSociale), corps: corpsRapport(sansFiche.nom, SOCIETE.raisonSociale), microsoft365: MICROSOFT_365_PROPOSE },
         envois: [],
       });
       const { res } = await enregistre(() => envoyer(sansFiche.id, 'saisi@client-6a4e.test'), 'envoi sans fiche client');
@@ -407,7 +412,7 @@ if (!TEST_DATABASE_URL) {
       assert.deepEqual(Object.keys(premier.res.body.envoi).sort(), CHAMPS_ENVOI);
       assert.deepEqual(premier.res.body.envoi, {
         id: premier.ligne.id, canal: 'MESSAGERIE', destinataire: 'premier@client-6a4e.test', objet: objetRapport(chantier.nom, SOCIETE.raisonSociale),
-        auteurNom: secours.name, createdAt: premier.ligne.createdAt.toISOString(),
+        auteurNom: secours.name, createdAt: premier.ligne.createdAt.toISOString(), expediteur: null,
       });
       assert.equal(premier.res.body.objet, objetRapport(chantier.nom, SOCIETE.raisonSociale));
       assert.equal(premier.res.body.corps, corpsRapport(chantier.nom, SOCIETE.raisonSociale));
@@ -533,7 +538,7 @@ if (!TEST_DATABASE_URL) {
           const lu = await sansEcriture(() => lire(id, auth), LECTURE_ADMISE[rangCible], `lecture, ${libelle}, ${nomCible}`);
           if (lu.status === 200) {
             const nom = rangCible === 0 ? enCours.nom : annule.nom;
-            assert.deepEqual(lu.body.proposition, { destinataire: 'droits@client-6a4e.test', objet: objetRapport(nom, SOCIETE.raisonSociale), corps: corpsRapport(nom, SOCIETE.raisonSociale) }, libelle);
+            assert.deepEqual(lu.body.proposition, { destinataire: 'droits@client-6a4e.test', objet: objetRapport(nom, SOCIETE.raisonSociale), corps: corpsRapport(nom, SOCIETE.raisonSociale), microsoft365: MICROSOFT_365_PROPOSE }, libelle);
           }
           const contexte = `enregistrement, ${libelle}, ${nomCible}`;
           if (ENREGISTREMENT_ADMIS[rangCible] === 201) {
@@ -585,7 +590,7 @@ if (!TEST_DATABASE_URL) {
       await annuler();
       const lu = await sansEcriture(() => lire(chantier.id), 200, 'lecture de l’annulé');
       assert.deepEqual(lu.body, {
-        proposition: { destinataire: 'annule@client-6a4e.test', objet: objetRapport(chantier.nom, SOCIETE.raisonSociale), corps: corpsRapport(chantier.nom, SOCIETE.raisonSociale) },
+        proposition: { destinataire: 'annule@client-6a4e.test', objet: objetRapport(chantier.nom, SOCIETE.raisonSociale), corps: corpsRapport(chantier.nom, SOCIETE.raisonSociale), microsoft365: MICROSOFT_365_PROPOSE },
         envois: [envoi],
       });
       await sansEcriture(() => envoyer(chantier.id, 'annule@client-6a4e.test'), 409, 'enregistrement sur l’annulé', CHANTIER_ANNULE);
@@ -802,7 +807,7 @@ if (!TEST_DATABASE_URL) {
       }
 
       const lu = await sansEcriture(() => lire(chantier.id), 200, 'lecture du chantier témoin');
-      assert.deepEqual(lu.body.proposition, { destinataire: 'temoin@client-6a4e.test', objet, corps });
+      assert.deepEqual(lu.body.proposition, { destinataire: 'temoin@client-6a4e.test', objet, corps, microsoft365: MICROSOFT_365_PROPOSE });
       verifierSansMontantNiHeure(lu.body.proposition.objet, 'objet proposé');
       verifierSansMontantNiHeure(lu.body.proposition.corps, 'texte proposé');
       const { res, ligne } = await enregistre(() => envoyer(chantier.id, 'temoin@client-6a4e.test'), 'envoi du chantier témoin');
@@ -859,7 +864,8 @@ if (!TEST_DATABASE_URL) {
       assert.equal(contrainte?.definition, 'CHECK ((num_nonnulls("devisId", "factureId", "interventionId", "contratMaintenanceId", "chantierId") = 1))');
       const [canal] = await prisma.$queryRaw`SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint WHERE conrelid = '"EnvoiDocument"'::regclass AND conname = 'EnvoiDocument_canal'`;
       assert.match(canal?.definition ?? '', /'MESSAGERIE'/);
-      assert.doesNotMatch(canal?.definition ?? '', /MICROSOFT|365/);
+      // Lot 6b-1b (cadrage du lot 6b, V3 bis, point 1) : le canal admet aussi MICROSOFT_365, et aucun autre.
+      assert.deepEqual([...(canal?.definition ?? '').matchAll(/'([^']*)'/g)].map((litteral) => litteral[1]).sort(), ['MESSAGERIE', 'MICROSOFT_365'], canal?.definition);
       const index = (await prisma.$queryRaw`SELECT indexdef FROM pg_indexes WHERE tablename = 'EnvoiDocument'`).map((ligne) => ligne.indexdef.replace(/^.* USING btree /, ''));
       for (const colonnes of ['("chantierId", "createdAt")', '("interventionId", "createdAt")', '("contratMaintenanceId", "createdAt")', '("devisId", "createdAt")', '("factureId", "createdAt")']) {
         assert.ok(index.includes(colonnes), `index ${colonnes} absent : ${index.join(' ; ')}`);
@@ -883,7 +889,9 @@ if (!TEST_DATABASE_URL) {
         [{ chantierId: chantier.id, contratMaintenanceId: contrat.id }, 'EnvoiDocument_un_document'],
         [{ chantierId: chantier.id, devisId: devis.id, factureId, interventionId: intervention.id, contratMaintenanceId: contrat.id }, 'EnvoiDocument_un_document'],
         [{ interventionId: intervention.id, contratMaintenanceId: contrat.id }, 'EnvoiDocument_un_document'],
-        [{ chantierId: chantier.id, canal: 'MICROSOFT_365' }, 'EnvoiDocument_canal'],
+        // Lot 6b-1b (cadrage du lot 6b, V3 bis, point 1) : MICROSOFT_365 est désormais un canal admis ; un canal
+        // réellement inconnu reste refusé.
+        [{ chantierId: chantier.id, canal: 'COURRIER' }, 'EnvoiDocument_canal'],
         [{ chantierId: chantier.id, canal: 'messagerie' }, 'EnvoiDocument_canal'],
       ]) await assert.rejects(inserer(donnees), new RegExp(`violates check constraint \\\\?"${nom}\\\\?"`), JSON.stringify(donnees));
       assert.equal(await prisma.envoiDocument.count(), avant, 'aucune ligne refusée n’est écrite');
@@ -944,7 +952,8 @@ if (!TEST_DATABASE_URL) {
         const toutes = readdirSync(join(dossierPrisma, 'migrations')).filter((nom) => nom !== 'migration_lock.toml').sort();
         assert.ok(toutes.includes(DERNIERE_MIGRATION_MAIN), 'dernière migration de main absente');
         const deMain = toutes.filter((nom) => nom <= DERNIERE_MIGRATION_MAIN);
-        const duLot = toutes.filter((nom) => nom > DERNIERE_MIGRATION_MAIN);
+        // Les migrations des lots suivants (6b-1b et après) ne sont pas rejouées ici : la base s'arrête à celle du lot.
+        const duLot = toutes.filter((nom) => nom > DERNIERE_MIGRATION_MAIN && nom <= MIGRATION_DU_LOT);
         assert.deepEqual(duLot, [MIGRATION_DU_LOT], 'migration du lot');
         for (const nom of deMain) cpSync(join(dossierPrisma, 'migrations', nom), join(migrations, nom), { recursive: true });
         const deployer = () => execFileSync(binairePrisma, ['migrate', 'deploy', '--schema', schema], {

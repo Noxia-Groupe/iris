@@ -7,7 +7,7 @@ export interface Parametres {
   margeCommercialeActive: boolean; planningActif: boolean; tauxAcompteDefaut: number; seuilMargeFaible: number | null; joursSansSaisie: number | null;
   rentabiliteConducteur: boolean; rentabiliteHierarchie: boolean; rentabiliteDirecteurs: boolean;
   journalConservationJours: number; anticipationVisitesJours: number | null; pasTempsPasseMinutes: number | null;
-  tempsMinimumMinutes: number;
+  tempsMinimumMinutes: number; modeEnvoi: string;
 }
 
 // Réglage unique (singleton) créé à sa première lecture. Avec un `update` vide, Prisma

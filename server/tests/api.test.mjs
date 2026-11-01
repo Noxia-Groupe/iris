@@ -17646,9 +17646,14 @@ if (!TEST_DATABASE_URL) {
     const entete = (utilisateur) => ({ Authorization: `Bearer ${jwt.sign({ id: utilisateur.id }, process.env.JWT_SECRET)}` });
     const SOCIETE = { raisonSociale: 'TEST Émetteur envoi A', nomCommercial: '', siret: '55555555500055', adresse: '5 rue de l’Envoi', codePostal: '14000', ville: 'Caen' };
     const EMAILS = ['envoi6a3.commercial@iris.test', 'envoi6a3.technicien@iris.test', 'envoi6a3.lecteur@iris.test', 'envoi6a3.directeur@iris.test', 'envoi6a3.sansnom@iris.test'];
-    const CHAMPS_ENVOI = ['auteurNom', 'canal', 'createdAt', 'destinataire', 'id', 'objet'];
+    // Lot 6b-1b (cadrage, V3 bis, point 2) : chaque envoi exposé porte aussi son expéditeur, nul pour la messagerie.
+    const CHAMPS_ENVOI = ['auteurNom', 'canal', 'createdAt', 'destinataire', 'expediteur', 'id', 'objet'];
     const REFUS_DESTINATAIRE = 'Adresse du destinataire invalide : indiquez une seule adresse électronique, de la forme nom@domaine.fr.';
     const corpsAttendu = (joint, raisonSociale) => `Bonjour,\n\nVeuillez trouver ci-joint ${joint}.\n\nCordialement,\n${raisonSociale}`;
+    // Lot 6b-1b (cadrage, V3 bis, point 3) : la proposition dit si l'envoi par Microsoft 365 est possible. Il ne
+    // l'est pas ici : la connexion Microsoft n'est pas configurée dans l'environnement des tests (AZURE_TENANT_ID et
+    // AZURE_CLIENT_ID absents, comme en CI) ; le mode d'envoi garde sa valeur par défaut, MICROSOFT_365.
+    const MICROSOFT_365_PROPOSE = false;
     const definirSociete = async (champs) => {
       const res = await request(app).put('/api/company').set(admin()).send(champs);
       assert.equal(res.status, 200, JSON.stringify(res.body));
@@ -17788,7 +17793,7 @@ if (!TEST_DATABASE_URL) {
       const lu = await lire(`devis/${devis.id}`);
       assert.equal(lu.status, 200, JSON.stringify(lu.body));
       assert.deepEqual(lu.body, {
-        proposition: { destinataire: '', objet: `Devis ${devis.numero} version 1 – TEST Émetteur envoi A`, corps: corpsAttendu(`notre devis ${devis.numero} (version 1)`, 'TEST Émetteur envoi A') },
+        proposition: { destinataire: '', objet: `Devis ${devis.numero} version 1 – TEST Émetteur envoi A`, corps: corpsAttendu(`notre devis ${devis.numero} (version 1)`, 'TEST Émetteur envoi A'), microsoft365: MICROSOFT_365_PROPOSE },
         envois: [],
       });
       const signe = await creerDevis(client.id, 'TEST Envoi du devis signé');
@@ -17797,7 +17802,7 @@ if (!TEST_DATABASE_URL) {
         await definirSociete({ raisonSociale: '  TEST Émetteur envoi renommé  ' });
         const objetSigne = `Devis ${signe.numero} version 1 – TEST Émetteur envoi A`;
         const corpsSigne = corpsAttendu(`notre devis ${signe.numero} (version 1)`, 'TEST Émetteur envoi A');
-        assert.deepEqual((await lire(`devis/${signe.id}`)).body.proposition, { destinataire: '', objet: objetSigne, corps: corpsSigne });
+        assert.deepEqual((await lire(`devis/${signe.id}`)).body.proposition, { destinataire: '', objet: objetSigne, corps: corpsSigne, microsoft365: MICROSOFT_365_PROPOSE });
         const envoi = await envoyer(`devis/${signe.id}`, 'client@envoi.test');
         assert.equal(envoi.status, 201, JSON.stringify(envoi.body));
         assert.equal(envoi.body.objet, objetSigne);
@@ -17819,7 +17824,7 @@ if (!TEST_DATABASE_URL) {
         assert.equal(revision.status, 201, JSON.stringify(revision.body));
         assert.deepEqual((await lire(`devis/${revision.body.id}`)).body.proposition, {
           destinataire: '', objet: `Devis ${signe.numero} version 2 – TEST Émetteur envoi renommé`,
-          corps: corpsAttendu(`notre devis ${signe.numero} (version 2)`, 'TEST Émetteur envoi renommé'),
+          corps: corpsAttendu(`notre devis ${signe.numero} (version 2)`, 'TEST Émetteur envoi renommé'), microsoft365: MICROSOFT_365_PROPOSE,
         });
         const envoiRevision = await envoyer(`devis/${revision.body.id}`, 'client@envoi.test');
         assert.equal(envoiRevision.status, 201, JSON.stringify(envoiRevision.body));
@@ -17839,12 +17844,12 @@ if (!TEST_DATABASE_URL) {
         const lu = await lire(`factures/${facture.id}`);
         assert.equal(lu.status, 200, JSON.stringify(lu.body));
         assert.deepEqual(lu.body, {
-          proposition: { destinataire: 'compta@client-envoi.test', objet: `Facture ${facture.numero} – TEST Émetteur envoi A`, corps: corpsAttendu(`notre facture ${facture.numero}`, 'TEST Émetteur envoi A') },
+          proposition: { destinataire: 'compta@client-envoi.test', objet: `Facture ${facture.numero} – TEST Émetteur envoi A`, corps: corpsAttendu(`notre facture ${facture.numero}`, 'TEST Émetteur envoi A'), microsoft365: MICROSOFT_365_PROPOSE },
           envois: [],
         });
         const luAvoir = await lire(`factures/${avoir.body.id}`);
         assert.deepEqual(luAvoir.body.proposition, {
-          destinataire: 'compta@client-envoi.test', objet: `Avoir ${avoir.body.numero} – TEST Émetteur envoi A`, corps: corpsAttendu(`notre avoir ${avoir.body.numero}`, 'TEST Émetteur envoi A'),
+          destinataire: 'compta@client-envoi.test', objet: `Avoir ${avoir.body.numero} – TEST Émetteur envoi A`, corps: corpsAttendu(`notre avoir ${avoir.body.numero}`, 'TEST Émetteur envoi A'), microsoft365: MICROSOFT_365_PROPOSE,
         });
         for (const [piece, objet] of [[facture, lu.body.proposition.objet], [avoir.body, luAvoir.body.proposition.objet]]) {
           const envoi = await envoyer(`factures/${piece.id}`, 'compta@client-envoi.test');
@@ -18138,7 +18143,9 @@ if (!TEST_DATABASE_URL) {
       for (const [donnees, contrainte] of [
         [{ devisId: null }, 'EnvoiDocument_un_document'],
         [{ factureId: facture.id }, 'EnvoiDocument_un_document'],
-        [{ canal: 'MICROSOFT_365' }, 'EnvoiDocument_canal'],
+        // Lot 6b-1b (cadrage, V3 bis, point 1) : MICROSOFT_365 est désormais un canal admis ; un canal réellement
+        // inconnu reste refusé.
+        [{ canal: 'COURRIER' }, 'EnvoiDocument_canal'],
         [{ canal: 'messagerie' }, 'EnvoiDocument_canal'],
         [{ destinataire: '   ' }, 'EnvoiDocument_destinataire_renseigne'],
         [{ objet: '' }, 'EnvoiDocument_objet_renseigne'],

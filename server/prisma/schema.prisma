@@ -415,6 +415,12 @@ model Parametres {
   // administrateur, et journalisé. Chaque nouveau devis au temps passé fige sa valeur
   // (cf. Devis.tempsMinimumMinutes).
   tempsMinimumMinutes      Int      @default(60)
+  // Mode d'envoi des documents (lot 6b-1b ; décision A10 du 16-10-2026 : « mode d'envoi choisi dans les
+  // paramètres généraux, Microsoft 365 par défaut ») : MICROSOFT_365 (par défaut) ou MESSAGERIE (CHECK
+  // en base). En MESSAGERIE, l'envoi par Microsoft 365 est refusé ; la messagerie reste toujours ouverte.
+  // Réglé par le super administrateur seul, avec les modules (PUT /api/modules ; choix le plus
+  // restrictif, à confirmer), et journalisé.
+  modeEnvoi                String   @default("MICROSOFT_365")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -814,15 +820,20 @@ model EcritureFacture {
   @@index([factureId])
 }
 
-// Journal des envois d'un document (lots 6a-3, 6a-4d et 6a-4e, choix par défaut, à confirmer) : chaque
-// envoi préparé depuis Iris, aujourd'hui par la messagerie de l'utilisateur (lien mailto, PDF joint à
-// la main). Iris ne sait pas si le courriel est parti : une ligne dit qu'un envoi a été préparé, à qui,
-// sous quel objet et par qui. En ajout seul, garanti en base (migration 20261023120000) : ni
-// modification, ni suppression, ni vidage ; horodatage imposé par la base. Exactement un document :
-// devis ou facture (avoir compris), depuis le lot 6a-3 ; compte rendu d'une intervention ou contrat
-// de maintenance, depuis le lot 6a-4d (migration 20261031120000) ; rapport de chantier remis au
-// client, depuis le lot 6a-4e (migration 20261031200000). Le canal MICROSOFT_365 viendra avec le
-// lot 6b.
+// Journal des envois d'un document (lots 6a-3, 6a-4d, 6a-4e et 6b-1b, choix par défaut, à confirmer),
+// par l'un de deux canaux :
+//  - MESSAGERIE : l'envoi préparé par la messagerie de l'utilisateur (lien mailto, PDF joint à la main).
+//    Iris ne sait pas si le courriel est parti : la ligne dit qu'un envoi a été préparé, à qui, sous
+//    quel objet et par qui ;
+//  - MICROSOFT_365 (lot 6b-1b, migration 20261101120000) : l'envoi fait par Iris depuis la boîte
+//    Microsoft de l'utilisateur (Microsoft Graph, POST /me/sendMail, PDF produit par Iris en pièce
+//    jointe). La ligne s'écrit après l'acceptation de Microsoft (202), avec l'expéditeur, l'empreinte
+//    du PDF et le texte envoyé ; son identifiant est celui de l'en-tête x-iris-envoi du courriel.
+// En ajout seul, garanti en base (migration 20261023120000) : ni modification, ni suppression, ni
+// vidage ; horodatage imposé par la base. Exactement un document : devis ou facture (avoir compris),
+// depuis le lot 6a-3 ; compte rendu d'une intervention ou contrat de maintenance, depuis le lot 6a-4d
+// (migration 20261031120000) ; rapport de chantier remis au client, depuis le lot 6a-4e (migration
+// 20261031200000).
 model EnvoiDocument {
   id                   String              @id @default(uuid())
   devisId              String?
@@ -838,9 +849,17 @@ model EnvoiDocument {
   // avec les comptes rendus de ses interventions non annulées.
   chantierId           String?
   chantier             Chantier?           @relation(fields: [chantierId], references: [id], onDelete: Restrict)
-  canal                String // MESSAGERIE
+  canal                String // MESSAGERIE | MICROSOFT_365
   destinataire         String
   objet                String
+  // Envoi par Microsoft 365 seulement (lot 6b-1b) : exigés pour ce canal, vides pour la messagerie
+  // (contraintes en base). L'adresse de la boîte d'envoi, contrôlée avant l'envoi (celle du compte Iris
+  // de la session) ; le SHA-256 du PDF joint, en hexadécimal minuscule, qui le reconnaît sans en garder
+  // de copie ; le texte envoyé, qu'Iris connaît exactement puisqu'il l'envoie lui-même. Le jeton
+  // Microsoft de l'utilisateur n'est jamais gardé.
+  expediteur           String?
+  empreintePdf         String?
+  corps                String?
   // Compte qui a préparé l'envoi, sans clé étrangère (comme JournalFacture.acteurId), et son nom
   // copié à l'enregistrement : le journal se lit même si le compte est renommé ou supprimé.
   auteurId             String
