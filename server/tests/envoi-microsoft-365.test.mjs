@@ -366,12 +366,12 @@ if (!TEST_DATABASE_URL) {
     // la route « PDF » hors CreationDate et /ID ; ligne du journal (canal, expéditeur, empreinte égale au SHA-256 du PDF
     // reçu, texte, auteur, horodatage de la base, identifiant égal à x-iris-envoi) ; seule cette ligne est écrite,
     // avec, pour un devis brouillon, son passage « envoyé » ; le jeton n'est jamais rendu ; la lecture rend l'envoi.
-    const envoiAccepte = async ({ nature, id, destinataire, saisi = destinataire, objet, corps, compte = secours, auth = admin(), jeton, adresse = compte.email, statutDevis, pdfAttendu, tablesModifiees = [], contexte }) => {
+    const envoiAccepte = async ({ nature, id, destinataire, saisi = destinataire, objet, corps, compte = secours, auth = admin(), jeton, adresse = compte.email, statutDevis, pdfAttendu, tablesModifiees = [], champsEnPlus, contexte }) => {
       const pdf = pdfAttendu ?? await lirePdf(nature, id);
       graph.reinitialiser();
       const [{ debut }] = await prisma.$queryRaw`SELECT now() AS debut`;
       const avant = await etatBase();
-      const res = await envoyer(nature, id, saisi, { auth, jeton });
+      const res = await envoyer(nature, id, saisi, { auth, jeton, ...(champsEnPlus ? { corps: { destinataire: saisi, canal: 'MICROSOFT_365', ...champsEnPlus } } : {}) });
       assert.equal(res.status, 201, `${contexte} : ${res.status} ${JSON.stringify(res.body)}`);
       const apres = await etatBase();
       for (const table of TABLES) {
@@ -711,6 +711,69 @@ if (!TEST_DATABASE_URL) {
           assert.doesNotMatch(plat, /TEST Société changée|72727272700072|renommé après|Déménagement|TEST mentions 6b1b v2/u, plat);
         }
       });
+    });
+
+    // Facture réglée, facture annulée et son avoir total : chacune part avec le PDF de la route « PDF », mention de
+    // son statut comprise (« Facture réglée. », « FACTURE ANNULÉE — ce document ne vaut pas justificatif de créance. »),
+    // comme par la messagerie, qui envoie aussi une facture annulée (lot 6a-3). Le cadrage note qu'« une facture se
+    // réimprime avec sa mention « réglée » ou « annulée » » (« Journal », B6). Lectures écartées : un PDF « figé à
+    // l'émission » sans la mention du statut (une créance annulée imprimée comme due) ; une facture annulée refusée par
+    // Microsoft 365 seulement.
+    test('facture réglée, facture annulée et avoir total : le PDF reçu par Graph est celui de la route « PDF », avec la mention du statut', async () => {
+      const s = suffixe();
+      const client = await creerClient(`TEST Client des statuts Microsoft 365 ${s}`, { email: 'statuts@client-6b1b.test' });
+      const reglee = await creerEmise(client.id, `TEST Facture réglée 6b1b ${s}`);
+      const annulee = await creerEmise(client.id, `TEST Facture annulée 6b1b ${s}`);
+      assert.deepEqual([reglee.totalTtc, annulee.totalTtc], [120, 120]);
+      await ok(appeler('post', '/reglements', { clientId: client.id, dateReglement: aujourdhui(), montant: 120, moyen: 'VIREMENT', affectations: [{ factureId: reglee.id, montant: 120 }] }), 201);
+      const annulation = await ok(appeler('post', `/factures/${annulee.id}/annuler`));
+      const avoirTotal = annulation.avoir;
+      assert.deepEqual(
+        (await prisma.facture.findMany({ where: { id: { in: [reglee.id, annulee.id, avoirTotal.id] } }, select: { id: true, statut: true } })).map(({ id, statut }) => [id, statut]).sort(),
+        [[reglee.id, 'REGLEE'], [annulee.id, 'ANNULEE'], [avoirTotal.id, 'EMISE']].sort(),
+      );
+      for (const [piece, attendus, ecartes] of [
+        [reglee, ['Facture réglée.', 'Total TTC : 120,00 €'], /FACTURE ANNULÉE/u],
+        [{ ...annulee, statut: 'ANNULEE' }, ['FACTURE ANNULÉE — ce document ne vaut pas justificatif de créance.', 'Total TTC : 120,00 €'], /Facture réglée/u],
+        [avoirTotal, [`Facture d’origine : ${annulee.numero}`, 'Total TTC : 120,00 €'], /FACTURE ANNULÉE|Facture réglée/u],
+      ]) {
+        const pdf = await lirePdf('facture', piece.id);
+        const { pdfRecu } = await envoiAccepte({
+          nature: 'facture', id: piece.id, destinataire: 'statuts@client-6b1b.test', ...TEXTES.facture(piece, SOCIETE.raisonSociale),
+          jeton: nouveauJeton(secours.email), pdfAttendu: pdf, contexte: `${piece.type} ${piece.numero} (${piece.statut})`,
+        });
+        const plat = aplatir(await texteDuPdf(pdfRecu));
+        for (const attendu of attendus) assert.ok(plat.includes(attendu), `${piece.numero} : absent du PDF envoyé « ${attendu} »\n${plat}`);
+        assert.doesNotMatch(plat, ecartes, plat);
+      }
+    });
+
+    // Cadrage : « Le serveur produit le PDF lui-même […] : jamais un fichier fourni par le navigateur » ; l'objet et le
+    // texte « partent sans retouche possible ». Un corps de requête qui porte un PDF (celui d'une autre facture, à
+    // d'autres montants), un objet, un texte, un expéditeur ou une empreinte est ignoré : le courriel et le journal
+    // portent ce qu'Iris produit. Lectures écartées : la pièce jointe, l'objet ou le texte repris de l'écran, comme
+    // dans la messagerie ; l'empreinte ou l'expéditeur déclarés par l'écran.
+    test('corps de la requête : un PDF, un objet, un texte, un expéditeur ou une empreinte fournis par l’écran sont ignorés', async () => {
+      const s = suffixe();
+      const client = await creerClient(`TEST Client des champs ignorés ${s}`, { email: 'ignores@client-6b1b.test' });
+      const facture = await emettre((await creerBrouillonFacture(client.id, [{ designation: `TEST Facture des champs ignorés ${s}`, quantite: 3, prixUnitaireHt: 33.33, tauxTva: 20 }], 'TEST champs ignorés 6b1b')).id);
+      assert.deepEqual([facture.totalHt, facture.totalTva, facture.totalTtc], [99.99, 20, 119.99]);
+      const autre = await lirePdf('facture', f.facture.id);
+      const champsEnPlus = {
+        pdf: autre.octets.toString('base64'), contentBytes: autre.octets.toString('base64'), attachments: [{ contentBytes: autre.octets.toString('base64') }],
+        nomFichier: 'TEST-forge.pdf', objet: 'TEST Objet saisi à l’écran', corps: 'TEST Texte saisi à l’écran : 1 000,00 € et 12 h', expediteur: 'autre.personne@iris.test',
+        empreintePdf: '0'.repeat(64), saveToSentItems: false,
+      };
+      for (const [nature, id, document, destinataire] of [['facture', facture.id, facture, 'ignores@client-6b1b.test'], ['chantier', f.chantier.id, f.chantier, 'client@client-6b1b.test']]) {
+        const { pdfRecu } = await envoiAccepte({
+          nature, id, destinataire, ...TEXTES[nature](document, SOCIETE.raisonSociale), jeton: nouveauJeton(secours.email), champsEnPlus, contexte: `${nature}, champs fournis par l’écran`,
+        });
+        assert.notEqual(normaliser(pdfRecu), normaliser(autre.octets), `${nature} : le PDF fourni par l’écran est joint`);
+        if (nature === 'facture') {
+          const plat = aplatir(await texteDuPdf(pdfRecu));
+          for (const attendu of ['Total HT : 99,99 €', 'TVA 20 % sur 99,99 € : 20,00 €', 'Total TTC : 119,99 €']) assert.ok(plat.includes(attendu), `absent du PDF envoyé « ${attendu} »\n${plat}`);
+        }
+      }
     });
 
     // Compte rendu : envoyé par le conducteur titulaire du chantier (périmètre SAV, durcissement N1 de #406 : la lecture
