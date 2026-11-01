@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { apiFetch } from '../api';
 import { useCompanyTimezone } from '../companyTimezoneContext';
 import { companyDateInputValue, formatCompanyDateTime } from '../lib/dateFormatting';
-import { roleLabel } from '../roles';
+import { CHAMPS_JOURNAL, lisible } from '../lib/journalAdministration';
 
 // Journal des paramètres et des droits (lot (a), décision de Nelson du 13-10-2026) : qui a changé
 // quoi, avant et après, filtrable par date, type et auteur, avec export CSV. Le serveur ne renvoie
@@ -72,56 +72,7 @@ const ACTIONS_JOURNAL: Record<string, string> = {
 
 const FILTRES_VIDES: Filtres = { du: '', au: '', type: '', auteur: '' };
 
-// Libellés des champs journalisés ; un champ absent de la liste garde son nom technique.
-const CHAMPS_JOURNAL: Record<string, string> = {
-  role: 'Type de compte',
-  estCommercial: 'Aussi commercial',
-  accesFinance: 'Accès financier',
-  permissions: 'Permissions',
-  actif: 'Actif',
-  responsableHierarchique: 'Responsable hiérarchique',
-  ficheIntervenant: 'Fiche intervenant',
-  margeCommercialeActive: 'Marge commerciale',
-  tauxAcompteDefaut: 'Acompte par défaut (%)',
-  seuilMargeFaible: 'Seuil de marge faible (%)',
-  joursSansSaisie: 'Jours sans saisie',
-  anticipationVisitesJours: 'Anticipation des visites (jours)',
-  pasTempsPasseMinutes: 'Pas du temps passé (minutes)',
-  tempsMinimumMinutes: 'Temps minimum facturé (minutes)',
-  rentabiliteConducteur: 'Rentabilité : conducteur',
-  rentabiliteHierarchie: 'Rentabilité : hiérarchie',
-  rentabiliteDirecteurs: 'Rentabilité : directeurs',
-  planningActif: 'Planning',
-  suiviAdministratif: 'Prime de suivi administratif',
-  journalConservationJours: 'Conservation (jours)',
-  logoDocuments: 'Logo des documents',
-  estMainOeuvre: 'Main d’œuvre',
-  reference: 'Référence',
-  nom: 'Nom',
-  description: 'Description',
-  categorie: 'Catégorie',
-  tauxTva: 'TVA (%)',
-  prixVenteHt: 'Prix de vente HT à l’heure, hors contrat',
-  prixJourHorsContratHt: 'Prix de vente HT au forfait jour, hors contrat',
-  prixHeureSousContratHt: 'Prix de vente HT à l’heure, sous contrat',
-  prixJourSousContratHt: 'Prix de vente HT au forfait jour, sous contrat',
-  prixDemiJourneeHorsContratHt: 'Prix de vente HT à la demi-journée, hors contrat',
-  prixDemiJourneeSousContratHt: 'Prix de vente HT à la demi-journée, sous contrat',
-  heuresParJour: 'Heures par jour',
-  unite: 'Unité',
-  prixAchatHt: 'Prix d’achat HT',
-  dureeIndicativeMin: 'Durée indicative (min)',
-  mainOeuvre: 'Main d’œuvre',
-};
-
-function lisible(valeur: unknown, champ?: string): string {
-  if (champ === 'role' && typeof valeur === 'string') return roleLabel(valeur);
-  if (valeur === null || valeur === undefined || valeur === '') return '—';
-  if (typeof valeur === 'boolean') return valeur ? 'oui' : 'non';
-  if (Array.isArray(valeur)) return valeur.length ? valeur.map((v) => lisible(v)).join(', ') : 'aucune';
-  if (typeof valeur === 'object') return JSON.stringify(valeur);
-  return String(valeur);
-}
+// Libellés des champs journalisés et des valeurs (CHAMPS_JOURNAL, lisible) : lib/journalAdministration.ts.
 
 function Valeurs({ valeurs }: { valeurs: Record<string, unknown> | null }) {
   if (!valeurs || !Object.keys(valeurs).length) return <span className="text-gray-400">—</span>;

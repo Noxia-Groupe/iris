@@ -1,9 +1,12 @@
+import { ModeEnvoiDocuments } from './ModeEnvoiDocuments';
+
 export function AdminModules({ planningActif, modulesMessage, handleModulePlanning }: {
   planningActif: boolean | null;
   modulesMessage: string;
   handleModulePlanning: (actif: boolean) => void;
 }) {
   return (
+      <>
         <div className="card">
           <h2 className="mb-2 text-primary-dark">Modules de l'application</h2>
           <p className="text-sm text-muted mb-6">
@@ -61,5 +64,9 @@ export function AdminModules({ planningActif, modulesMessage, handleModulePlanni
             cet accès.
           </p>
         </div>
+
+        {/* Mode d'envoi des documents (lot 6b-2) : son propre bloc, avec son introduction. */}
+        <ModeEnvoiDocuments />
+      </>
   );
 }

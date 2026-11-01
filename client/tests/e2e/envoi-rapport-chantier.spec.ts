@@ -216,7 +216,7 @@ test('rapport de chantier : envoi préparé depuis la fiche, PDF téléchargé s
   const envois = await envoisDe(request, token, chantier.id);
   expect(envois).toHaveLength(1);
   expect(envois[0]).toMatchObject({ destinataire: principal, objet, auteurNom: auteur });
-  const liste = dialogue.getByRole('region', { name: 'Envois préparés' }).getByRole('listitem');
+  const liste = dialogue.getByRole('region', { name: 'Envois' }).getByRole('listitem');
   await expect(liste).toHaveText([`Envoi préparé le ${dateHeure(envois[0].createdAt, fuseauHoraire || 'Europe/Paris')} à ${principal} par ${auteur}`]);
   // Ni l'objet ni le texte ne portent de montant ni d'heures (nombres bornés : l'objet porte l'horodatage du nom).
   for (const [motif, libelle] of MONTANTS_ET_HEURES_INTERDITS) expect(`${objet}\n${corps}`, `écrit à tort : ${libelle}`).not.toMatch(motif);
@@ -228,7 +228,7 @@ test('rapport de chantier : envoi préparé depuis la fiche, PDF téléchargé s
   await dialogue.getByRole('button', { name: 'Fermer' }).click();
   await expect(dialogue).toHaveCount(0);
   await bouton.click();
-  await expect(dialogue.getByRole('region', { name: 'Envois préparés' }).getByRole('listitem')).toHaveCount(1);
+  await expect(dialogue.getByRole('region', { name: 'Envois' }).getByRole('listitem')).toHaveCount(1);
   await dialogue.getByRole('button', { name: 'Fermer' }).click();
   await expect(dialogue).toHaveCount(0);
 
@@ -348,7 +348,7 @@ test('à 375 px : le bouton tient dans l’écran ; la fenêtre défile, sans d�
   await expect(dialogue.getByRole('textbox', { name: 'Destinataire' })).toHaveValue(long);
   await pdfTelecharge(page, () => dialogue.getByRole('button', { name: 'Préparer l’envoi' }).click(), fichierRapport(nom));
   await expect(dialogue.getByRole('link', { name: 'Ouvrir la messagerie' })).toBeVisible();
-  await expect(dialogue.getByRole('region', { name: 'Envois préparés' }).getByRole('listitem')).toHaveCount(1);
+  await expect(dialogue.getByRole('region', { name: 'Envois' }).getByRole('listitem')).toHaveCount(1);
 
   // Aucun défilement horizontal du document ; la fenêtre et ses commandes dans la largeur de l'écran.
   expect(await page.evaluate(() => document.documentElement.scrollWidth), 'défilement horizontal du document').toBeLessThanOrEqual(375);
@@ -367,7 +367,7 @@ test('à 375 px : le bouton tient dans l’écran ; la fenêtre défile, sans d�
   expect(defilement!.deplace, 'la fenêtre défile').toBe(true);
   expect(defilement!.horsDeMain).toBe(true);
   // Défilée jusqu'en bas, le journal est atteint, et chaque commande tient dans la largeur.
-  const journal = dialogue.getByRole('region', { name: 'Envois préparés' }).getByRole('listitem').first();
+  const journal = dialogue.getByRole('region', { name: 'Envois' }).getByRole('listitem').first();
   await expect(journal).toBeInViewport();
   for (const element of [dialogue, dialogue.getByRole('link', { name: 'Ouvrir la messagerie' }), dialogue.getByRole('button', { name: 'Préparer l’envoi' }), dialogue.getByRole('button', { name: 'Fermer' }), journal]) {
     const cadre = await element.boundingBox();

@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { effacerCacheSociete } from '../lib/cacheSociete';
+import { viderCacheMicrosoft365 } from '../lib/microsoft365';
 
 // Page affichée lorsqu'un compte s'authentifie via SSO Microsoft mais ne figure pas
 // dans la liste blanche d'autorisation (géré par un administrateur dans l'onglet
@@ -11,6 +12,9 @@ const AccesRefuse = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     effacerCacheSociete();
+    // Cache MSAL de l'onglet, laissé par la connexion refusée (lot 6b-2), sans fermer la session
+    // Microsoft du navigateur.
+    viderCacheMicrosoft365();
     navigate('/login');
   };
 

@@ -2,6 +2,7 @@
 // En production, le Dockerfile injecte VITE_API_URL=/api (même origine, derrière nginx).
 // En développement, on cible /api et le proxy Vite (voir vite.config.ts) redirige vers le backend.
 import { effacerCacheSociete } from './lib/cacheSociete';
+import { viderCacheMicrosoft365 } from './lib/microsoft365';
 
 export const API_URL: string = import.meta.env.VITE_API_URL || '/api';
 
@@ -27,10 +28,13 @@ export function getToken(): string | null {
   return localStorage.getItem('token');
 }
 
+// Déconnexion : la session Iris, le cache local et le cache MSAL de l'onglet (lot 6b-2), sans fermer
+// la session Microsoft du navigateur.
 function logoutAndRedirect() {
   localStorage.removeItem('token');
   localStorage.removeItem('user');
   effacerCacheSociete();
+  viderCacheMicrosoft365();
   if (!window.location.pathname.startsWith('/login')) {
     window.location.href = '/login';
   }
