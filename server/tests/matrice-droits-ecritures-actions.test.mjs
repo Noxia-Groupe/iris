@@ -175,7 +175,7 @@ if (!TEST_DATABASE_URL) {
     // Refus du rôle PostgreSQL (exigerRoleReplication) : le premier test échoue avec son message, chacun des autres
     // échoue en le citant ; aucune base n'est créée. Jamais un SKIP.
     let refusRole = null;
-    const PREPARATION_INTERROMPUE = 'Préparation interrompue : le rôle PostgreSQL de TEST_DATABASE_URL ne peut pas poser session_replication_role (voir le test « rôle PostgreSQL »).';
+    const PREPARATION_INTERROMPUE = 'Préparation interrompue : le contrôle du rôle PostgreSQL de TEST_DATABASE_URL a échoué (voir le test « rôle PostgreSQL » : rôle sans session_replication_role, ou serveur injoignable).';
     const testPrepare = (titre, corps) => test(titre, async (t) => {
       if (refusRole) assert.fail(PREPARATION_INTERROMPUE);
       return corps(t);
@@ -436,8 +436,17 @@ if (!TEST_DATABASE_URL) {
       const cles = lignes.map((l) => l.split(SEPARATEUR).slice(0, 4).join(SEPARATEUR));
       assert.equal(new Set(cles).size, cles.length, 'chaque cas n’a qu’une ligne');
       assert.equal(lignes.length, Object.values(chiffres.parRoute).reduce((s, r) => s + r.cas, 0), 'une ligne par cas joué');
-      const avecMontant = lignes.filter((l) => /€|\b\d+[.,]\d{2}\b/.test(l));
-      assert.deepEqual(avecMontant, [], 'lignes qui portent un montant');
+      // Aucun montant (cadrage v3, §3, ligne D1a-5 : « Les montants restent hors de la référence »), quelle que soit sa
+      // forme (12.5, 150, 12,50 €) : un 2xx s'écrit par son code seul, suivi de « inchangé » ou des tables écrites ; hors
+      // de son code, un refus ne porte de nombre que pour compter des objets (« 7 écriture(s) ») ; ni la cible ni le
+      // contexte (nom du corps) n'en portent ; aucune ligne ne porte « € ».
+      const avecMontant = lignes.filter((l) => {
+        const [compte, , cible, contexte, reponse] = l.split(SEPARATEUR);
+        if (l.includes('€') || !COMPTES_JOUES.includes(compte) || /\d/.test(cible) || /\d/.test(contexte)) return true;
+        if (/^2\d\d /.test(reponse)) return !/^2\d\d (inchangé|écrit \([^()\d]+\))$/.test(reponse);
+        return /\d/.test(reponse.replace(/^\d{3} /, '').replace(/\b\d+ [^\s()]+\(s\)/g, ''));
+      });
+      assert.deepEqual(avecMontant, [], 'lignes qui portent un montant, ou un nombre hors du code de la réponse et des comptes d’objets d’un refus');
       t.diagnostic(`routes : ${ROUTES_B.length} (b) et ${ROUTES_MARQUEES.length} marquées ; comptes : ${COMPTES_JOUES.length}`);
       t.diagnostic(`cas : ${lignes.length} (en parallèle ${chiffres.casParalleles}, un à un ${chiffres.casUnAUn}) ; écrits : ${chiffres.casEcrits} ; remises : ${remise.remises} ; lots rejoués : ${chiffres.lotsRejoues.length ? chiffres.lotsRejoues.join(' ; ') : 'aucun'}`);
       for (const [route, r] of Object.entries(chiffres.parRoute)) t.diagnostic(`${route} : ${r.cibles} cible(s), ${r.cas} cas (${r.refuses} refusés à l’entrée, ${r.admis} admis)`);
@@ -509,8 +518,13 @@ if (!TEST_DATABASE_URL) {
       assert.ok(etatInitial.nombreDeclencheurs > 100 && etatInitial.lignesSchema > 500, `relevé du catalogue : ${etatInitial.nombreDeclencheurs} déclencheurs, ${etatInitial.lignesSchema} lignes de schéma`);
       // Sonde d'immutabilité, une dernière fois (elle tourne aussi après chaque remise).
       await remise.sondeImmutabilite('fin de la preuve');
-      // Refus de l'outil sur une autre base que la base jetable du fichier, avant toute écriture.
-      await assert.rejects(creerRemiseEnEtat({ url: TEST_DATABASE_URL, nomBase: base.nom, tables: ['Facture'], connexionApplication: appli.serveur.prisma, factureEmiseId: 'x' }), /Remise en état refusée : la connexion vise la base « [^»]+ », et non la base jetable/);
+      // Refus de l'outil sur une autre base que la base jetable du fichier, avant toute écriture. L'autre base est la
+      // base de maintenance du serveur (« postgres », que baseJetable ouvre déjà), et non celle de TEST_DATABASE_URL,
+      // que les autres fichiers emploient en même temps : si ce refus disparaissait, l'outil s'arrêterait sur une table
+      // absente (« table sans colonne »), avant tout instantané, au lieu de vider puis recopier « Facture » chez eux.
+      const autreBase = new URL(base.url);
+      autreBase.pathname = '/postgres';
+      await assert.rejects(creerRemiseEnEtat({ url: autreBase.toString(), nomBase: base.nom, tables: ['Facture'], connexionApplication: appli.serveur.prisma, factureEmiseId: 'x' }), /Remise en état refusée : la connexion vise la base « postgres », et non la base jetable/);
       await assert.rejects(creerRemiseEnEtat({ url: base.url, nomBase: 'iris_test', tables: ['Facture'], connexionApplication: appli.serveur.prisma, factureEmiseId: 'x' }), /n’est pas le nom d’une base jetable de la matrice/);
     });
   });

@@ -12,9 +12,10 @@
 //    transaction ;
 //  - après chaque remise, l'empreinte de toute la base, séquences comprises (last_value et is_called, note N4 de
 //    #428), est comparée à la référence ; un écart fait échouer le cas en nommant le compte, la route, la cible et les
-//    tables. Une sonde vérifie ensuite que le rôle de réplication n'est resté posé nulle part : la connexion de la
-//    remise est revenue à « origin », et un déclencheur d'immutabilité refuse toujours, par cette connexion comme par
-//    celle de l'application, de remettre en brouillon une facture émise (la modification est annulée dans tous les cas).
+//    tables. Une sonde vérifie ensuite que la connexion de la remise est revenue à « origin » (SHOW
+//    session_replication_role), et qu'un déclencheur d'immutabilité refuse toujours de remettre en brouillon une
+//    facture émise, par cette connexion et par une connexion de l'application (celle que son pool Prisma prête à la
+//    sonde, et non chacune des connexions du pool) ; la modification est annulée dans tous les cas.
 //
 // Garde-fous (avenant, section 1) :
 //  - une connexion pg dédiée, distincte de celles de l'application, jamais le client Prisma qu'elle emploie ;
@@ -41,8 +42,10 @@ export const SCHEMA_INSTANTANE = 'etat_reference_matrice';
 const NOM_BASE_JETABLE = /^iris_test_matrice_[a-z0-9]+_[0-9a-f]{12}$/;
 // Préfixe des clés de séquence dans l'empreinte (une table ne porte jamais d'espace dans son nom).
 const PREFIXE_SEQUENCE = 'séquence ';
-// Sonde d'immutabilité : remettre en brouillon une facture émise, refusé par le déclencheur
-// interdire_modification_origine_facture_emise (migration 20261018120000_factures_emises_figees).
+// Sonde d'immutabilité : remettre en brouillon une facture émise, refusé par le déclencheur de la fonction
+// interdire_modification_origine_facture_emise, dont la garde « ne redevient jamais brouillon » vient de la migration
+// 20261018120000_factures_emises_figees ; la fonction est redéfinie en dernier, avec le même message, par la migration
+// 20261022120000_identite_emetteur_figee.
 const REFUS_IMMUTABILITE = 'Une facture émise ne redevient jamais brouillon.';
 const SONDE_SQL = 'UPDATE "Facture" SET "statut" = \'BROUILLON\' WHERE "id" = $1 AND "statut" <> \'BROUILLON\'';
 const ANNULATION_SONDE = 'sonde annulée : aucune écriture conservée';
