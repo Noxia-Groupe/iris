@@ -102,23 +102,29 @@ export async function chargerApplication(base) {
 }
 
 // Appel HTTP réel, par node:http et un agent qui garde les connexions ouvertes. `jeton` : chaîne (en-tête
-// Bearer), ou null pour un appel sans session. Le corps est toujours envoyé en JSON pour une écriture (un objet
-// vide pour un « corps vide », cadrage §2.4) ; rien pour une lecture. Pourquoi pas `fetch` : sur les quelque
-// 11 000 appels de la matrice d'entrée, il coûte environ 20 % de processeur de plus (mesure du 01-11-2026), et la
-// CI partage ce processeur avec les autres fichiers de tests, que la matrice ralentit d'autant.
+// Bearer), ou null pour un appel sans session ; `autorisation` : en-tête Authorization donné tel quel, pour un en-tête
+// qui ne suit pas la forme « Bearer <jeton> » (matrice des clés d'intégration, D1a-2). Le corps est toujours envoyé
+// en JSON pour une écriture (un objet vide pour un « corps vide », cadrage §2.4) ; rien pour une lecture. Pourquoi
+// pas `fetch` : sur les quelque 11 000 appels de la matrice d'entrée, `fetch` coûte environ 25 % de processeur de
+// plus que node:http, qui en retire donc environ 20 % (mesures du 01-11-2026 : 41,4 et 43,3 s de processeur avec
+// `fetch`, de 33,5 à 34,3 s avec node:http) ; la CI partage ce processeur avec les autres fichiers de tests, que la
+// matrice ralentit d'autant.
 const agentHttp = new Agent({ keepAlive: true, maxSockets: 16 });
-export function appeler(adresse, methode, chemin, { jeton = null, corps, requete } = {}) {
+// Une route qui ne répond jamais fait échouer l'appel au lieu de suspendre le fichier (fetch abandonnait après 300 s).
+const DELAI_APPEL_MS = 60_000;
+export function appeler(adresse, methode, chemin, { jeton = null, autorisation = null, corps, requete } = {}) {
   const url = new URL(chemin, adresse);
   for (const [cle, valeur] of Object.entries(requete ?? {})) url.searchParams.set(cle, valeur);
   const entetes = {};
   if (jeton !== null) entetes.Authorization = `Bearer ${jeton}`;
+  if (autorisation !== null) entetes.Authorization = autorisation;
   const donnees = methode !== 'GET' ? Buffer.from(JSON.stringify(corps ?? {})) : null;
   if (donnees) {
     entetes['Content-Type'] = 'application/json';
     entetes['Content-Length'] = donnees.length;
   }
   return new Promise((ok, ko) => {
-    const requeteHttp = request(url, { method: methode, headers: entetes, agent: agentHttp }, (reponse) => {
+    const requeteHttp = request(url, { method: methode, headers: entetes, agent: agentHttp, timeout: DELAI_APPEL_MS }, (reponse) => {
       const type = reponse.headers['content-type'] ?? '';
       const json = type.includes('application/json');
       const morceaux = [];
@@ -135,6 +141,7 @@ export function appeler(adresse, methode, chemin, { jeton = null, corps, requete
       });
     });
     requeteHttp.on('error', ko);
+    requeteHttp.on('timeout', () => requeteHttp.destroy(new Error(`${methode} ${chemin} : aucune réponse en ${DELAI_APPEL_MS / 1000} s`)));
     if (donnees) requeteHttp.write(donnees);
     requeteHttp.end();
   });
@@ -162,8 +169,16 @@ export async function tablesDeLaBase(prisma) {
   const lignes = await prisma.$queryRaw`SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE' AND table_name <> '_prisma_migrations' ORDER BY table_name`;
   return lignes.map((ligne) => ligne.table_name);
 }
-export async function empreinteBase(prisma, tables) {
-  const colonnes = tables.map((table) => `(SELECT count(*)::text || ':' || coalesce(md5(string_agg(row_to_json(t)::text, '|' ORDER BY row_to_json(t)::text)), '') FROM "${table}" t) AS "${table}"`);
+// `colonnesIgnorees` (table → noms de colonnes) retire des colonnes du contenu résumé : la matrice des clés
+// d'intégration (D1a-2) en retire la dernière utilisation d'une clé, écrite sans attente par la porte /api/v1, et la
+// contrôle à part, clé par clé (voir matrice-droits-cles.test.mjs). Sans elle, l'empreinte est celle de D1a-1.
+export async function empreinteBase(prisma, tables, { colonnesIgnorees = {} } = {}) {
+  const contenu = (table) => {
+    const ignorees = colonnesIgnorees[table] ?? [];
+    for (const colonne of ignorees) assert.match(colonne, /^[A-Za-z]+$/, `colonne ignorée : ${colonne}`);
+    return ignorees.length ? `(row_to_json(t)::jsonb${ignorees.map((colonne) => ` - '${colonne}'`).join('')})::text` : 'row_to_json(t)::text';
+  };
+  const colonnes = tables.map((table) => `(SELECT count(*)::text || ':' || coalesce(md5(string_agg(${contenu(table)}, '|' ORDER BY ${contenu(table)})), '') FROM "${table}" t) AS "${table}"`);
   const [ligne] = await prisma.$queryRawUnsafe(`SELECT ${colonnes.join(', ')}`);
   return ligne;
 }

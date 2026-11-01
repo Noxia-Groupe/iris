@@ -12,6 +12,7 @@
 // cible des écritures de la famille (b) (cadrage §2.4) et des refus à l'authentification.
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { SANS_CIBLE } from './outils.mjs';
 
 export const INEXISTANT = 'inexistant';
 // Identifiant de forme valide (UUID v4), absent de la base : tiré une fois par exécution.
@@ -230,6 +231,10 @@ export const FAMILLES = {
     cibles: [
       C('heures-tech-intervention-affectee', 'heures de TECH sur intervention-affectee-tech', { TECH: 'auteur, affecté', RESP: 'chantier lié dans sa branche' }),
       C('heures-tech-sous-intervention-autre', 'heures de TECH, sous intervention-autre (couple incohérent)'),
+      // Matériel (type « achats ») : sa correction est réservée à l'encadrement, celle des heures au technicien
+      // affecté (interventions/routes.ts) ; la cible porte son type de coût, qui remplace la valeur fixe.
+      C('materiel-intervention-chantier-ct', 'matériel de intervention-chantier-ct (type achats)', { CT: 'titulaire du chantier lié' }),
+      C('materiel-intervention-affectee', 'matériel de intervention-affectee-tech (type achats)', { TECH: 'affecté', RESP: 'chantier lié dans sa branche' }),
       C(INEXISTANT, 'intervention-affectee-tech et coût absent', { TECH: 'affecté' }),
     ],
   },
@@ -252,6 +257,35 @@ export function cibleDe(famille, nom) {
   const cible = FAMILLES[famille]?.cibles.find((c) => c.nom === nom);
   assert.ok(cible, `cible inconnue : ${famille} / ${nom}`);
   return cible;
+}
+
+// Chemin d'une route pour une cible : chaque paramètre de dossier reçoit l'identifiant de la cible, chaque autre
+// paramètre sa valeur fixe (cadrage §2.3). Partagé par les matrices des sessions (D1a-1) et des clés (D1a-2).
+export function cheminPour(chemin, famille, cible) {
+  return chemin.replace(/:([A-Za-z]+)/g, (_, nom) => {
+    if (famille && cible) {
+      const ids = cible.ids;
+      if (nom === 'coutId') return ids.coutId;
+      // Type de coût porté par la cible (matériel) ; sinon, la valeur fixe (heures).
+      if (nom === 'type' && ids.type) return ids.type;
+      if (nom === 'clientId') return ids.clientId ?? ids.id;
+      if (nom === 'id' || nom === 'rapportId') return ids.id;
+    }
+    assert.ok(Object.hasOwn(VALEURS_FIXES, nom), `paramètre sans valeur : ${nom} (${chemin})`);
+    return VALEURS_FIXES[nom];
+  });
+}
+// Cible d'une route sans paramètre de dossier : « — », ou ses valeurs fixes (par exemple « cle=CLIENT »).
+export function cibleSansFamille(chemin) {
+  const noms = [...chemin.matchAll(/:([A-Za-z]+)/g)].map(([, nom]) => nom);
+  return noms.length ? noms.map((nom) => `${nom}=${VALEURS_FIXES[nom]}`).join(',') : SANS_CIBLE;
+}
+// Cibles jouées pour une route : toutes celles de sa famille (lecture, écriture (a)), la seule cible `inexistant`
+// (écriture (b)), aucune cible nommée pour une route sans paramètre de dossier.
+export function ciblesDe(definition, chemin) {
+  if (!definition.famille) return [{ nom: cibleSansFamille(chemin) }];
+  const cibles = FAMILLES[definition.famille].cibles;
+  return definition.ecriture === 'b' ? cibles.filter((c) => c.nom === INEXISTANT) : cibles;
 }
 
 // --- Construction ---
@@ -394,7 +428,7 @@ export async function construireJeuDeDonnees({ prisma, api, comptes, donnees }) 
   await placer(affecteeTech.id, aujourdhui, ficheTech.id);
   await demarrer(affecteeTech.id);
   const heuresTech = await api('TECH', 'POST', `/api/interventions/${affecteeTech.id}/couts/heures`, { date: aujourdhui, nbrHeures: 1.5 }, 201);
-  await api(SA, 'POST', `/api/interventions/${affecteeTech.id}/couts/achats`, { date: aujourdhui, montantHT: 30, description: 'TEST Matériel SAV', fournisseurId: fournisseur.id }, 201);
+  const materielAffectee = await api(SA, 'POST', `/api/interventions/${affecteeTech.id}/couts/achats`, { date: aujourdhui, montantHT: 30, description: 'TEST Matériel SAV', fournisseurId: fournisseur.id }, 201);
   const rapportNonSigne = await compteRendu(affecteeTech.id, 'TEST Compte rendu non signé.', 'TECH');
 
   const sansChantierBranche = await creerIntervention('TEST Curative sans chantier de la branche');
@@ -404,6 +438,7 @@ export async function construireJeuDeDonnees({ prisma, api, comptes, donnees }) 
 
   const chantierCt = await creerIntervention('TEST Intervention du chantier du conducteur', { chantierId: chantiers['chantier-ct'] });
   const projection = await placer(chantierCt.id, demain, ficheLibre.id);
+  const materielChantierCt = await api(SA, 'POST', `/api/interventions/${chantierCt.id}/couts/achats`, { date: aujourdhui, montantHT: 20, description: 'TEST Matériel SAV du chantier du conducteur', fournisseurId: fournisseur.id }, 201);
 
   const termineeSignee = await creerIntervention('TEST Intervention terminée et signée', { chantierId: chantiers['chantier-ct'] });
   await placer(termineeSignee.id, hier, ficheTech.id);
@@ -439,6 +474,8 @@ export async function construireJeuDeDonnees({ prisma, api, comptes, donnees }) 
   fixer('compte-rendu', 'rapport-cloture-motif', { id: rapportMotif.id });
   fixer('cout-sav', 'heures-tech-intervention-affectee', { id: affecteeTech.id, coutId: heuresTech.id });
   fixer('cout-sav', 'heures-tech-sous-intervention-autre', { id: autre.id, coutId: heuresTech.id });
+  fixer('cout-sav', 'materiel-intervention-chantier-ct', { id: chantierCt.id, coutId: materielChantierCt.id, type: 'achats' });
+  fixer('cout-sav', 'materiel-intervention-affectee', { id: affecteeTech.id, coutId: materielAffectee.id, type: 'achats' });
 
   // Planning : type, événement libre, affectation de chantier ; la projection vient du placement ci-dessus.
   const type = await api(SA, 'POST', '/api/planning/types', { nom: 'TEST Type matrice', couleur: '#123456' }, 201);

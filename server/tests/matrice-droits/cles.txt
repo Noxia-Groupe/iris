@@ -1,0 +1,1397 @@
+AC | DELETE /api/v1/catalogue/:family/:id | inexistant | défaut | 401 « Clé API Iris requise »
+AC | DELETE /api/v1/clients/:id | inexistant | défaut | 401 « Clé API Iris requise »
+AC | GET /api/v1/achats | — | défaut | 401 « Clé API Iris requise »
+AC | GET /api/v1/catalogue/:family | family=prestations | défaut | 401 « Clé API Iris requise »
+AC | GET /api/v1/catalogue/categories | — | défaut | 401 « Clé API Iris requise »
+AC | GET /api/v1/chantiers | — | défaut | 401 « Clé API Iris requise »
+AC | GET /api/v1/clients | — | défaut | 401 « Clé API Iris requise »
+AC | GET /api/v1/clients/:clientId/equipements | inexistant | défaut | 401 « Clé API Iris requise »
+AC | GET /api/v1/clients/:id | inexistant | défaut | 401 « Clé API Iris requise »
+AC | GET /api/v1/company | — | défaut | 401 « Clé API Iris requise »
+AC | GET /api/v1/devis | — | défaut | 401 « Clé API Iris requise »
+AC | GET /api/v1/heures | — | défaut | 401 « Clé API Iris requise »
+AC | PATCH /api/v1/devis/:id | inexistant | défaut | 401 « Clé API Iris requise »
+AC | POST /api/v1/catalogue/:family | family=prestations | défaut | 401 « Clé API Iris requise »
+AC | POST /api/v1/catalogue/categories | — | défaut | 401 « Clé API Iris requise »
+AC | POST /api/v1/clients | — | défaut | 401 « Clé API Iris requise »
+AC | POST /api/v1/clients/:clientId/contacts | inexistant | défaut | 401 « Clé API Iris requise »
+AC | POST /api/v1/clients/:clientId/equipements | inexistant | défaut | 401 « Clé API Iris requise »
+AC | POST /api/v1/clients/:clientId/equipements/:id/archiver | inexistant | défaut | 401 « Clé API Iris requise »
+AC | POST /api/v1/clients/:clientId/sites | inexistant | défaut | 401 « Clé API Iris requise »
+AC | POST /api/v1/devis | — | défaut | 401 « Clé API Iris requise »
+AC | POST /api/v1/devis/:id/convertir | inexistant | défaut | 401 « Clé API Iris requise »
+AC | POST /api/v1/devis/:id/revisions | inexistant | défaut | 401 « Clé API Iris requise »
+AC | PUT /api/v1/catalogue/:family/:id | inexistant | défaut | 401 « Clé API Iris requise »
+AC | PUT /api/v1/clients/:clientId/contacts/:id | inexistant | défaut | 401 « Clé API Iris requise »
+AC | PUT /api/v1/clients/:clientId/sites/:id | inexistant | défaut | 401 « Clé API Iris requise »
+AC | PUT /api/v1/clients/:id | inexistant | défaut | 401 « Clé API Iris requise »
+AC | PUT /api/v1/devis/:id/statut | inexistant | défaut | 401 « Clé API Iris requise »
+AD | DELETE /api/v1/catalogue/:family/:id | inexistant | défaut | 401 « Clé API Iris requise »
+AD | DELETE /api/v1/clients/:id | inexistant | défaut | 401 « Clé API Iris requise »
+AD | GET /api/v1/achats | — | défaut | 401 « Clé API Iris requise »
+AD | GET /api/v1/catalogue/:family | family=prestations | défaut | 401 « Clé API Iris requise »
+AD | GET /api/v1/catalogue/categories | — | défaut | 401 « Clé API Iris requise »
+AD | GET /api/v1/chantiers | — | défaut | 401 « Clé API Iris requise »
+AD | GET /api/v1/clients | — | défaut | 401 « Clé API Iris requise »
+AD | GET /api/v1/clients/:clientId/equipements | inexistant | défaut | 401 « Clé API Iris requise »
+AD | GET /api/v1/clients/:id | inexistant | défaut | 401 « Clé API Iris requise »
+AD | GET /api/v1/company | — | défaut | 401 « Clé API Iris requise »
+AD | GET /api/v1/devis | — | défaut | 401 « Clé API Iris requise »
+AD | GET /api/v1/heures | — | défaut | 401 « Clé API Iris requise »
+AD | PATCH /api/v1/devis/:id | inexistant | défaut | 401 « Clé API Iris requise »
+AD | POST /api/v1/catalogue/:family | family=prestations | défaut | 401 « Clé API Iris requise »
+AD | POST /api/v1/catalogue/categories | — | défaut | 401 « Clé API Iris requise »
+AD | POST /api/v1/clients | — | défaut | 401 « Clé API Iris requise »
+AD | POST /api/v1/clients/:clientId/contacts | inexistant | défaut | 401 « Clé API Iris requise »
+AD | POST /api/v1/clients/:clientId/equipements | inexistant | défaut | 401 « Clé API Iris requise »
+AD | POST /api/v1/clients/:clientId/equipements/:id/archiver | inexistant | défaut | 401 « Clé API Iris requise »
+AD | POST /api/v1/clients/:clientId/sites | inexistant | défaut | 401 « Clé API Iris requise »
+AD | POST /api/v1/devis | — | défaut | 401 « Clé API Iris requise »
+AD | POST /api/v1/devis/:id/convertir | inexistant | défaut | 401 « Clé API Iris requise »
+AD | POST /api/v1/devis/:id/revisions | inexistant | défaut | 401 « Clé API Iris requise »
+AD | PUT /api/v1/catalogue/:family/:id | inexistant | défaut | 401 « Clé API Iris requise »
+AD | PUT /api/v1/clients/:clientId/contacts/:id | inexistant | défaut | 401 « Clé API Iris requise »
+AD | PUT /api/v1/clients/:clientId/sites/:id | inexistant | défaut | 401 « Clé API Iris requise »
+AD | PUT /api/v1/clients/:id | inexistant | défaut | 401 « Clé API Iris requise »
+AD | PUT /api/v1/devis/:id/statut | inexistant | défaut | 401 « Clé API Iris requise »
+CLE catalogue:read | DELETE /api/v1/catalogue/:family/:id | inexistant | défaut | 403 « Scope requis : catalogue:write »
+CLE catalogue:read | DELETE /api/v1/clients/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE catalogue:read | GET /api/v1/achats | — | défaut | 403 « Scope requis : chantiers:read »
+CLE catalogue:read | GET /api/v1/catalogue/:family | family=prestations | défaut | 200
+CLE catalogue:read | GET /api/v1/catalogue/categories | — | défaut | 200
+CLE catalogue:read | GET /api/v1/chantiers | — | défaut | 403 « Scope requis : chantiers:read »
+CLE catalogue:read | GET /api/v1/clients | — | défaut | 403 « Scope requis : clients:read »
+CLE catalogue:read | GET /api/v1/clients/:clientId/equipements | client-actif | défaut | 403 « Scope requis : equipements:read »
+CLE catalogue:read | GET /api/v1/clients/:clientId/equipements | client-desactive | défaut | 403 « Scope requis : equipements:read »
+CLE catalogue:read | GET /api/v1/clients/:clientId/equipements | inexistant | défaut | 403 « Scope requis : equipements:read »
+CLE catalogue:read | GET /api/v1/clients/:id | client-actif | défaut | 403 « Scope requis : clients:read »
+CLE catalogue:read | GET /api/v1/clients/:id | client-desactive | défaut | 403 « Scope requis : clients:read »
+CLE catalogue:read | GET /api/v1/clients/:id | inexistant | défaut | 403 « Scope requis : clients:read »
+CLE catalogue:read | GET /api/v1/company | — | défaut | 403 « Scope requis : company:read »
+CLE catalogue:read | GET /api/v1/devis | — | défaut | 403 « Scope requis : devis:read »
+CLE catalogue:read | GET /api/v1/heures | — | défaut | 403 « Scope requis : chantiers:read »
+CLE catalogue:read | PATCH /api/v1/devis/:id | devis-brouillon | défaut | 403 « Scope requis : devis:write »
+CLE catalogue:read | PATCH /api/v1/devis/:id | devis-converti | défaut | 403 « Scope requis : devis:write »
+CLE catalogue:read | PATCH /api/v1/devis/:id | devis-signe | défaut | 403 « Scope requis : devis:write »
+CLE catalogue:read | PATCH /api/v1/devis/:id | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE catalogue:read | POST /api/v1/catalogue/:family | family=prestations | défaut | 403 « Scope requis : catalogue:write »
+CLE catalogue:read | POST /api/v1/catalogue/categories | — | défaut | 403 « Scope requis : catalogue:write »
+CLE catalogue:read | POST /api/v1/clients | — | défaut | 403 « Scope requis : clients:write »
+CLE catalogue:read | POST /api/v1/clients/:clientId/contacts | client-actif | défaut | 403 « Scope requis : clients:write »
+CLE catalogue:read | POST /api/v1/clients/:clientId/contacts | client-desactive | défaut | 403 « Scope requis : clients:write »
+CLE catalogue:read | POST /api/v1/clients/:clientId/contacts | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE catalogue:read | POST /api/v1/clients/:clientId/equipements | client-actif | défaut | 403 « Scope requis : equipements:write »
+CLE catalogue:read | POST /api/v1/clients/:clientId/equipements | client-desactive | défaut | 403 « Scope requis : equipements:write »
+CLE catalogue:read | POST /api/v1/clients/:clientId/equipements | inexistant | défaut | 403 « Scope requis : equipements:write »
+CLE catalogue:read | POST /api/v1/clients/:clientId/equipements/:id/archiver | inexistant | défaut | 403 « Scope requis : equipements:write »
+CLE catalogue:read | POST /api/v1/clients/:clientId/sites | client-actif | défaut | 403 « Scope requis : clients:write »
+CLE catalogue:read | POST /api/v1/clients/:clientId/sites | client-desactive | défaut | 403 « Scope requis : clients:write »
+CLE catalogue:read | POST /api/v1/clients/:clientId/sites | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE catalogue:read | POST /api/v1/devis | — | défaut | 403 « Scope requis : devis:write »
+CLE catalogue:read | POST /api/v1/devis/:id/convertir | devis-brouillon | défaut | 403 « Scope requis : devis:write »
+CLE catalogue:read | POST /api/v1/devis/:id/convertir | devis-converti | défaut | 403 « Scope requis : devis:write »
+CLE catalogue:read | POST /api/v1/devis/:id/convertir | devis-signe | défaut | 403 « Scope requis : devis:write »
+CLE catalogue:read | POST /api/v1/devis/:id/convertir | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE catalogue:read | POST /api/v1/devis/:id/revisions | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE catalogue:read | PUT /api/v1/catalogue/:family/:id | inexistant | défaut | 403 « Scope requis : catalogue:write »
+CLE catalogue:read | PUT /api/v1/catalogue/:family/:id | prestation-catalogue | défaut | 403 « Scope requis : catalogue:write »
+CLE catalogue:read | PUT /api/v1/clients/:clientId/contacts/:id | contact-autre-client | défaut | 403 « Scope requis : clients:write »
+CLE catalogue:read | PUT /api/v1/clients/:clientId/contacts/:id | contact-client-actif | défaut | 403 « Scope requis : clients:write »
+CLE catalogue:read | PUT /api/v1/clients/:clientId/contacts/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE catalogue:read | PUT /api/v1/clients/:clientId/sites/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE catalogue:read | PUT /api/v1/clients/:clientId/sites/:id | site-autre-client | défaut | 403 « Scope requis : clients:write »
+CLE catalogue:read | PUT /api/v1/clients/:clientId/sites/:id | site-client-actif | défaut | 403 « Scope requis : clients:write »
+CLE catalogue:read | PUT /api/v1/clients/:id | client-actif | défaut | 403 « Scope requis : clients:write »
+CLE catalogue:read | PUT /api/v1/clients/:id | client-desactive | défaut | 403 « Scope requis : clients:write »
+CLE catalogue:read | PUT /api/v1/clients/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE catalogue:read | PUT /api/v1/devis/:id/statut | devis-brouillon | défaut | 403 « Scope requis : devis:write »
+CLE catalogue:read | PUT /api/v1/devis/:id/statut | devis-converti | défaut | 403 « Scope requis : devis:write »
+CLE catalogue:read | PUT /api/v1/devis/:id/statut | devis-signe | défaut | 403 « Scope requis : devis:write »
+CLE catalogue:read | PUT /api/v1/devis/:id/statut | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE catalogue:write | DELETE /api/v1/catalogue/:family/:id | inexistant | défaut | 404 « Fiche catalogue introuvable. »
+CLE catalogue:write | DELETE /api/v1/clients/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE catalogue:write | GET /api/v1/achats | — | défaut | 403 « Scope requis : chantiers:read »
+CLE catalogue:write | GET /api/v1/catalogue/:family | family=prestations | défaut | 403 « Scope requis : catalogue:read »
+CLE catalogue:write | GET /api/v1/catalogue/categories | — | défaut | 403 « Scope requis : catalogue:read »
+CLE catalogue:write | GET /api/v1/chantiers | — | défaut | 403 « Scope requis : chantiers:read »
+CLE catalogue:write | GET /api/v1/clients | — | défaut | 403 « Scope requis : clients:read »
+CLE catalogue:write | GET /api/v1/clients/:clientId/equipements | client-actif | défaut | 403 « Scope requis : equipements:read »
+CLE catalogue:write | GET /api/v1/clients/:clientId/equipements | client-desactive | défaut | 403 « Scope requis : equipements:read »
+CLE catalogue:write | GET /api/v1/clients/:clientId/equipements | inexistant | défaut | 403 « Scope requis : equipements:read »
+CLE catalogue:write | GET /api/v1/clients/:id | client-actif | défaut | 403 « Scope requis : clients:read »
+CLE catalogue:write | GET /api/v1/clients/:id | client-desactive | défaut | 403 « Scope requis : clients:read »
+CLE catalogue:write | GET /api/v1/clients/:id | inexistant | défaut | 403 « Scope requis : clients:read »
+CLE catalogue:write | GET /api/v1/company | — | défaut | 403 « Scope requis : company:read »
+CLE catalogue:write | GET /api/v1/devis | — | défaut | 403 « Scope requis : devis:read »
+CLE catalogue:write | GET /api/v1/heures | — | défaut | 403 « Scope requis : chantiers:read »
+CLE catalogue:write | PATCH /api/v1/devis/:id | devis-brouillon | défaut | 403 « Scope requis : devis:write »
+CLE catalogue:write | PATCH /api/v1/devis/:id | devis-converti | défaut | 403 « Scope requis : devis:write »
+CLE catalogue:write | PATCH /api/v1/devis/:id | devis-signe | défaut | 403 « Scope requis : devis:write »
+CLE catalogue:write | PATCH /api/v1/devis/:id | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE catalogue:write | POST /api/v1/catalogue/:family | family=prestations | défaut | 400
+CLE catalogue:write | POST /api/v1/catalogue/categories | — | défaut | 400
+CLE catalogue:write | POST /api/v1/clients | — | défaut | 403 « Scope requis : clients:write »
+CLE catalogue:write | POST /api/v1/clients/:clientId/contacts | client-actif | défaut | 403 « Scope requis : clients:write »
+CLE catalogue:write | POST /api/v1/clients/:clientId/contacts | client-desactive | défaut | 403 « Scope requis : clients:write »
+CLE catalogue:write | POST /api/v1/clients/:clientId/contacts | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE catalogue:write | POST /api/v1/clients/:clientId/equipements | client-actif | défaut | 403 « Scope requis : equipements:write »
+CLE catalogue:write | POST /api/v1/clients/:clientId/equipements | client-desactive | défaut | 403 « Scope requis : equipements:write »
+CLE catalogue:write | POST /api/v1/clients/:clientId/equipements | inexistant | défaut | 403 « Scope requis : equipements:write »
+CLE catalogue:write | POST /api/v1/clients/:clientId/equipements/:id/archiver | inexistant | défaut | 403 « Scope requis : equipements:write »
+CLE catalogue:write | POST /api/v1/clients/:clientId/sites | client-actif | défaut | 403 « Scope requis : clients:write »
+CLE catalogue:write | POST /api/v1/clients/:clientId/sites | client-desactive | défaut | 403 « Scope requis : clients:write »
+CLE catalogue:write | POST /api/v1/clients/:clientId/sites | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE catalogue:write | POST /api/v1/devis | — | défaut | 403 « Scope requis : devis:write »
+CLE catalogue:write | POST /api/v1/devis/:id/convertir | devis-brouillon | défaut | 403 « Scope requis : devis:write »
+CLE catalogue:write | POST /api/v1/devis/:id/convertir | devis-converti | défaut | 403 « Scope requis : devis:write »
+CLE catalogue:write | POST /api/v1/devis/:id/convertir | devis-signe | défaut | 403 « Scope requis : devis:write »
+CLE catalogue:write | POST /api/v1/devis/:id/convertir | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE catalogue:write | POST /api/v1/devis/:id/revisions | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE catalogue:write | PUT /api/v1/catalogue/:family/:id | inexistant | défaut | 400 validation-avant-droit
+CLE catalogue:write | PUT /api/v1/catalogue/:family/:id | prestation-catalogue | défaut | 400 validation-avant-droit
+CLE catalogue:write | PUT /api/v1/clients/:clientId/contacts/:id | contact-autre-client | défaut | 403 « Scope requis : clients:write »
+CLE catalogue:write | PUT /api/v1/clients/:clientId/contacts/:id | contact-client-actif | défaut | 403 « Scope requis : clients:write »
+CLE catalogue:write | PUT /api/v1/clients/:clientId/contacts/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE catalogue:write | PUT /api/v1/clients/:clientId/sites/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE catalogue:write | PUT /api/v1/clients/:clientId/sites/:id | site-autre-client | défaut | 403 « Scope requis : clients:write »
+CLE catalogue:write | PUT /api/v1/clients/:clientId/sites/:id | site-client-actif | défaut | 403 « Scope requis : clients:write »
+CLE catalogue:write | PUT /api/v1/clients/:id | client-actif | défaut | 403 « Scope requis : clients:write »
+CLE catalogue:write | PUT /api/v1/clients/:id | client-desactive | défaut | 403 « Scope requis : clients:write »
+CLE catalogue:write | PUT /api/v1/clients/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE catalogue:write | PUT /api/v1/devis/:id/statut | devis-brouillon | défaut | 403 « Scope requis : devis:write »
+CLE catalogue:write | PUT /api/v1/devis/:id/statut | devis-converti | défaut | 403 « Scope requis : devis:write »
+CLE catalogue:write | PUT /api/v1/devis/:id/statut | devis-signe | défaut | 403 « Scope requis : devis:write »
+CLE catalogue:write | PUT /api/v1/devis/:id/statut | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE chantiers:archive | DELETE /api/v1/catalogue/:family/:id | inexistant | défaut | 403 « Scope requis : catalogue:write »
+CLE chantiers:archive | DELETE /api/v1/clients/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:archive | GET /api/v1/achats | — | défaut | 403 « Scope requis : chantiers:read »
+CLE chantiers:archive | GET /api/v1/catalogue/:family | family=prestations | défaut | 403 « Scope requis : catalogue:read »
+CLE chantiers:archive | GET /api/v1/catalogue/categories | — | défaut | 403 « Scope requis : catalogue:read »
+CLE chantiers:archive | GET /api/v1/chantiers | — | défaut | 403 « Scope requis : chantiers:read »
+CLE chantiers:archive | GET /api/v1/clients | — | défaut | 403 « Scope requis : clients:read »
+CLE chantiers:archive | GET /api/v1/clients/:clientId/equipements | client-actif | défaut | 403 « Scope requis : equipements:read »
+CLE chantiers:archive | GET /api/v1/clients/:clientId/equipements | client-desactive | défaut | 403 « Scope requis : equipements:read »
+CLE chantiers:archive | GET /api/v1/clients/:clientId/equipements | inexistant | défaut | 403 « Scope requis : equipements:read »
+CLE chantiers:archive | GET /api/v1/clients/:id | client-actif | défaut | 403 « Scope requis : clients:read »
+CLE chantiers:archive | GET /api/v1/clients/:id | client-desactive | défaut | 403 « Scope requis : clients:read »
+CLE chantiers:archive | GET /api/v1/clients/:id | inexistant | défaut | 403 « Scope requis : clients:read »
+CLE chantiers:archive | GET /api/v1/company | — | défaut | 403 « Scope requis : company:read »
+CLE chantiers:archive | GET /api/v1/devis | — | défaut | 403 « Scope requis : devis:read »
+CLE chantiers:archive | GET /api/v1/heures | — | défaut | 403 « Scope requis : chantiers:read »
+CLE chantiers:archive | PATCH /api/v1/devis/:id | devis-brouillon | défaut | 403 « Scope requis : devis:write »
+CLE chantiers:archive | PATCH /api/v1/devis/:id | devis-converti | défaut | 403 « Scope requis : devis:write »
+CLE chantiers:archive | PATCH /api/v1/devis/:id | devis-signe | défaut | 403 « Scope requis : devis:write »
+CLE chantiers:archive | PATCH /api/v1/devis/:id | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE chantiers:archive | POST /api/v1/catalogue/:family | family=prestations | défaut | 403 « Scope requis : catalogue:write »
+CLE chantiers:archive | POST /api/v1/catalogue/categories | — | défaut | 403 « Scope requis : catalogue:write »
+CLE chantiers:archive | POST /api/v1/clients | — | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:archive | POST /api/v1/clients/:clientId/contacts | client-actif | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:archive | POST /api/v1/clients/:clientId/contacts | client-desactive | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:archive | POST /api/v1/clients/:clientId/contacts | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:archive | POST /api/v1/clients/:clientId/equipements | client-actif | défaut | 403 « Scope requis : equipements:write »
+CLE chantiers:archive | POST /api/v1/clients/:clientId/equipements | client-desactive | défaut | 403 « Scope requis : equipements:write »
+CLE chantiers:archive | POST /api/v1/clients/:clientId/equipements | inexistant | défaut | 403 « Scope requis : equipements:write »
+CLE chantiers:archive | POST /api/v1/clients/:clientId/equipements/:id/archiver | inexistant | défaut | 403 « Scope requis : equipements:write »
+CLE chantiers:archive | POST /api/v1/clients/:clientId/sites | client-actif | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:archive | POST /api/v1/clients/:clientId/sites | client-desactive | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:archive | POST /api/v1/clients/:clientId/sites | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:archive | POST /api/v1/devis | — | défaut | 403 « Scope requis : devis:write »
+CLE chantiers:archive | POST /api/v1/devis/:id/convertir | devis-brouillon | défaut | 403 « Scope requis : devis:write »
+CLE chantiers:archive | POST /api/v1/devis/:id/convertir | devis-converti | défaut | 403 « Scope requis : devis:write »
+CLE chantiers:archive | POST /api/v1/devis/:id/convertir | devis-signe | défaut | 403 « Scope requis : devis:write »
+CLE chantiers:archive | POST /api/v1/devis/:id/convertir | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE chantiers:archive | POST /api/v1/devis/:id/revisions | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE chantiers:archive | PUT /api/v1/catalogue/:family/:id | inexistant | défaut | 403 « Scope requis : catalogue:write »
+CLE chantiers:archive | PUT /api/v1/catalogue/:family/:id | prestation-catalogue | défaut | 403 « Scope requis : catalogue:write »
+CLE chantiers:archive | PUT /api/v1/clients/:clientId/contacts/:id | contact-autre-client | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:archive | PUT /api/v1/clients/:clientId/contacts/:id | contact-client-actif | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:archive | PUT /api/v1/clients/:clientId/contacts/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:archive | PUT /api/v1/clients/:clientId/sites/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:archive | PUT /api/v1/clients/:clientId/sites/:id | site-autre-client | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:archive | PUT /api/v1/clients/:clientId/sites/:id | site-client-actif | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:archive | PUT /api/v1/clients/:id | client-actif | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:archive | PUT /api/v1/clients/:id | client-desactive | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:archive | PUT /api/v1/clients/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:archive | PUT /api/v1/devis/:id/statut | devis-brouillon | défaut | 403 « Scope requis : devis:write »
+CLE chantiers:archive | PUT /api/v1/devis/:id/statut | devis-converti | défaut | 403 « Scope requis : devis:write »
+CLE chantiers:archive | PUT /api/v1/devis/:id/statut | devis-signe | défaut | 403 « Scope requis : devis:write »
+CLE chantiers:archive | PUT /api/v1/devis/:id/statut | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE chantiers:read | DELETE /api/v1/catalogue/:family/:id | inexistant | défaut | 403 « Scope requis : catalogue:write »
+CLE chantiers:read | DELETE /api/v1/clients/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:read | GET /api/v1/achats | — | défaut | 200
+CLE chantiers:read | GET /api/v1/catalogue/:family | family=prestations | défaut | 403 « Scope requis : catalogue:read »
+CLE chantiers:read | GET /api/v1/catalogue/categories | — | défaut | 403 « Scope requis : catalogue:read »
+CLE chantiers:read | GET /api/v1/chantiers | — | défaut | 200
+CLE chantiers:read | GET /api/v1/clients | — | défaut | 403 « Scope requis : clients:read »
+CLE chantiers:read | GET /api/v1/clients/:clientId/equipements | client-actif | défaut | 403 « Scope requis : equipements:read »
+CLE chantiers:read | GET /api/v1/clients/:clientId/equipements | client-desactive | défaut | 403 « Scope requis : equipements:read »
+CLE chantiers:read | GET /api/v1/clients/:clientId/equipements | inexistant | défaut | 403 « Scope requis : equipements:read »
+CLE chantiers:read | GET /api/v1/clients/:id | client-actif | défaut | 403 « Scope requis : clients:read »
+CLE chantiers:read | GET /api/v1/clients/:id | client-desactive | défaut | 403 « Scope requis : clients:read »
+CLE chantiers:read | GET /api/v1/clients/:id | inexistant | défaut | 403 « Scope requis : clients:read »
+CLE chantiers:read | GET /api/v1/company | — | défaut | 403 « Scope requis : company:read »
+CLE chantiers:read | GET /api/v1/devis | — | défaut | 403 « Scope requis : devis:read »
+CLE chantiers:read | GET /api/v1/heures | — | défaut | 200
+CLE chantiers:read | PATCH /api/v1/devis/:id | devis-brouillon | défaut | 403 « Scope requis : devis:write »
+CLE chantiers:read | PATCH /api/v1/devis/:id | devis-converti | défaut | 403 « Scope requis : devis:write »
+CLE chantiers:read | PATCH /api/v1/devis/:id | devis-signe | défaut | 403 « Scope requis : devis:write »
+CLE chantiers:read | PATCH /api/v1/devis/:id | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE chantiers:read | POST /api/v1/catalogue/:family | family=prestations | défaut | 403 « Scope requis : catalogue:write »
+CLE chantiers:read | POST /api/v1/catalogue/categories | — | défaut | 403 « Scope requis : catalogue:write »
+CLE chantiers:read | POST /api/v1/clients | — | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:read | POST /api/v1/clients/:clientId/contacts | client-actif | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:read | POST /api/v1/clients/:clientId/contacts | client-desactive | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:read | POST /api/v1/clients/:clientId/contacts | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:read | POST /api/v1/clients/:clientId/equipements | client-actif | défaut | 403 « Scope requis : equipements:write »
+CLE chantiers:read | POST /api/v1/clients/:clientId/equipements | client-desactive | défaut | 403 « Scope requis : equipements:write »
+CLE chantiers:read | POST /api/v1/clients/:clientId/equipements | inexistant | défaut | 403 « Scope requis : equipements:write »
+CLE chantiers:read | POST /api/v1/clients/:clientId/equipements/:id/archiver | inexistant | défaut | 403 « Scope requis : equipements:write »
+CLE chantiers:read | POST /api/v1/clients/:clientId/sites | client-actif | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:read | POST /api/v1/clients/:clientId/sites | client-desactive | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:read | POST /api/v1/clients/:clientId/sites | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:read | POST /api/v1/devis | — | défaut | 403 « Scope requis : devis:write »
+CLE chantiers:read | POST /api/v1/devis/:id/convertir | devis-brouillon | défaut | 403 « Scope requis : devis:write »
+CLE chantiers:read | POST /api/v1/devis/:id/convertir | devis-converti | défaut | 403 « Scope requis : devis:write »
+CLE chantiers:read | POST /api/v1/devis/:id/convertir | devis-signe | défaut | 403 « Scope requis : devis:write »
+CLE chantiers:read | POST /api/v1/devis/:id/convertir | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE chantiers:read | POST /api/v1/devis/:id/revisions | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE chantiers:read | PUT /api/v1/catalogue/:family/:id | inexistant | défaut | 403 « Scope requis : catalogue:write »
+CLE chantiers:read | PUT /api/v1/catalogue/:family/:id | prestation-catalogue | défaut | 403 « Scope requis : catalogue:write »
+CLE chantiers:read | PUT /api/v1/clients/:clientId/contacts/:id | contact-autre-client | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:read | PUT /api/v1/clients/:clientId/contacts/:id | contact-client-actif | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:read | PUT /api/v1/clients/:clientId/contacts/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:read | PUT /api/v1/clients/:clientId/sites/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:read | PUT /api/v1/clients/:clientId/sites/:id | site-autre-client | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:read | PUT /api/v1/clients/:clientId/sites/:id | site-client-actif | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:read | PUT /api/v1/clients/:id | client-actif | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:read | PUT /api/v1/clients/:id | client-desactive | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:read | PUT /api/v1/clients/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:read | PUT /api/v1/devis/:id/statut | devis-brouillon | défaut | 403 « Scope requis : devis:write »
+CLE chantiers:read | PUT /api/v1/devis/:id/statut | devis-converti | défaut | 403 « Scope requis : devis:write »
+CLE chantiers:read | PUT /api/v1/devis/:id/statut | devis-signe | défaut | 403 « Scope requis : devis:write »
+CLE chantiers:read | PUT /api/v1/devis/:id/statut | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE chantiers:write | DELETE /api/v1/catalogue/:family/:id | inexistant | défaut | 403 « Scope requis : catalogue:write »
+CLE chantiers:write | DELETE /api/v1/clients/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:write | GET /api/v1/achats | — | défaut | 403 « Scope requis : chantiers:read »
+CLE chantiers:write | GET /api/v1/catalogue/:family | family=prestations | défaut | 403 « Scope requis : catalogue:read »
+CLE chantiers:write | GET /api/v1/catalogue/categories | — | défaut | 403 « Scope requis : catalogue:read »
+CLE chantiers:write | GET /api/v1/chantiers | — | défaut | 403 « Scope requis : chantiers:read »
+CLE chantiers:write | GET /api/v1/clients | — | défaut | 403 « Scope requis : clients:read »
+CLE chantiers:write | GET /api/v1/clients/:clientId/equipements | client-actif | défaut | 403 « Scope requis : equipements:read »
+CLE chantiers:write | GET /api/v1/clients/:clientId/equipements | client-desactive | défaut | 403 « Scope requis : equipements:read »
+CLE chantiers:write | GET /api/v1/clients/:clientId/equipements | inexistant | défaut | 403 « Scope requis : equipements:read »
+CLE chantiers:write | GET /api/v1/clients/:id | client-actif | défaut | 403 « Scope requis : clients:read »
+CLE chantiers:write | GET /api/v1/clients/:id | client-desactive | défaut | 403 « Scope requis : clients:read »
+CLE chantiers:write | GET /api/v1/clients/:id | inexistant | défaut | 403 « Scope requis : clients:read »
+CLE chantiers:write | GET /api/v1/company | — | défaut | 403 « Scope requis : company:read »
+CLE chantiers:write | GET /api/v1/devis | — | défaut | 403 « Scope requis : devis:read »
+CLE chantiers:write | GET /api/v1/heures | — | défaut | 403 « Scope requis : chantiers:read »
+CLE chantiers:write | PATCH /api/v1/devis/:id | devis-brouillon | défaut | 403 « Scope requis : devis:write »
+CLE chantiers:write | PATCH /api/v1/devis/:id | devis-converti | défaut | 403 « Scope requis : devis:write »
+CLE chantiers:write | PATCH /api/v1/devis/:id | devis-signe | défaut | 403 « Scope requis : devis:write »
+CLE chantiers:write | PATCH /api/v1/devis/:id | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE chantiers:write | POST /api/v1/catalogue/:family | family=prestations | défaut | 403 « Scope requis : catalogue:write »
+CLE chantiers:write | POST /api/v1/catalogue/categories | — | défaut | 403 « Scope requis : catalogue:write »
+CLE chantiers:write | POST /api/v1/clients | — | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:write | POST /api/v1/clients/:clientId/contacts | client-actif | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:write | POST /api/v1/clients/:clientId/contacts | client-desactive | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:write | POST /api/v1/clients/:clientId/contacts | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:write | POST /api/v1/clients/:clientId/equipements | client-actif | défaut | 403 « Scope requis : equipements:write »
+CLE chantiers:write | POST /api/v1/clients/:clientId/equipements | client-desactive | défaut | 403 « Scope requis : equipements:write »
+CLE chantiers:write | POST /api/v1/clients/:clientId/equipements | inexistant | défaut | 403 « Scope requis : equipements:write »
+CLE chantiers:write | POST /api/v1/clients/:clientId/equipements/:id/archiver | inexistant | défaut | 403 « Scope requis : equipements:write »
+CLE chantiers:write | POST /api/v1/clients/:clientId/sites | client-actif | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:write | POST /api/v1/clients/:clientId/sites | client-desactive | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:write | POST /api/v1/clients/:clientId/sites | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:write | POST /api/v1/devis | — | défaut | 403 « Scope requis : devis:write »
+CLE chantiers:write | POST /api/v1/devis/:id/convertir | devis-brouillon | défaut | 403 « Scope requis : devis:write »
+CLE chantiers:write | POST /api/v1/devis/:id/convertir | devis-converti | défaut | 403 « Scope requis : devis:write »
+CLE chantiers:write | POST /api/v1/devis/:id/convertir | devis-signe | défaut | 403 « Scope requis : devis:write »
+CLE chantiers:write | POST /api/v1/devis/:id/convertir | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE chantiers:write | POST /api/v1/devis/:id/revisions | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE chantiers:write | PUT /api/v1/catalogue/:family/:id | inexistant | défaut | 403 « Scope requis : catalogue:write »
+CLE chantiers:write | PUT /api/v1/catalogue/:family/:id | prestation-catalogue | défaut | 403 « Scope requis : catalogue:write »
+CLE chantiers:write | PUT /api/v1/clients/:clientId/contacts/:id | contact-autre-client | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:write | PUT /api/v1/clients/:clientId/contacts/:id | contact-client-actif | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:write | PUT /api/v1/clients/:clientId/contacts/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:write | PUT /api/v1/clients/:clientId/sites/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:write | PUT /api/v1/clients/:clientId/sites/:id | site-autre-client | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:write | PUT /api/v1/clients/:clientId/sites/:id | site-client-actif | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:write | PUT /api/v1/clients/:id | client-actif | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:write | PUT /api/v1/clients/:id | client-desactive | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:write | PUT /api/v1/clients/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE chantiers:write | PUT /api/v1/devis/:id/statut | devis-brouillon | défaut | 403 « Scope requis : devis:write »
+CLE chantiers:write | PUT /api/v1/devis/:id/statut | devis-converti | défaut | 403 « Scope requis : devis:write »
+CLE chantiers:write | PUT /api/v1/devis/:id/statut | devis-signe | défaut | 403 « Scope requis : devis:write »
+CLE chantiers:write | PUT /api/v1/devis/:id/statut | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE clients:read | DELETE /api/v1/catalogue/:family/:id | inexistant | défaut | 403 « Scope requis : catalogue:write »
+CLE clients:read | DELETE /api/v1/clients/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE clients:read | GET /api/v1/achats | — | défaut | 403 « Scope requis : chantiers:read »
+CLE clients:read | GET /api/v1/catalogue/:family | family=prestations | défaut | 403 « Scope requis : catalogue:read »
+CLE clients:read | GET /api/v1/catalogue/categories | — | défaut | 403 « Scope requis : catalogue:read »
+CLE clients:read | GET /api/v1/chantiers | — | défaut | 403 « Scope requis : chantiers:read »
+CLE clients:read | GET /api/v1/clients | — | défaut | 200
+CLE clients:read | GET /api/v1/clients/:clientId/equipements | client-actif | défaut | 403 « Scope requis : equipements:read »
+CLE clients:read | GET /api/v1/clients/:clientId/equipements | client-desactive | défaut | 403 « Scope requis : equipements:read »
+CLE clients:read | GET /api/v1/clients/:clientId/equipements | inexistant | défaut | 403 « Scope requis : equipements:read »
+CLE clients:read | GET /api/v1/clients/:id | client-actif | défaut | 200
+CLE clients:read | GET /api/v1/clients/:id | client-desactive | défaut | 200
+CLE clients:read | GET /api/v1/clients/:id | inexistant | défaut | 404 « Client introuvable. »
+CLE clients:read | GET /api/v1/company | — | défaut | 403 « Scope requis : company:read »
+CLE clients:read | GET /api/v1/devis | — | défaut | 403 « Scope requis : devis:read »
+CLE clients:read | GET /api/v1/heures | — | défaut | 403 « Scope requis : chantiers:read »
+CLE clients:read | PATCH /api/v1/devis/:id | devis-brouillon | défaut | 403 « Scope requis : devis:write »
+CLE clients:read | PATCH /api/v1/devis/:id | devis-converti | défaut | 403 « Scope requis : devis:write »
+CLE clients:read | PATCH /api/v1/devis/:id | devis-signe | défaut | 403 « Scope requis : devis:write »
+CLE clients:read | PATCH /api/v1/devis/:id | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE clients:read | POST /api/v1/catalogue/:family | family=prestations | défaut | 403 « Scope requis : catalogue:write »
+CLE clients:read | POST /api/v1/catalogue/categories | — | défaut | 403 « Scope requis : catalogue:write »
+CLE clients:read | POST /api/v1/clients | — | défaut | 403 « Scope requis : clients:write »
+CLE clients:read | POST /api/v1/clients/:clientId/contacts | client-actif | défaut | 403 « Scope requis : clients:write »
+CLE clients:read | POST /api/v1/clients/:clientId/contacts | client-desactive | défaut | 403 « Scope requis : clients:write »
+CLE clients:read | POST /api/v1/clients/:clientId/contacts | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE clients:read | POST /api/v1/clients/:clientId/equipements | client-actif | défaut | 403 « Scope requis : equipements:write »
+CLE clients:read | POST /api/v1/clients/:clientId/equipements | client-desactive | défaut | 403 « Scope requis : equipements:write »
+CLE clients:read | POST /api/v1/clients/:clientId/equipements | inexistant | défaut | 403 « Scope requis : equipements:write »
+CLE clients:read | POST /api/v1/clients/:clientId/equipements/:id/archiver | inexistant | défaut | 403 « Scope requis : equipements:write »
+CLE clients:read | POST /api/v1/clients/:clientId/sites | client-actif | défaut | 403 « Scope requis : clients:write »
+CLE clients:read | POST /api/v1/clients/:clientId/sites | client-desactive | défaut | 403 « Scope requis : clients:write »
+CLE clients:read | POST /api/v1/clients/:clientId/sites | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE clients:read | POST /api/v1/devis | — | défaut | 403 « Scope requis : devis:write »
+CLE clients:read | POST /api/v1/devis/:id/convertir | devis-brouillon | défaut | 403 « Scope requis : devis:write »
+CLE clients:read | POST /api/v1/devis/:id/convertir | devis-converti | défaut | 403 « Scope requis : devis:write »
+CLE clients:read | POST /api/v1/devis/:id/convertir | devis-signe | défaut | 403 « Scope requis : devis:write »
+CLE clients:read | POST /api/v1/devis/:id/convertir | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE clients:read | POST /api/v1/devis/:id/revisions | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE clients:read | PUT /api/v1/catalogue/:family/:id | inexistant | défaut | 403 « Scope requis : catalogue:write »
+CLE clients:read | PUT /api/v1/catalogue/:family/:id | prestation-catalogue | défaut | 403 « Scope requis : catalogue:write »
+CLE clients:read | PUT /api/v1/clients/:clientId/contacts/:id | contact-autre-client | défaut | 403 « Scope requis : clients:write »
+CLE clients:read | PUT /api/v1/clients/:clientId/contacts/:id | contact-client-actif | défaut | 403 « Scope requis : clients:write »
+CLE clients:read | PUT /api/v1/clients/:clientId/contacts/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE clients:read | PUT /api/v1/clients/:clientId/sites/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE clients:read | PUT /api/v1/clients/:clientId/sites/:id | site-autre-client | défaut | 403 « Scope requis : clients:write »
+CLE clients:read | PUT /api/v1/clients/:clientId/sites/:id | site-client-actif | défaut | 403 « Scope requis : clients:write »
+CLE clients:read | PUT /api/v1/clients/:id | client-actif | défaut | 403 « Scope requis : clients:write »
+CLE clients:read | PUT /api/v1/clients/:id | client-desactive | défaut | 403 « Scope requis : clients:write »
+CLE clients:read | PUT /api/v1/clients/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE clients:read | PUT /api/v1/devis/:id/statut | devis-brouillon | défaut | 403 « Scope requis : devis:write »
+CLE clients:read | PUT /api/v1/devis/:id/statut | devis-converti | défaut | 403 « Scope requis : devis:write »
+CLE clients:read | PUT /api/v1/devis/:id/statut | devis-signe | défaut | 403 « Scope requis : devis:write »
+CLE clients:read | PUT /api/v1/devis/:id/statut | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE clients:write | DELETE /api/v1/catalogue/:family/:id | inexistant | défaut | 403 « Scope requis : catalogue:write »
+CLE clients:write | DELETE /api/v1/clients/:id | inexistant | défaut | 404 « Enregistrement introuvable. »
+CLE clients:write | GET /api/v1/achats | — | défaut | 403 « Scope requis : chantiers:read »
+CLE clients:write | GET /api/v1/catalogue/:family | family=prestations | défaut | 403 « Scope requis : catalogue:read »
+CLE clients:write | GET /api/v1/catalogue/categories | — | défaut | 403 « Scope requis : catalogue:read »
+CLE clients:write | GET /api/v1/chantiers | — | défaut | 403 « Scope requis : chantiers:read »
+CLE clients:write | GET /api/v1/clients | — | défaut | 403 « Scope requis : clients:read »
+CLE clients:write | GET /api/v1/clients/:clientId/equipements | client-actif | défaut | 403 « Scope requis : equipements:read »
+CLE clients:write | GET /api/v1/clients/:clientId/equipements | client-desactive | défaut | 403 « Scope requis : equipements:read »
+CLE clients:write | GET /api/v1/clients/:clientId/equipements | inexistant | défaut | 403 « Scope requis : equipements:read »
+CLE clients:write | GET /api/v1/clients/:id | client-actif | défaut | 403 « Scope requis : clients:read »
+CLE clients:write | GET /api/v1/clients/:id | client-desactive | défaut | 403 « Scope requis : clients:read »
+CLE clients:write | GET /api/v1/clients/:id | inexistant | défaut | 403 « Scope requis : clients:read »
+CLE clients:write | GET /api/v1/company | — | défaut | 403 « Scope requis : company:read »
+CLE clients:write | GET /api/v1/devis | — | défaut | 403 « Scope requis : devis:read »
+CLE clients:write | GET /api/v1/heures | — | défaut | 403 « Scope requis : chantiers:read »
+CLE clients:write | PATCH /api/v1/devis/:id | devis-brouillon | défaut | 403 « Scope requis : devis:write »
+CLE clients:write | PATCH /api/v1/devis/:id | devis-converti | défaut | 403 « Scope requis : devis:write »
+CLE clients:write | PATCH /api/v1/devis/:id | devis-signe | défaut | 403 « Scope requis : devis:write »
+CLE clients:write | PATCH /api/v1/devis/:id | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE clients:write | POST /api/v1/catalogue/:family | family=prestations | défaut | 403 « Scope requis : catalogue:write »
+CLE clients:write | POST /api/v1/catalogue/categories | — | défaut | 403 « Scope requis : catalogue:write »
+CLE clients:write | POST /api/v1/clients | — | défaut | 400
+CLE clients:write | POST /api/v1/clients/:clientId/contacts | client-actif | défaut | 400
+CLE clients:write | POST /api/v1/clients/:clientId/contacts | client-desactive | défaut | 400
+CLE clients:write | POST /api/v1/clients/:clientId/contacts | inexistant | défaut | 400
+CLE clients:write | POST /api/v1/clients/:clientId/equipements | client-actif | défaut | 403 « Scope requis : equipements:write »
+CLE clients:write | POST /api/v1/clients/:clientId/equipements | client-desactive | défaut | 403 « Scope requis : equipements:write »
+CLE clients:write | POST /api/v1/clients/:clientId/equipements | inexistant | défaut | 403 « Scope requis : equipements:write »
+CLE clients:write | POST /api/v1/clients/:clientId/equipements/:id/archiver | inexistant | défaut | 403 « Scope requis : equipements:write »
+CLE clients:write | POST /api/v1/clients/:clientId/sites | client-actif | défaut | 400
+CLE clients:write | POST /api/v1/clients/:clientId/sites | client-desactive | défaut | 400
+CLE clients:write | POST /api/v1/clients/:clientId/sites | inexistant | défaut | 400
+CLE clients:write | POST /api/v1/devis | — | défaut | 403 « Scope requis : devis:write »
+CLE clients:write | POST /api/v1/devis/:id/convertir | devis-brouillon | défaut | 403 « Scope requis : devis:write »
+CLE clients:write | POST /api/v1/devis/:id/convertir | devis-converti | défaut | 403 « Scope requis : devis:write »
+CLE clients:write | POST /api/v1/devis/:id/convertir | devis-signe | défaut | 403 « Scope requis : devis:write »
+CLE clients:write | POST /api/v1/devis/:id/convertir | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE clients:write | POST /api/v1/devis/:id/revisions | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE clients:write | PUT /api/v1/catalogue/:family/:id | inexistant | défaut | 403 « Scope requis : catalogue:write »
+CLE clients:write | PUT /api/v1/catalogue/:family/:id | prestation-catalogue | défaut | 403 « Scope requis : catalogue:write »
+CLE clients:write | PUT /api/v1/clients/:clientId/contacts/:id | contact-autre-client | défaut | 404 « Contact introuvable. »
+CLE clients:write | PUT /api/v1/clients/:clientId/contacts/:id | contact-client-actif | défaut | 404 « Contact introuvable. »
+CLE clients:write | PUT /api/v1/clients/:clientId/contacts/:id | inexistant | défaut | 404 « Contact introuvable. »
+CLE clients:write | PUT /api/v1/clients/:clientId/sites/:id | inexistant | défaut | 404 « Site introuvable. »
+CLE clients:write | PUT /api/v1/clients/:clientId/sites/:id | site-autre-client | défaut | 404 « Site introuvable. »
+CLE clients:write | PUT /api/v1/clients/:clientId/sites/:id | site-client-actif | défaut | 404 « Site introuvable. »
+CLE clients:write | PUT /api/v1/clients/:id | client-actif | défaut | 200
+CLE clients:write | PUT /api/v1/clients/:id | client-desactive | défaut | 200
+CLE clients:write | PUT /api/v1/clients/:id | inexistant | défaut | 404 « Enregistrement introuvable. »
+CLE clients:write | PUT /api/v1/devis/:id/statut | devis-brouillon | défaut | 403 « Scope requis : devis:write »
+CLE clients:write | PUT /api/v1/devis/:id/statut | devis-converti | défaut | 403 « Scope requis : devis:write »
+CLE clients:write | PUT /api/v1/devis/:id/statut | devis-signe | défaut | 403 « Scope requis : devis:write »
+CLE clients:write | PUT /api/v1/devis/:id/statut | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE company:read | DELETE /api/v1/catalogue/:family/:id | inexistant | défaut | 403 « Scope requis : catalogue:write »
+CLE company:read | DELETE /api/v1/clients/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE company:read | GET /api/v1/achats | — | défaut | 403 « Scope requis : chantiers:read »
+CLE company:read | GET /api/v1/catalogue/:family | family=prestations | défaut | 403 « Scope requis : catalogue:read »
+CLE company:read | GET /api/v1/catalogue/categories | — | défaut | 403 « Scope requis : catalogue:read »
+CLE company:read | GET /api/v1/chantiers | — | défaut | 403 « Scope requis : chantiers:read »
+CLE company:read | GET /api/v1/clients | — | défaut | 403 « Scope requis : clients:read »
+CLE company:read | GET /api/v1/clients/:clientId/equipements | client-actif | défaut | 403 « Scope requis : equipements:read »
+CLE company:read | GET /api/v1/clients/:clientId/equipements | client-desactive | défaut | 403 « Scope requis : equipements:read »
+CLE company:read | GET /api/v1/clients/:clientId/equipements | inexistant | défaut | 403 « Scope requis : equipements:read »
+CLE company:read | GET /api/v1/clients/:id | client-actif | défaut | 403 « Scope requis : clients:read »
+CLE company:read | GET /api/v1/clients/:id | client-desactive | défaut | 403 « Scope requis : clients:read »
+CLE company:read | GET /api/v1/clients/:id | inexistant | défaut | 403 « Scope requis : clients:read »
+CLE company:read | GET /api/v1/company | — | défaut | 200
+CLE company:read | GET /api/v1/devis | — | défaut | 403 « Scope requis : devis:read »
+CLE company:read | GET /api/v1/heures | — | défaut | 403 « Scope requis : chantiers:read »
+CLE company:read | PATCH /api/v1/devis/:id | devis-brouillon | défaut | 403 « Scope requis : devis:write »
+CLE company:read | PATCH /api/v1/devis/:id | devis-converti | défaut | 403 « Scope requis : devis:write »
+CLE company:read | PATCH /api/v1/devis/:id | devis-signe | défaut | 403 « Scope requis : devis:write »
+CLE company:read | PATCH /api/v1/devis/:id | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE company:read | POST /api/v1/catalogue/:family | family=prestations | défaut | 403 « Scope requis : catalogue:write »
+CLE company:read | POST /api/v1/catalogue/categories | — | défaut | 403 « Scope requis : catalogue:write »
+CLE company:read | POST /api/v1/clients | — | défaut | 403 « Scope requis : clients:write »
+CLE company:read | POST /api/v1/clients/:clientId/contacts | client-actif | défaut | 403 « Scope requis : clients:write »
+CLE company:read | POST /api/v1/clients/:clientId/contacts | client-desactive | défaut | 403 « Scope requis : clients:write »
+CLE company:read | POST /api/v1/clients/:clientId/contacts | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE company:read | POST /api/v1/clients/:clientId/equipements | client-actif | défaut | 403 « Scope requis : equipements:write »
+CLE company:read | POST /api/v1/clients/:clientId/equipements | client-desactive | défaut | 403 « Scope requis : equipements:write »
+CLE company:read | POST /api/v1/clients/:clientId/equipements | inexistant | défaut | 403 « Scope requis : equipements:write »
+CLE company:read | POST /api/v1/clients/:clientId/equipements/:id/archiver | inexistant | défaut | 403 « Scope requis : equipements:write »
+CLE company:read | POST /api/v1/clients/:clientId/sites | client-actif | défaut | 403 « Scope requis : clients:write »
+CLE company:read | POST /api/v1/clients/:clientId/sites | client-desactive | défaut | 403 « Scope requis : clients:write »
+CLE company:read | POST /api/v1/clients/:clientId/sites | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE company:read | POST /api/v1/devis | — | défaut | 403 « Scope requis : devis:write »
+CLE company:read | POST /api/v1/devis/:id/convertir | devis-brouillon | défaut | 403 « Scope requis : devis:write »
+CLE company:read | POST /api/v1/devis/:id/convertir | devis-converti | défaut | 403 « Scope requis : devis:write »
+CLE company:read | POST /api/v1/devis/:id/convertir | devis-signe | défaut | 403 « Scope requis : devis:write »
+CLE company:read | POST /api/v1/devis/:id/convertir | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE company:read | POST /api/v1/devis/:id/revisions | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE company:read | PUT /api/v1/catalogue/:family/:id | inexistant | défaut | 403 « Scope requis : catalogue:write »
+CLE company:read | PUT /api/v1/catalogue/:family/:id | prestation-catalogue | défaut | 403 « Scope requis : catalogue:write »
+CLE company:read | PUT /api/v1/clients/:clientId/contacts/:id | contact-autre-client | défaut | 403 « Scope requis : clients:write »
+CLE company:read | PUT /api/v1/clients/:clientId/contacts/:id | contact-client-actif | défaut | 403 « Scope requis : clients:write »
+CLE company:read | PUT /api/v1/clients/:clientId/contacts/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE company:read | PUT /api/v1/clients/:clientId/sites/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE company:read | PUT /api/v1/clients/:clientId/sites/:id | site-autre-client | défaut | 403 « Scope requis : clients:write »
+CLE company:read | PUT /api/v1/clients/:clientId/sites/:id | site-client-actif | défaut | 403 « Scope requis : clients:write »
+CLE company:read | PUT /api/v1/clients/:id | client-actif | défaut | 403 « Scope requis : clients:write »
+CLE company:read | PUT /api/v1/clients/:id | client-desactive | défaut | 403 « Scope requis : clients:write »
+CLE company:read | PUT /api/v1/clients/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE company:read | PUT /api/v1/devis/:id/statut | devis-brouillon | défaut | 403 « Scope requis : devis:write »
+CLE company:read | PUT /api/v1/devis/:id/statut | devis-converti | défaut | 403 « Scope requis : devis:write »
+CLE company:read | PUT /api/v1/devis/:id/statut | devis-signe | défaut | 403 « Scope requis : devis:write »
+CLE company:read | PUT /api/v1/devis/:id/statut | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE devis:read | DELETE /api/v1/catalogue/:family/:id | inexistant | défaut | 403 « Scope requis : catalogue:write »
+CLE devis:read | DELETE /api/v1/clients/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE devis:read | GET /api/v1/achats | — | défaut | 403 « Scope requis : chantiers:read »
+CLE devis:read | GET /api/v1/catalogue/:family | family=prestations | défaut | 403 « Scope requis : catalogue:read »
+CLE devis:read | GET /api/v1/catalogue/categories | — | défaut | 403 « Scope requis : catalogue:read »
+CLE devis:read | GET /api/v1/chantiers | — | défaut | 403 « Scope requis : chantiers:read »
+CLE devis:read | GET /api/v1/clients | — | défaut | 403 « Scope requis : clients:read »
+CLE devis:read | GET /api/v1/clients/:clientId/equipements | client-actif | défaut | 403 « Scope requis : equipements:read »
+CLE devis:read | GET /api/v1/clients/:clientId/equipements | client-desactive | défaut | 403 « Scope requis : equipements:read »
+CLE devis:read | GET /api/v1/clients/:clientId/equipements | inexistant | défaut | 403 « Scope requis : equipements:read »
+CLE devis:read | GET /api/v1/clients/:id | client-actif | défaut | 403 « Scope requis : clients:read »
+CLE devis:read | GET /api/v1/clients/:id | client-desactive | défaut | 403 « Scope requis : clients:read »
+CLE devis:read | GET /api/v1/clients/:id | inexistant | défaut | 403 « Scope requis : clients:read »
+CLE devis:read | GET /api/v1/company | — | défaut | 403 « Scope requis : company:read »
+CLE devis:read | GET /api/v1/devis | — | défaut | 200
+CLE devis:read | GET /api/v1/heures | — | défaut | 403 « Scope requis : chantiers:read »
+CLE devis:read | PATCH /api/v1/devis/:id | devis-brouillon | défaut | 403 « Scope requis : devis:write »
+CLE devis:read | PATCH /api/v1/devis/:id | devis-converti | défaut | 403 « Scope requis : devis:write »
+CLE devis:read | PATCH /api/v1/devis/:id | devis-signe | défaut | 403 « Scope requis : devis:write »
+CLE devis:read | PATCH /api/v1/devis/:id | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE devis:read | POST /api/v1/catalogue/:family | family=prestations | défaut | 403 « Scope requis : catalogue:write »
+CLE devis:read | POST /api/v1/catalogue/categories | — | défaut | 403 « Scope requis : catalogue:write »
+CLE devis:read | POST /api/v1/clients | — | défaut | 403 « Scope requis : clients:write »
+CLE devis:read | POST /api/v1/clients/:clientId/contacts | client-actif | défaut | 403 « Scope requis : clients:write »
+CLE devis:read | POST /api/v1/clients/:clientId/contacts | client-desactive | défaut | 403 « Scope requis : clients:write »
+CLE devis:read | POST /api/v1/clients/:clientId/contacts | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE devis:read | POST /api/v1/clients/:clientId/equipements | client-actif | défaut | 403 « Scope requis : equipements:write »
+CLE devis:read | POST /api/v1/clients/:clientId/equipements | client-desactive | défaut | 403 « Scope requis : equipements:write »
+CLE devis:read | POST /api/v1/clients/:clientId/equipements | inexistant | défaut | 403 « Scope requis : equipements:write »
+CLE devis:read | POST /api/v1/clients/:clientId/equipements/:id/archiver | inexistant | défaut | 403 « Scope requis : equipements:write »
+CLE devis:read | POST /api/v1/clients/:clientId/sites | client-actif | défaut | 403 « Scope requis : clients:write »
+CLE devis:read | POST /api/v1/clients/:clientId/sites | client-desactive | défaut | 403 « Scope requis : clients:write »
+CLE devis:read | POST /api/v1/clients/:clientId/sites | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE devis:read | POST /api/v1/devis | — | défaut | 403 « Scope requis : devis:write »
+CLE devis:read | POST /api/v1/devis/:id/convertir | devis-brouillon | défaut | 403 « Scope requis : devis:write »
+CLE devis:read | POST /api/v1/devis/:id/convertir | devis-converti | défaut | 403 « Scope requis : devis:write »
+CLE devis:read | POST /api/v1/devis/:id/convertir | devis-signe | défaut | 403 « Scope requis : devis:write »
+CLE devis:read | POST /api/v1/devis/:id/convertir | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE devis:read | POST /api/v1/devis/:id/revisions | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE devis:read | PUT /api/v1/catalogue/:family/:id | inexistant | défaut | 403 « Scope requis : catalogue:write »
+CLE devis:read | PUT /api/v1/catalogue/:family/:id | prestation-catalogue | défaut | 403 « Scope requis : catalogue:write »
+CLE devis:read | PUT /api/v1/clients/:clientId/contacts/:id | contact-autre-client | défaut | 403 « Scope requis : clients:write »
+CLE devis:read | PUT /api/v1/clients/:clientId/contacts/:id | contact-client-actif | défaut | 403 « Scope requis : clients:write »
+CLE devis:read | PUT /api/v1/clients/:clientId/contacts/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE devis:read | PUT /api/v1/clients/:clientId/sites/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE devis:read | PUT /api/v1/clients/:clientId/sites/:id | site-autre-client | défaut | 403 « Scope requis : clients:write »
+CLE devis:read | PUT /api/v1/clients/:clientId/sites/:id | site-client-actif | défaut | 403 « Scope requis : clients:write »
+CLE devis:read | PUT /api/v1/clients/:id | client-actif | défaut | 403 « Scope requis : clients:write »
+CLE devis:read | PUT /api/v1/clients/:id | client-desactive | défaut | 403 « Scope requis : clients:write »
+CLE devis:read | PUT /api/v1/clients/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE devis:read | PUT /api/v1/devis/:id/statut | devis-brouillon | défaut | 403 « Scope requis : devis:write »
+CLE devis:read | PUT /api/v1/devis/:id/statut | devis-converti | défaut | 403 « Scope requis : devis:write »
+CLE devis:read | PUT /api/v1/devis/:id/statut | devis-signe | défaut | 403 « Scope requis : devis:write »
+CLE devis:read | PUT /api/v1/devis/:id/statut | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE devis:write | DELETE /api/v1/catalogue/:family/:id | inexistant | défaut | 403 « Scope requis : catalogue:write »
+CLE devis:write | DELETE /api/v1/clients/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE devis:write | GET /api/v1/achats | — | défaut | 403 « Scope requis : chantiers:read »
+CLE devis:write | GET /api/v1/catalogue/:family | family=prestations | défaut | 403 « Scope requis : catalogue:read »
+CLE devis:write | GET /api/v1/catalogue/categories | — | défaut | 403 « Scope requis : catalogue:read »
+CLE devis:write | GET /api/v1/chantiers | — | défaut | 403 « Scope requis : chantiers:read »
+CLE devis:write | GET /api/v1/clients | — | défaut | 403 « Scope requis : clients:read »
+CLE devis:write | GET /api/v1/clients/:clientId/equipements | client-actif | défaut | 403 « Scope requis : equipements:read »
+CLE devis:write | GET /api/v1/clients/:clientId/equipements | client-desactive | défaut | 403 « Scope requis : equipements:read »
+CLE devis:write | GET /api/v1/clients/:clientId/equipements | inexistant | défaut | 403 « Scope requis : equipements:read »
+CLE devis:write | GET /api/v1/clients/:id | client-actif | défaut | 403 « Scope requis : clients:read »
+CLE devis:write | GET /api/v1/clients/:id | client-desactive | défaut | 403 « Scope requis : clients:read »
+CLE devis:write | GET /api/v1/clients/:id | inexistant | défaut | 403 « Scope requis : clients:read »
+CLE devis:write | GET /api/v1/company | — | défaut | 403 « Scope requis : company:read »
+CLE devis:write | GET /api/v1/devis | — | défaut | 403 « Scope requis : devis:read »
+CLE devis:write | GET /api/v1/heures | — | défaut | 403 « Scope requis : chantiers:read »
+CLE devis:write | PATCH /api/v1/devis/:id | devis-brouillon | défaut | 400 validation-avant-droit
+CLE devis:write | PATCH /api/v1/devis/:id | devis-converti | défaut | 400 validation-avant-droit
+CLE devis:write | PATCH /api/v1/devis/:id | devis-signe | défaut | 400 validation-avant-droit
+CLE devis:write | PATCH /api/v1/devis/:id | inexistant | défaut | 400 validation-avant-droit
+CLE devis:write | POST /api/v1/catalogue/:family | family=prestations | défaut | 403 « Scope requis : catalogue:write »
+CLE devis:write | POST /api/v1/catalogue/categories | — | défaut | 403 « Scope requis : catalogue:write »
+CLE devis:write | POST /api/v1/clients | — | défaut | 403 « Scope requis : clients:write »
+CLE devis:write | POST /api/v1/clients/:clientId/contacts | client-actif | défaut | 403 « Scope requis : clients:write »
+CLE devis:write | POST /api/v1/clients/:clientId/contacts | client-desactive | défaut | 403 « Scope requis : clients:write »
+CLE devis:write | POST /api/v1/clients/:clientId/contacts | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE devis:write | POST /api/v1/clients/:clientId/equipements | client-actif | défaut | 403 « Scope requis : equipements:write »
+CLE devis:write | POST /api/v1/clients/:clientId/equipements | client-desactive | défaut | 403 « Scope requis : equipements:write »
+CLE devis:write | POST /api/v1/clients/:clientId/equipements | inexistant | défaut | 403 « Scope requis : equipements:write »
+CLE devis:write | POST /api/v1/clients/:clientId/equipements/:id/archiver | inexistant | défaut | 403 « Scope requis : equipements:write »
+CLE devis:write | POST /api/v1/clients/:clientId/sites | client-actif | défaut | 403 « Scope requis : clients:write »
+CLE devis:write | POST /api/v1/clients/:clientId/sites | client-desactive | défaut | 403 « Scope requis : clients:write »
+CLE devis:write | POST /api/v1/clients/:clientId/sites | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE devis:write | POST /api/v1/devis | — | défaut | 400 validation-avant-droit
+CLE devis:write | POST /api/v1/devis/:id/convertir | devis-brouillon | défaut | 400 validation-avant-droit
+CLE devis:write | POST /api/v1/devis/:id/convertir | devis-converti | défaut | 400 validation-avant-droit
+CLE devis:write | POST /api/v1/devis/:id/convertir | devis-signe | défaut | 400 validation-avant-droit
+CLE devis:write | POST /api/v1/devis/:id/convertir | inexistant | défaut | 400 validation-avant-droit
+CLE devis:write | POST /api/v1/devis/:id/revisions | inexistant | défaut | 400
+CLE devis:write | PUT /api/v1/catalogue/:family/:id | inexistant | défaut | 403 « Scope requis : catalogue:write »
+CLE devis:write | PUT /api/v1/catalogue/:family/:id | prestation-catalogue | défaut | 403 « Scope requis : catalogue:write »
+CLE devis:write | PUT /api/v1/clients/:clientId/contacts/:id | contact-autre-client | défaut | 403 « Scope requis : clients:write »
+CLE devis:write | PUT /api/v1/clients/:clientId/contacts/:id | contact-client-actif | défaut | 403 « Scope requis : clients:write »
+CLE devis:write | PUT /api/v1/clients/:clientId/contacts/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE devis:write | PUT /api/v1/clients/:clientId/sites/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE devis:write | PUT /api/v1/clients/:clientId/sites/:id | site-autre-client | défaut | 403 « Scope requis : clients:write »
+CLE devis:write | PUT /api/v1/clients/:clientId/sites/:id | site-client-actif | défaut | 403 « Scope requis : clients:write »
+CLE devis:write | PUT /api/v1/clients/:id | client-actif | défaut | 403 « Scope requis : clients:write »
+CLE devis:write | PUT /api/v1/clients/:id | client-desactive | défaut | 403 « Scope requis : clients:write »
+CLE devis:write | PUT /api/v1/clients/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE devis:write | PUT /api/v1/devis/:id/statut | devis-brouillon | défaut | 400
+CLE devis:write | PUT /api/v1/devis/:id/statut | devis-converti | défaut | 400
+CLE devis:write | PUT /api/v1/devis/:id/statut | devis-signe | défaut | 400
+CLE devis:write | PUT /api/v1/devis/:id/statut | inexistant | défaut | 404 « Devis introuvable. »
+CLE equipements:read | DELETE /api/v1/catalogue/:family/:id | inexistant | défaut | 403 « Scope requis : catalogue:write »
+CLE equipements:read | DELETE /api/v1/clients/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE equipements:read | GET /api/v1/achats | — | défaut | 403 « Scope requis : chantiers:read »
+CLE equipements:read | GET /api/v1/catalogue/:family | family=prestations | défaut | 403 « Scope requis : catalogue:read »
+CLE equipements:read | GET /api/v1/catalogue/categories | — | défaut | 403 « Scope requis : catalogue:read »
+CLE equipements:read | GET /api/v1/chantiers | — | défaut | 403 « Scope requis : chantiers:read »
+CLE equipements:read | GET /api/v1/clients | — | défaut | 403 « Scope requis : clients:read »
+CLE equipements:read | GET /api/v1/clients/:clientId/equipements | client-actif | défaut | 200
+CLE equipements:read | GET /api/v1/clients/:clientId/equipements | client-desactive | défaut | 200
+CLE equipements:read | GET /api/v1/clients/:clientId/equipements | inexistant | défaut | 200
+CLE equipements:read | GET /api/v1/clients/:id | client-actif | défaut | 403 « Scope requis : clients:read »
+CLE equipements:read | GET /api/v1/clients/:id | client-desactive | défaut | 403 « Scope requis : clients:read »
+CLE equipements:read | GET /api/v1/clients/:id | inexistant | défaut | 403 « Scope requis : clients:read »
+CLE equipements:read | GET /api/v1/company | — | défaut | 403 « Scope requis : company:read »
+CLE equipements:read | GET /api/v1/devis | — | défaut | 403 « Scope requis : devis:read »
+CLE equipements:read | GET /api/v1/heures | — | défaut | 403 « Scope requis : chantiers:read »
+CLE equipements:read | PATCH /api/v1/devis/:id | devis-brouillon | défaut | 403 « Scope requis : devis:write »
+CLE equipements:read | PATCH /api/v1/devis/:id | devis-converti | défaut | 403 « Scope requis : devis:write »
+CLE equipements:read | PATCH /api/v1/devis/:id | devis-signe | défaut | 403 « Scope requis : devis:write »
+CLE equipements:read | PATCH /api/v1/devis/:id | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE equipements:read | POST /api/v1/catalogue/:family | family=prestations | défaut | 403 « Scope requis : catalogue:write »
+CLE equipements:read | POST /api/v1/catalogue/categories | — | défaut | 403 « Scope requis : catalogue:write »
+CLE equipements:read | POST /api/v1/clients | — | défaut | 403 « Scope requis : clients:write »
+CLE equipements:read | POST /api/v1/clients/:clientId/contacts | client-actif | défaut | 403 « Scope requis : clients:write »
+CLE equipements:read | POST /api/v1/clients/:clientId/contacts | client-desactive | défaut | 403 « Scope requis : clients:write »
+CLE equipements:read | POST /api/v1/clients/:clientId/contacts | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE equipements:read | POST /api/v1/clients/:clientId/equipements | client-actif | défaut | 403 « Scope requis : equipements:write »
+CLE equipements:read | POST /api/v1/clients/:clientId/equipements | client-desactive | défaut | 403 « Scope requis : equipements:write »
+CLE equipements:read | POST /api/v1/clients/:clientId/equipements | inexistant | défaut | 403 « Scope requis : equipements:write »
+CLE equipements:read | POST /api/v1/clients/:clientId/equipements/:id/archiver | inexistant | défaut | 403 « Scope requis : equipements:write »
+CLE equipements:read | POST /api/v1/clients/:clientId/sites | client-actif | défaut | 403 « Scope requis : clients:write »
+CLE equipements:read | POST /api/v1/clients/:clientId/sites | client-desactive | défaut | 403 « Scope requis : clients:write »
+CLE equipements:read | POST /api/v1/clients/:clientId/sites | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE equipements:read | POST /api/v1/devis | — | défaut | 403 « Scope requis : devis:write »
+CLE equipements:read | POST /api/v1/devis/:id/convertir | devis-brouillon | défaut | 403 « Scope requis : devis:write »
+CLE equipements:read | POST /api/v1/devis/:id/convertir | devis-converti | défaut | 403 « Scope requis : devis:write »
+CLE equipements:read | POST /api/v1/devis/:id/convertir | devis-signe | défaut | 403 « Scope requis : devis:write »
+CLE equipements:read | POST /api/v1/devis/:id/convertir | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE equipements:read | POST /api/v1/devis/:id/revisions | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE equipements:read | PUT /api/v1/catalogue/:family/:id | inexistant | défaut | 403 « Scope requis : catalogue:write »
+CLE equipements:read | PUT /api/v1/catalogue/:family/:id | prestation-catalogue | défaut | 403 « Scope requis : catalogue:write »
+CLE equipements:read | PUT /api/v1/clients/:clientId/contacts/:id | contact-autre-client | défaut | 403 « Scope requis : clients:write »
+CLE equipements:read | PUT /api/v1/clients/:clientId/contacts/:id | contact-client-actif | défaut | 403 « Scope requis : clients:write »
+CLE equipements:read | PUT /api/v1/clients/:clientId/contacts/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE equipements:read | PUT /api/v1/clients/:clientId/sites/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE equipements:read | PUT /api/v1/clients/:clientId/sites/:id | site-autre-client | défaut | 403 « Scope requis : clients:write »
+CLE equipements:read | PUT /api/v1/clients/:clientId/sites/:id | site-client-actif | défaut | 403 « Scope requis : clients:write »
+CLE equipements:read | PUT /api/v1/clients/:id | client-actif | défaut | 403 « Scope requis : clients:write »
+CLE equipements:read | PUT /api/v1/clients/:id | client-desactive | défaut | 403 « Scope requis : clients:write »
+CLE equipements:read | PUT /api/v1/clients/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE equipements:read | PUT /api/v1/devis/:id/statut | devis-brouillon | défaut | 403 « Scope requis : devis:write »
+CLE equipements:read | PUT /api/v1/devis/:id/statut | devis-converti | défaut | 403 « Scope requis : devis:write »
+CLE equipements:read | PUT /api/v1/devis/:id/statut | devis-signe | défaut | 403 « Scope requis : devis:write »
+CLE equipements:read | PUT /api/v1/devis/:id/statut | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE equipements:write | DELETE /api/v1/catalogue/:family/:id | inexistant | défaut | 403 « Scope requis : catalogue:write »
+CLE equipements:write | DELETE /api/v1/clients/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE equipements:write | GET /api/v1/achats | — | défaut | 403 « Scope requis : chantiers:read »
+CLE equipements:write | GET /api/v1/catalogue/:family | family=prestations | défaut | 403 « Scope requis : catalogue:read »
+CLE equipements:write | GET /api/v1/catalogue/categories | — | défaut | 403 « Scope requis : catalogue:read »
+CLE equipements:write | GET /api/v1/chantiers | — | défaut | 403 « Scope requis : chantiers:read »
+CLE equipements:write | GET /api/v1/clients | — | défaut | 403 « Scope requis : clients:read »
+CLE equipements:write | GET /api/v1/clients/:clientId/equipements | client-actif | défaut | 403 « Scope requis : equipements:read »
+CLE equipements:write | GET /api/v1/clients/:clientId/equipements | client-desactive | défaut | 403 « Scope requis : equipements:read »
+CLE equipements:write | GET /api/v1/clients/:clientId/equipements | inexistant | défaut | 403 « Scope requis : equipements:read »
+CLE equipements:write | GET /api/v1/clients/:id | client-actif | défaut | 403 « Scope requis : clients:read »
+CLE equipements:write | GET /api/v1/clients/:id | client-desactive | défaut | 403 « Scope requis : clients:read »
+CLE equipements:write | GET /api/v1/clients/:id | inexistant | défaut | 403 « Scope requis : clients:read »
+CLE equipements:write | GET /api/v1/company | — | défaut | 403 « Scope requis : company:read »
+CLE equipements:write | GET /api/v1/devis | — | défaut | 403 « Scope requis : devis:read »
+CLE equipements:write | GET /api/v1/heures | — | défaut | 403 « Scope requis : chantiers:read »
+CLE equipements:write | PATCH /api/v1/devis/:id | devis-brouillon | défaut | 403 « Scope requis : devis:write »
+CLE equipements:write | PATCH /api/v1/devis/:id | devis-converti | défaut | 403 « Scope requis : devis:write »
+CLE equipements:write | PATCH /api/v1/devis/:id | devis-signe | défaut | 403 « Scope requis : devis:write »
+CLE equipements:write | PATCH /api/v1/devis/:id | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE equipements:write | POST /api/v1/catalogue/:family | family=prestations | défaut | 403 « Scope requis : catalogue:write »
+CLE equipements:write | POST /api/v1/catalogue/categories | — | défaut | 403 « Scope requis : catalogue:write »
+CLE equipements:write | POST /api/v1/clients | — | défaut | 403 « Scope requis : clients:write »
+CLE equipements:write | POST /api/v1/clients/:clientId/contacts | client-actif | défaut | 403 « Scope requis : clients:write »
+CLE equipements:write | POST /api/v1/clients/:clientId/contacts | client-desactive | défaut | 403 « Scope requis : clients:write »
+CLE equipements:write | POST /api/v1/clients/:clientId/contacts | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE equipements:write | POST /api/v1/clients/:clientId/equipements | client-actif | défaut | 400
+CLE equipements:write | POST /api/v1/clients/:clientId/equipements | client-desactive | défaut | 400
+CLE equipements:write | POST /api/v1/clients/:clientId/equipements | inexistant | défaut | 400
+CLE equipements:write | POST /api/v1/clients/:clientId/equipements/:id/archiver | inexistant | défaut | 404 « Équipement introuvable. »
+CLE equipements:write | POST /api/v1/clients/:clientId/sites | client-actif | défaut | 403 « Scope requis : clients:write »
+CLE equipements:write | POST /api/v1/clients/:clientId/sites | client-desactive | défaut | 403 « Scope requis : clients:write »
+CLE equipements:write | POST /api/v1/clients/:clientId/sites | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE equipements:write | POST /api/v1/devis | — | défaut | 403 « Scope requis : devis:write »
+CLE equipements:write | POST /api/v1/devis/:id/convertir | devis-brouillon | défaut | 403 « Scope requis : devis:write »
+CLE equipements:write | POST /api/v1/devis/:id/convertir | devis-converti | défaut | 403 « Scope requis : devis:write »
+CLE equipements:write | POST /api/v1/devis/:id/convertir | devis-signe | défaut | 403 « Scope requis : devis:write »
+CLE equipements:write | POST /api/v1/devis/:id/convertir | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE equipements:write | POST /api/v1/devis/:id/revisions | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE equipements:write | PUT /api/v1/catalogue/:family/:id | inexistant | défaut | 403 « Scope requis : catalogue:write »
+CLE equipements:write | PUT /api/v1/catalogue/:family/:id | prestation-catalogue | défaut | 403 « Scope requis : catalogue:write »
+CLE equipements:write | PUT /api/v1/clients/:clientId/contacts/:id | contact-autre-client | défaut | 403 « Scope requis : clients:write »
+CLE equipements:write | PUT /api/v1/clients/:clientId/contacts/:id | contact-client-actif | défaut | 403 « Scope requis : clients:write »
+CLE equipements:write | PUT /api/v1/clients/:clientId/contacts/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE equipements:write | PUT /api/v1/clients/:clientId/sites/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE equipements:write | PUT /api/v1/clients/:clientId/sites/:id | site-autre-client | défaut | 403 « Scope requis : clients:write »
+CLE equipements:write | PUT /api/v1/clients/:clientId/sites/:id | site-client-actif | défaut | 403 « Scope requis : clients:write »
+CLE equipements:write | PUT /api/v1/clients/:id | client-actif | défaut | 403 « Scope requis : clients:write »
+CLE equipements:write | PUT /api/v1/clients/:id | client-desactive | défaut | 403 « Scope requis : clients:write »
+CLE equipements:write | PUT /api/v1/clients/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE equipements:write | PUT /api/v1/devis/:id/statut | devis-brouillon | défaut | 403 « Scope requis : devis:write »
+CLE equipements:write | PUT /api/v1/devis/:id/statut | devis-converti | défaut | 403 « Scope requis : devis:write »
+CLE equipements:write | PUT /api/v1/devis/:id/statut | devis-signe | défaut | 403 « Scope requis : devis:write »
+CLE equipements:write | PUT /api/v1/devis/:id/statut | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE finances:read | DELETE /api/v1/catalogue/:family/:id | inexistant | défaut | 403 « Scope requis : catalogue:write »
+CLE finances:read | DELETE /api/v1/clients/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE finances:read | GET /api/v1/achats | — | défaut | 403 « Scope requis : chantiers:read »
+CLE finances:read | GET /api/v1/catalogue/:family | family=prestations | défaut | 403 « Scope requis : catalogue:read »
+CLE finances:read | GET /api/v1/catalogue/categories | — | défaut | 403 « Scope requis : catalogue:read »
+CLE finances:read | GET /api/v1/chantiers | — | défaut | 403 « Scope requis : chantiers:read »
+CLE finances:read | GET /api/v1/clients | — | défaut | 403 « Scope requis : clients:read »
+CLE finances:read | GET /api/v1/clients/:clientId/equipements | client-actif | défaut | 403 « Scope requis : equipements:read »
+CLE finances:read | GET /api/v1/clients/:clientId/equipements | client-desactive | défaut | 403 « Scope requis : equipements:read »
+CLE finances:read | GET /api/v1/clients/:clientId/equipements | inexistant | défaut | 403 « Scope requis : equipements:read »
+CLE finances:read | GET /api/v1/clients/:id | client-actif | défaut | 403 « Scope requis : clients:read »
+CLE finances:read | GET /api/v1/clients/:id | client-desactive | défaut | 403 « Scope requis : clients:read »
+CLE finances:read | GET /api/v1/clients/:id | inexistant | défaut | 403 « Scope requis : clients:read »
+CLE finances:read | GET /api/v1/company | — | défaut | 403 « Scope requis : company:read »
+CLE finances:read | GET /api/v1/devis | — | défaut | 403 « Scope requis : devis:read »
+CLE finances:read | GET /api/v1/heures | — | défaut | 403 « Scope requis : chantiers:read »
+CLE finances:read | PATCH /api/v1/devis/:id | devis-brouillon | défaut | 403 « Scope requis : devis:write »
+CLE finances:read | PATCH /api/v1/devis/:id | devis-converti | défaut | 403 « Scope requis : devis:write »
+CLE finances:read | PATCH /api/v1/devis/:id | devis-signe | défaut | 403 « Scope requis : devis:write »
+CLE finances:read | PATCH /api/v1/devis/:id | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE finances:read | POST /api/v1/catalogue/:family | family=prestations | défaut | 403 « Scope requis : catalogue:write »
+CLE finances:read | POST /api/v1/catalogue/categories | — | défaut | 403 « Scope requis : catalogue:write »
+CLE finances:read | POST /api/v1/clients | — | défaut | 403 « Scope requis : clients:write »
+CLE finances:read | POST /api/v1/clients/:clientId/contacts | client-actif | défaut | 403 « Scope requis : clients:write »
+CLE finances:read | POST /api/v1/clients/:clientId/contacts | client-desactive | défaut | 403 « Scope requis : clients:write »
+CLE finances:read | POST /api/v1/clients/:clientId/contacts | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE finances:read | POST /api/v1/clients/:clientId/equipements | client-actif | défaut | 403 « Scope requis : equipements:write »
+CLE finances:read | POST /api/v1/clients/:clientId/equipements | client-desactive | défaut | 403 « Scope requis : equipements:write »
+CLE finances:read | POST /api/v1/clients/:clientId/equipements | inexistant | défaut | 403 « Scope requis : equipements:write »
+CLE finances:read | POST /api/v1/clients/:clientId/equipements/:id/archiver | inexistant | défaut | 403 « Scope requis : equipements:write »
+CLE finances:read | POST /api/v1/clients/:clientId/sites | client-actif | défaut | 403 « Scope requis : clients:write »
+CLE finances:read | POST /api/v1/clients/:clientId/sites | client-desactive | défaut | 403 « Scope requis : clients:write »
+CLE finances:read | POST /api/v1/clients/:clientId/sites | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE finances:read | POST /api/v1/devis | — | défaut | 403 « Scope requis : devis:write »
+CLE finances:read | POST /api/v1/devis/:id/convertir | devis-brouillon | défaut | 403 « Scope requis : devis:write »
+CLE finances:read | POST /api/v1/devis/:id/convertir | devis-converti | défaut | 403 « Scope requis : devis:write »
+CLE finances:read | POST /api/v1/devis/:id/convertir | devis-signe | défaut | 403 « Scope requis : devis:write »
+CLE finances:read | POST /api/v1/devis/:id/convertir | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE finances:read | POST /api/v1/devis/:id/revisions | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE finances:read | PUT /api/v1/catalogue/:family/:id | inexistant | défaut | 403 « Scope requis : catalogue:write »
+CLE finances:read | PUT /api/v1/catalogue/:family/:id | prestation-catalogue | défaut | 403 « Scope requis : catalogue:write »
+CLE finances:read | PUT /api/v1/clients/:clientId/contacts/:id | contact-autre-client | défaut | 403 « Scope requis : clients:write »
+CLE finances:read | PUT /api/v1/clients/:clientId/contacts/:id | contact-client-actif | défaut | 403 « Scope requis : clients:write »
+CLE finances:read | PUT /api/v1/clients/:clientId/contacts/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE finances:read | PUT /api/v1/clients/:clientId/sites/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE finances:read | PUT /api/v1/clients/:clientId/sites/:id | site-autre-client | défaut | 403 « Scope requis : clients:write »
+CLE finances:read | PUT /api/v1/clients/:clientId/sites/:id | site-client-actif | défaut | 403 « Scope requis : clients:write »
+CLE finances:read | PUT /api/v1/clients/:id | client-actif | défaut | 403 « Scope requis : clients:write »
+CLE finances:read | PUT /api/v1/clients/:id | client-desactive | défaut | 403 « Scope requis : clients:write »
+CLE finances:read | PUT /api/v1/clients/:id | inexistant | défaut | 403 « Scope requis : clients:write »
+CLE finances:read | PUT /api/v1/devis/:id/statut | devis-brouillon | défaut | 403 « Scope requis : devis:write »
+CLE finances:read | PUT /api/v1/devis/:id/statut | devis-converti | défaut | 403 « Scope requis : devis:write »
+CLE finances:read | PUT /api/v1/devis/:id/statut | devis-signe | défaut | 403 « Scope requis : devis:write »
+CLE finances:read | PUT /api/v1/devis/:id/statut | inexistant | défaut | 403 « Scope requis : devis:write »
+CLE-ABSENTE | DELETE /api/v1/catalogue/:family/:id | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-ABSENTE | DELETE /api/v1/clients/:id | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-ABSENTE | GET /api/v1/achats | — | défaut | 401 « Clé API Iris requise »
+CLE-ABSENTE | GET /api/v1/catalogue/:family | family=prestations | défaut | 401 « Clé API Iris requise »
+CLE-ABSENTE | GET /api/v1/catalogue/categories | — | défaut | 401 « Clé API Iris requise »
+CLE-ABSENTE | GET /api/v1/chantiers | — | défaut | 401 « Clé API Iris requise »
+CLE-ABSENTE | GET /api/v1/clients | — | défaut | 401 « Clé API Iris requise »
+CLE-ABSENTE | GET /api/v1/clients/:clientId/equipements | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-ABSENTE | GET /api/v1/clients/:id | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-ABSENTE | GET /api/v1/company | — | défaut | 401 « Clé API Iris requise »
+CLE-ABSENTE | GET /api/v1/devis | — | défaut | 401 « Clé API Iris requise »
+CLE-ABSENTE | GET /api/v1/heures | — | défaut | 401 « Clé API Iris requise »
+CLE-ABSENTE | PATCH /api/v1/devis/:id | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-ABSENTE | POST /api/v1/catalogue/:family | family=prestations | défaut | 401 « Clé API Iris requise »
+CLE-ABSENTE | POST /api/v1/catalogue/categories | — | défaut | 401 « Clé API Iris requise »
+CLE-ABSENTE | POST /api/v1/clients | — | défaut | 401 « Clé API Iris requise »
+CLE-ABSENTE | POST /api/v1/clients/:clientId/contacts | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-ABSENTE | POST /api/v1/clients/:clientId/equipements | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-ABSENTE | POST /api/v1/clients/:clientId/equipements/:id/archiver | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-ABSENTE | POST /api/v1/clients/:clientId/sites | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-ABSENTE | POST /api/v1/devis | — | défaut | 401 « Clé API Iris requise »
+CLE-ABSENTE | POST /api/v1/devis/:id/convertir | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-ABSENTE | POST /api/v1/devis/:id/revisions | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-ABSENTE | PUT /api/v1/catalogue/:family/:id | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-ABSENTE | PUT /api/v1/clients/:clientId/contacts/:id | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-ABSENTE | PUT /api/v1/clients/:clientId/sites/:id | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-ABSENTE | PUT /api/v1/clients/:id | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-ABSENTE | PUT /api/v1/devis/:id/statut | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-AUTRE-SCHEMA | DELETE /api/v1/catalogue/:family/:id | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-AUTRE-SCHEMA | DELETE /api/v1/clients/:id | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-AUTRE-SCHEMA | GET /api/v1/achats | — | défaut | 401 « Clé API Iris requise »
+CLE-AUTRE-SCHEMA | GET /api/v1/catalogue/:family | family=prestations | défaut | 401 « Clé API Iris requise »
+CLE-AUTRE-SCHEMA | GET /api/v1/catalogue/categories | — | défaut | 401 « Clé API Iris requise »
+CLE-AUTRE-SCHEMA | GET /api/v1/chantiers | — | défaut | 401 « Clé API Iris requise »
+CLE-AUTRE-SCHEMA | GET /api/v1/clients | — | défaut | 401 « Clé API Iris requise »
+CLE-AUTRE-SCHEMA | GET /api/v1/clients/:clientId/equipements | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-AUTRE-SCHEMA | GET /api/v1/clients/:id | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-AUTRE-SCHEMA | GET /api/v1/company | — | défaut | 401 « Clé API Iris requise »
+CLE-AUTRE-SCHEMA | GET /api/v1/devis | — | défaut | 401 « Clé API Iris requise »
+CLE-AUTRE-SCHEMA | GET /api/v1/heures | — | défaut | 401 « Clé API Iris requise »
+CLE-AUTRE-SCHEMA | PATCH /api/v1/devis/:id | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-AUTRE-SCHEMA | POST /api/v1/catalogue/:family | family=prestations | défaut | 401 « Clé API Iris requise »
+CLE-AUTRE-SCHEMA | POST /api/v1/catalogue/categories | — | défaut | 401 « Clé API Iris requise »
+CLE-AUTRE-SCHEMA | POST /api/v1/clients | — | défaut | 401 « Clé API Iris requise »
+CLE-AUTRE-SCHEMA | POST /api/v1/clients/:clientId/contacts | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-AUTRE-SCHEMA | POST /api/v1/clients/:clientId/equipements | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-AUTRE-SCHEMA | POST /api/v1/clients/:clientId/equipements/:id/archiver | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-AUTRE-SCHEMA | POST /api/v1/clients/:clientId/sites | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-AUTRE-SCHEMA | POST /api/v1/devis | — | défaut | 401 « Clé API Iris requise »
+CLE-AUTRE-SCHEMA | POST /api/v1/devis/:id/convertir | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-AUTRE-SCHEMA | POST /api/v1/devis/:id/revisions | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-AUTRE-SCHEMA | PUT /api/v1/catalogue/:family/:id | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-AUTRE-SCHEMA | PUT /api/v1/clients/:clientId/contacts/:id | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-AUTRE-SCHEMA | PUT /api/v1/clients/:clientId/sites/:id | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-AUTRE-SCHEMA | PUT /api/v1/clients/:id | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-AUTRE-SCHEMA | PUT /api/v1/devis/:id/statut | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-EXPIREE | DELETE /api/v1/catalogue/:family/:id | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-EXPIREE | DELETE /api/v1/clients/:id | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-EXPIREE | GET /api/v1/achats | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-EXPIREE | GET /api/v1/catalogue/:family | family=prestations | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-EXPIREE | GET /api/v1/catalogue/categories | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-EXPIREE | GET /api/v1/chantiers | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-EXPIREE | GET /api/v1/clients | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-EXPIREE | GET /api/v1/clients/:clientId/equipements | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-EXPIREE | GET /api/v1/clients/:id | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-EXPIREE | GET /api/v1/company | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-EXPIREE | GET /api/v1/devis | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-EXPIREE | GET /api/v1/heures | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-EXPIREE | PATCH /api/v1/devis/:id | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-EXPIREE | POST /api/v1/catalogue/:family | family=prestations | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-EXPIREE | POST /api/v1/catalogue/categories | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-EXPIREE | POST /api/v1/clients | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-EXPIREE | POST /api/v1/clients/:clientId/contacts | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-EXPIREE | POST /api/v1/clients/:clientId/equipements | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-EXPIREE | POST /api/v1/clients/:clientId/equipements/:id/archiver | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-EXPIREE | POST /api/v1/clients/:clientId/sites | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-EXPIREE | POST /api/v1/devis | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-EXPIREE | POST /api/v1/devis/:id/convertir | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-EXPIREE | POST /api/v1/devis/:id/revisions | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-EXPIREE | PUT /api/v1/catalogue/:family/:id | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-EXPIREE | PUT /api/v1/clients/:clientId/contacts/:id | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-EXPIREE | PUT /api/v1/clients/:clientId/sites/:id | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-EXPIREE | PUT /api/v1/clients/:id | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-EXPIREE | PUT /api/v1/devis/:id/statut | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INACTIVE | DELETE /api/v1/catalogue/:family/:id | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INACTIVE | DELETE /api/v1/clients/:id | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INACTIVE | GET /api/v1/achats | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INACTIVE | GET /api/v1/catalogue/:family | family=prestations | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INACTIVE | GET /api/v1/catalogue/categories | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INACTIVE | GET /api/v1/chantiers | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INACTIVE | GET /api/v1/clients | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INACTIVE | GET /api/v1/clients/:clientId/equipements | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INACTIVE | GET /api/v1/clients/:id | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INACTIVE | GET /api/v1/company | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INACTIVE | GET /api/v1/devis | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INACTIVE | GET /api/v1/heures | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INACTIVE | PATCH /api/v1/devis/:id | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INACTIVE | POST /api/v1/catalogue/:family | family=prestations | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INACTIVE | POST /api/v1/catalogue/categories | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INACTIVE | POST /api/v1/clients | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INACTIVE | POST /api/v1/clients/:clientId/contacts | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INACTIVE | POST /api/v1/clients/:clientId/equipements | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INACTIVE | POST /api/v1/clients/:clientId/equipements/:id/archiver | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INACTIVE | POST /api/v1/clients/:clientId/sites | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INACTIVE | POST /api/v1/devis | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INACTIVE | POST /api/v1/devis/:id/convertir | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INACTIVE | POST /api/v1/devis/:id/revisions | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INACTIVE | PUT /api/v1/catalogue/:family/:id | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INACTIVE | PUT /api/v1/clients/:clientId/contacts/:id | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INACTIVE | PUT /api/v1/clients/:clientId/sites/:id | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INACTIVE | PUT /api/v1/clients/:id | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INACTIVE | PUT /api/v1/devis/:id/statut | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INCONNUE | DELETE /api/v1/catalogue/:family/:id | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INCONNUE | DELETE /api/v1/clients/:id | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INCONNUE | GET /api/v1/achats | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INCONNUE | GET /api/v1/catalogue/:family | family=prestations | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INCONNUE | GET /api/v1/catalogue/categories | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INCONNUE | GET /api/v1/chantiers | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INCONNUE | GET /api/v1/clients | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INCONNUE | GET /api/v1/clients/:clientId/equipements | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INCONNUE | GET /api/v1/clients/:id | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INCONNUE | GET /api/v1/company | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INCONNUE | GET /api/v1/devis | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INCONNUE | GET /api/v1/heures | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INCONNUE | PATCH /api/v1/devis/:id | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INCONNUE | POST /api/v1/catalogue/:family | family=prestations | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INCONNUE | POST /api/v1/catalogue/categories | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INCONNUE | POST /api/v1/clients | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INCONNUE | POST /api/v1/clients/:clientId/contacts | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INCONNUE | POST /api/v1/clients/:clientId/equipements | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INCONNUE | POST /api/v1/clients/:clientId/equipements/:id/archiver | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INCONNUE | POST /api/v1/clients/:clientId/sites | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INCONNUE | POST /api/v1/devis | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INCONNUE | POST /api/v1/devis/:id/convertir | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INCONNUE | POST /api/v1/devis/:id/revisions | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INCONNUE | PUT /api/v1/catalogue/:family/:id | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INCONNUE | PUT /api/v1/clients/:clientId/contacts/:id | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INCONNUE | PUT /api/v1/clients/:clientId/sites/:id | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INCONNUE | PUT /api/v1/clients/:id | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-INCONNUE | PUT /api/v1/devis/:id/statut | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE | DELETE /api/v1/catalogue/:family/:id | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE | DELETE /api/v1/clients/:id | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE | GET /api/v1/achats | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE | GET /api/v1/catalogue/:family | family=prestations | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE | GET /api/v1/catalogue/categories | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE | GET /api/v1/chantiers | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE | GET /api/v1/clients | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE | GET /api/v1/clients/:clientId/equipements | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE | GET /api/v1/clients/:id | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE | GET /api/v1/company | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE | GET /api/v1/devis | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE | GET /api/v1/heures | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE | PATCH /api/v1/devis/:id | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE | POST /api/v1/catalogue/:family | family=prestations | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE | POST /api/v1/catalogue/categories | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE | POST /api/v1/clients | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE | POST /api/v1/clients/:clientId/contacts | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE | POST /api/v1/clients/:clientId/equipements | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE | POST /api/v1/clients/:clientId/equipements/:id/archiver | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE | POST /api/v1/clients/:clientId/sites | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE | POST /api/v1/devis | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE | POST /api/v1/devis/:id/convertir | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE | POST /api/v1/devis/:id/revisions | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE | PUT /api/v1/catalogue/:family/:id | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE | PUT /api/v1/clients/:clientId/contacts/:id | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE | PUT /api/v1/clients/:clientId/sites/:id | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE | PUT /api/v1/clients/:id | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE | PUT /api/v1/devis/:id/statut | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE-ACTIVE | DELETE /api/v1/catalogue/:family/:id | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE-ACTIVE | DELETE /api/v1/clients/:id | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE-ACTIVE | GET /api/v1/achats | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE-ACTIVE | GET /api/v1/catalogue/:family | family=prestations | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE-ACTIVE | GET /api/v1/catalogue/categories | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE-ACTIVE | GET /api/v1/chantiers | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE-ACTIVE | GET /api/v1/clients | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE-ACTIVE | GET /api/v1/clients/:clientId/equipements | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE-ACTIVE | GET /api/v1/clients/:id | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE-ACTIVE | GET /api/v1/company | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE-ACTIVE | GET /api/v1/devis | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE-ACTIVE | GET /api/v1/heures | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE-ACTIVE | PATCH /api/v1/devis/:id | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE-ACTIVE | POST /api/v1/catalogue/:family | family=prestations | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE-ACTIVE | POST /api/v1/catalogue/categories | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE-ACTIVE | POST /api/v1/clients | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE-ACTIVE | POST /api/v1/clients/:clientId/contacts | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE-ACTIVE | POST /api/v1/clients/:clientId/equipements | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE-ACTIVE | POST /api/v1/clients/:clientId/equipements/:id/archiver | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE-ACTIVE | POST /api/v1/clients/:clientId/sites | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE-ACTIVE | POST /api/v1/devis | — | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE-ACTIVE | POST /api/v1/devis/:id/convertir | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE-ACTIVE | POST /api/v1/devis/:id/revisions | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE-ACTIVE | PUT /api/v1/catalogue/:family/:id | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE-ACTIVE | PUT /api/v1/clients/:clientId/contacts/:id | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE-ACTIVE | PUT /api/v1/clients/:clientId/sites/:id | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE-ACTIVE | PUT /api/v1/clients/:id | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-REVOQUEE-ACTIVE | PUT /api/v1/devis/:id/statut | inexistant | défaut | 401 « Clé API invalide, expirée ou révoquée »
+CLE-SANS-PREFIXE | DELETE /api/v1/catalogue/:family/:id | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-SANS-PREFIXE | DELETE /api/v1/clients/:id | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-SANS-PREFIXE | GET /api/v1/achats | — | défaut | 401 « Clé API Iris requise »
+CLE-SANS-PREFIXE | GET /api/v1/catalogue/:family | family=prestations | défaut | 401 « Clé API Iris requise »
+CLE-SANS-PREFIXE | GET /api/v1/catalogue/categories | — | défaut | 401 « Clé API Iris requise »
+CLE-SANS-PREFIXE | GET /api/v1/chantiers | — | défaut | 401 « Clé API Iris requise »
+CLE-SANS-PREFIXE | GET /api/v1/clients | — | défaut | 401 « Clé API Iris requise »
+CLE-SANS-PREFIXE | GET /api/v1/clients/:clientId/equipements | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-SANS-PREFIXE | GET /api/v1/clients/:id | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-SANS-PREFIXE | GET /api/v1/company | — | défaut | 401 « Clé API Iris requise »
+CLE-SANS-PREFIXE | GET /api/v1/devis | — | défaut | 401 « Clé API Iris requise »
+CLE-SANS-PREFIXE | GET /api/v1/heures | — | défaut | 401 « Clé API Iris requise »
+CLE-SANS-PREFIXE | PATCH /api/v1/devis/:id | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-SANS-PREFIXE | POST /api/v1/catalogue/:family | family=prestations | défaut | 401 « Clé API Iris requise »
+CLE-SANS-PREFIXE | POST /api/v1/catalogue/categories | — | défaut | 401 « Clé API Iris requise »
+CLE-SANS-PREFIXE | POST /api/v1/clients | — | défaut | 401 « Clé API Iris requise »
+CLE-SANS-PREFIXE | POST /api/v1/clients/:clientId/contacts | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-SANS-PREFIXE | POST /api/v1/clients/:clientId/equipements | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-SANS-PREFIXE | POST /api/v1/clients/:clientId/equipements/:id/archiver | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-SANS-PREFIXE | POST /api/v1/clients/:clientId/sites | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-SANS-PREFIXE | POST /api/v1/devis | — | défaut | 401 « Clé API Iris requise »
+CLE-SANS-PREFIXE | POST /api/v1/devis/:id/convertir | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-SANS-PREFIXE | POST /api/v1/devis/:id/revisions | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-SANS-PREFIXE | PUT /api/v1/catalogue/:family/:id | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-SANS-PREFIXE | PUT /api/v1/clients/:clientId/contacts/:id | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-SANS-PREFIXE | PUT /api/v1/clients/:clientId/sites/:id | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-SANS-PREFIXE | PUT /api/v1/clients/:id | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-SANS-PREFIXE | PUT /api/v1/devis/:id/statut | inexistant | défaut | 401 « Clé API Iris requise »
+CLE-TOUS-SCOPES | DELETE /api/achats/:id | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | DELETE /api/catalogue/:family/:id | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | DELETE /api/categories/:id | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | DELETE /api/chantiers/:id | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | DELETE /api/clients/:id | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | DELETE /api/company/logo | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | DELETE /api/comptabilite/regles/:cle | cle=CLIENT | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | DELETE /api/comptabilite/tva/:taux | taux=20 | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | DELETE /api/fournisseurs/:id | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | DELETE /api/heures/:id | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | DELETE /api/intervenants/:id | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | DELETE /api/planning/events/:id | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | DELETE /api/planning/types/:id | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | DELETE /api/users/:id | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/achats | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/admin/api-keys | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/admin/api-scopes | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/catalogue/:family | family=prestations | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/catalogue/categories | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/categories | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/chantiers | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/chantiers/:id | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/chantiers/:id/document.pdf | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/chantiers/:id/envois | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/chantiers/:id/journal-saisies | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/clients | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/clients/:clientId/equipements | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/clients/:id | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/clients/:id/chantiers | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/commerciaux | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/company | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/company/logo | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/comptabilite | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/comptabilite/comptes/:id/journal | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/comptabilite/regles/journal | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/conducteurs | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/contrats-maintenance | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/contrats-maintenance/:id/document.pdf | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/contrats-maintenance/:id/envois | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/contrats-maintenance/:id/journal-saisies | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/contrats-maintenance/generation-visites | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/devis | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/devis/:id/document.pdf | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/devis/:id/envois | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/devis/a-convertir | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/devis/catalogue | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/facturation/prete-a-facturer | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/factures | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/factures/:id/document.pdf | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/factures/:id/envois | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/factures/:id/journal | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/factures/:id/tracabilite | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/factures/a-regler | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/factures/chronologie | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/factures/export-comptable.csv | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/fournisseurs | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/heures | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/intervenants | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/interventions | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/interventions/:id | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/interventions/:id/couts | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/interventions/:id/document.pdf | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/interventions/:id/envois | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/interventions/:id/facture-temps-passe | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/interventions/:id/journal-saisies | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/interventions/journee | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/journal-administration | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/journal-administration/export.csv | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/me | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/mentions-legales | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/modules | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/parametres | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/parametres/remuneration | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/planning/chantiers | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/planning/events | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/planning/interventions-a-planifier | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/planning/share | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/planning/types | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/registry/companies | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/reglements | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/stats/chantiers-repartition | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/stats/commerciaux | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/stats/conducteurs | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/stats/conducteurs/assiduite | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/stats/fournisseurs | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/stats/global | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/stats/intervenants | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/stats/types-chantiers | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | GET /api/users | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | PATCH /api/achats/:id | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | PATCH /api/chantiers/:id | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | PATCH /api/chantiers/:id/commercial | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | PATCH /api/chantiers/:id/encaisse | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | PATCH /api/chantiers/:id/statut | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | PATCH /api/comptabilite/comptes/:id | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | PATCH /api/comptabilite/comptes/:id/activation | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | PATCH /api/contrats-maintenance/:id | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | PATCH /api/contrats-maintenance/:id/statut | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | PATCH /api/devis/:id | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | PATCH /api/heures/:id | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | PATCH /api/interventions/:id/couts/:type/:coutId | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | PATCH /api/interventions/:id/statut | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | PATCH /api/planning/events/:id | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | PATCH /api/planning/share | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | PATCH /api/users/:id/acces-finance | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | PATCH /api/users/:id/actif | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | PATCH /api/users/:id/est-commercial | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | PATCH /api/users/:id/responsable-hierarchique | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | PATCH /api/users/:id/role | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/achats | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/achats/:id/restaurer | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/admin/api-keys | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/admin/api-keys/:id/revoke | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/catalogue/:family | family=prestations | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/catalogue/categories | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/categories | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/chantiers | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/chantiers/:id/analyze | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/chantiers/:id/envois | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/clients | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/clients/:clientId/contacts | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/clients/:clientId/equipements | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/clients/:clientId/equipements/:id/archiver | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/clients/:clientId/sites | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/comptabilite/comptes | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/comptabilite/importer | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/contrats-maintenance | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/contrats-maintenance/:id/avancer-echeance | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/contrats-maintenance/:id/envois | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/contrats-maintenance/:id/generer-intervention | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/contrats-maintenance/generation-visites | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/devis | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/devis/:id/acompte | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/devis/:id/annulation | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/devis/:id/convertir | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/devis/:id/duplication | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/devis/:id/envois | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/devis/:id/revisions | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/devis/:id/signature | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/factures | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/factures/:id/annuler | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/factures/:id/avoirs | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/factures/:id/emettre | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/factures/:id/envois | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/factures/:id/regler | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/fournisseurs | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/heures | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/heures/:id/restaurer | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/intervenants | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/interventions | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/interventions/:id/couts/:type/:coutId/:action | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/interventions/:id/couts/achats | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/interventions/:id/couts/heures | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/interventions/:id/envois | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/interventions/:id/facture-temps-passe | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/interventions/:id/rapports | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/interventions/:id/remise-a-planifier | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/interventions/:id/suites | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/interventions/rapports/:rapportId/signature | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/mentions-legales | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/mentions-legales/:version/publier | version=999 | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/planning/events | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/planning/share | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/planning/types | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/reglements | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/reglements/:id/contrepasser | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | POST /api/users | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | PUT /api/catalogue/:family/:id | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | PUT /api/categories/:id | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | PUT /api/clients/:clientId/contacts/:id | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | PUT /api/clients/:clientId/sites/:id | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | PUT /api/clients/:id | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | PUT /api/commerciaux/:id/prime-mensuelle | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | PUT /api/company | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | PUT /api/company/logo | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | PUT /api/comptabilite/regles/:cle | cle=CLIENT | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | PUT /api/comptabilite/tva/:taux | taux=20 | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | PUT /api/devis/:id/statut | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | PUT /api/fournisseurs/:id | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | PUT /api/intervenants/:id | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | PUT /api/intervenants/:id/compte | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | PUT /api/intervenants/:id/main-oeuvre | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | PUT /api/interventions/:id/a-suivre | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | PUT /api/interventions/:id/planning | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | PUT /api/journal-administration/conservation | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | PUT /api/me/theme | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | PUT /api/modules | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | PUT /api/parametres | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | PUT /api/parametres/remuneration | — | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | PUT /api/planning/types/:id | inexistant | défaut | 401 « Session expirée ou invalide »
+CLE-TOUS-SCOPES | PUT /api/users/:id/permissions | inexistant | défaut | 401 « Session expirée ou invalide »
+COM | DELETE /api/v1/catalogue/:family/:id | inexistant | défaut | 401 « Clé API Iris requise »
+COM | DELETE /api/v1/clients/:id | inexistant | défaut | 401 « Clé API Iris requise »
+COM | GET /api/v1/achats | — | défaut | 401 « Clé API Iris requise »
+COM | GET /api/v1/catalogue/:family | family=prestations | défaut | 401 « Clé API Iris requise »
+COM | GET /api/v1/catalogue/categories | — | défaut | 401 « Clé API Iris requise »
+COM | GET /api/v1/chantiers | — | défaut | 401 « Clé API Iris requise »
+COM | GET /api/v1/clients | — | défaut | 401 « Clé API Iris requise »
+COM | GET /api/v1/clients/:clientId/equipements | inexistant | défaut | 401 « Clé API Iris requise »
+COM | GET /api/v1/clients/:id | inexistant | défaut | 401 « Clé API Iris requise »
+COM | GET /api/v1/company | — | défaut | 401 « Clé API Iris requise »
+COM | GET /api/v1/devis | — | défaut | 401 « Clé API Iris requise »
+COM | GET /api/v1/heures | — | défaut | 401 « Clé API Iris requise »
+COM | PATCH /api/v1/devis/:id | inexistant | défaut | 401 « Clé API Iris requise »
+COM | POST /api/v1/catalogue/:family | family=prestations | défaut | 401 « Clé API Iris requise »
+COM | POST /api/v1/catalogue/categories | — | défaut | 401 « Clé API Iris requise »
+COM | POST /api/v1/clients | — | défaut | 401 « Clé API Iris requise »
+COM | POST /api/v1/clients/:clientId/contacts | inexistant | défaut | 401 « Clé API Iris requise »
+COM | POST /api/v1/clients/:clientId/equipements | inexistant | défaut | 401 « Clé API Iris requise »
+COM | POST /api/v1/clients/:clientId/equipements/:id/archiver | inexistant | défaut | 401 « Clé API Iris requise »
+COM | POST /api/v1/clients/:clientId/sites | inexistant | défaut | 401 « Clé API Iris requise »
+COM | POST /api/v1/devis | — | défaut | 401 « Clé API Iris requise »
+COM | POST /api/v1/devis/:id/convertir | inexistant | défaut | 401 « Clé API Iris requise »
+COM | POST /api/v1/devis/:id/revisions | inexistant | défaut | 401 « Clé API Iris requise »
+COM | PUT /api/v1/catalogue/:family/:id | inexistant | défaut | 401 « Clé API Iris requise »
+COM | PUT /api/v1/clients/:clientId/contacts/:id | inexistant | défaut | 401 « Clé API Iris requise »
+COM | PUT /api/v1/clients/:clientId/sites/:id | inexistant | défaut | 401 « Clé API Iris requise »
+COM | PUT /api/v1/clients/:id | inexistant | défaut | 401 « Clé API Iris requise »
+COM | PUT /api/v1/devis/:id/statut | inexistant | défaut | 401 « Clé API Iris requise »
+CPT | DELETE /api/v1/catalogue/:family/:id | inexistant | défaut | 401 « Clé API Iris requise »
+CPT | DELETE /api/v1/clients/:id | inexistant | défaut | 401 « Clé API Iris requise »
+CPT | GET /api/v1/achats | — | défaut | 401 « Clé API Iris requise »
+CPT | GET /api/v1/catalogue/:family | family=prestations | défaut | 401 « Clé API Iris requise »
+CPT | GET /api/v1/catalogue/categories | — | défaut | 401 « Clé API Iris requise »
+CPT | GET /api/v1/chantiers | — | défaut | 401 « Clé API Iris requise »
+CPT | GET /api/v1/clients | — | défaut | 401 « Clé API Iris requise »
+CPT | GET /api/v1/clients/:clientId/equipements | inexistant | défaut | 401 « Clé API Iris requise »
+CPT | GET /api/v1/clients/:id | inexistant | défaut | 401 « Clé API Iris requise »
+CPT | GET /api/v1/company | — | défaut | 401 « Clé API Iris requise »
+CPT | GET /api/v1/devis | — | défaut | 401 « Clé API Iris requise »
+CPT | GET /api/v1/heures | — | défaut | 401 « Clé API Iris requise »
+CPT | PATCH /api/v1/devis/:id | inexistant | défaut | 401 « Clé API Iris requise »
+CPT | POST /api/v1/catalogue/:family | family=prestations | défaut | 401 « Clé API Iris requise »
+CPT | POST /api/v1/catalogue/categories | — | défaut | 401 « Clé API Iris requise »
+CPT | POST /api/v1/clients | — | défaut | 401 « Clé API Iris requise »
+CPT | POST /api/v1/clients/:clientId/contacts | inexistant | défaut | 401 « Clé API Iris requise »
+CPT | POST /api/v1/clients/:clientId/equipements | inexistant | défaut | 401 « Clé API Iris requise »
+CPT | POST /api/v1/clients/:clientId/equipements/:id/archiver | inexistant | défaut | 401 « Clé API Iris requise »
+CPT | POST /api/v1/clients/:clientId/sites | inexistant | défaut | 401 « Clé API Iris requise »
+CPT | POST /api/v1/devis | — | défaut | 401 « Clé API Iris requise »
+CPT | POST /api/v1/devis/:id/convertir | inexistant | défaut | 401 « Clé API Iris requise »
+CPT | POST /api/v1/devis/:id/revisions | inexistant | défaut | 401 « Clé API Iris requise »
+CPT | PUT /api/v1/catalogue/:family/:id | inexistant | défaut | 401 « Clé API Iris requise »
+CPT | PUT /api/v1/clients/:clientId/contacts/:id | inexistant | défaut | 401 « Clé API Iris requise »
+CPT | PUT /api/v1/clients/:clientId/sites/:id | inexistant | défaut | 401 « Clé API Iris requise »
+CPT | PUT /api/v1/clients/:id | inexistant | défaut | 401 « Clé API Iris requise »
+CPT | PUT /api/v1/devis/:id/statut | inexistant | défaut | 401 « Clé API Iris requise »
+CT | DELETE /api/v1/catalogue/:family/:id | inexistant | défaut | 401 « Clé API Iris requise »
+CT | DELETE /api/v1/clients/:id | inexistant | défaut | 401 « Clé API Iris requise »
+CT | GET /api/v1/achats | — | défaut | 401 « Clé API Iris requise »
+CT | GET /api/v1/catalogue/:family | family=prestations | défaut | 401 « Clé API Iris requise »
+CT | GET /api/v1/catalogue/categories | — | défaut | 401 « Clé API Iris requise »
+CT | GET /api/v1/chantiers | — | défaut | 401 « Clé API Iris requise »
+CT | GET /api/v1/clients | — | défaut | 401 « Clé API Iris requise »
+CT | GET /api/v1/clients/:clientId/equipements | inexistant | défaut | 401 « Clé API Iris requise »
+CT | GET /api/v1/clients/:id | inexistant | défaut | 401 « Clé API Iris requise »
+CT | GET /api/v1/company | — | défaut | 401 « Clé API Iris requise »
+CT | GET /api/v1/devis | — | défaut | 401 « Clé API Iris requise »
+CT | GET /api/v1/heures | — | défaut | 401 « Clé API Iris requise »
+CT | PATCH /api/v1/devis/:id | inexistant | défaut | 401 « Clé API Iris requise »
+CT | POST /api/v1/catalogue/:family | family=prestations | défaut | 401 « Clé API Iris requise »
+CT | POST /api/v1/catalogue/categories | — | défaut | 401 « Clé API Iris requise »
+CT | POST /api/v1/clients | — | défaut | 401 « Clé API Iris requise »
+CT | POST /api/v1/clients/:clientId/contacts | inexistant | défaut | 401 « Clé API Iris requise »
+CT | POST /api/v1/clients/:clientId/equipements | inexistant | défaut | 401 « Clé API Iris requise »
+CT | POST /api/v1/clients/:clientId/equipements/:id/archiver | inexistant | défaut | 401 « Clé API Iris requise »
+CT | POST /api/v1/clients/:clientId/sites | inexistant | défaut | 401 « Clé API Iris requise »
+CT | POST /api/v1/devis | — | défaut | 401 « Clé API Iris requise »
+CT | POST /api/v1/devis/:id/convertir | inexistant | défaut | 401 « Clé API Iris requise »
+CT | POST /api/v1/devis/:id/revisions | inexistant | défaut | 401 « Clé API Iris requise »
+CT | PUT /api/v1/catalogue/:family/:id | inexistant | défaut | 401 « Clé API Iris requise »
+CT | PUT /api/v1/clients/:clientId/contacts/:id | inexistant | défaut | 401 « Clé API Iris requise »
+CT | PUT /api/v1/clients/:clientId/sites/:id | inexistant | défaut | 401 « Clé API Iris requise »
+CT | PUT /api/v1/clients/:id | inexistant | défaut | 401 « Clé API Iris requise »
+CT | PUT /api/v1/devis/:id/statut | inexistant | défaut | 401 « Clé API Iris requise »
+DC | DELETE /api/v1/catalogue/:family/:id | inexistant | défaut | 401 « Clé API Iris requise »
+DC | DELETE /api/v1/clients/:id | inexistant | défaut | 401 « Clé API Iris requise »
+DC | GET /api/v1/achats | — | défaut | 401 « Clé API Iris requise »
+DC | GET /api/v1/catalogue/:family | family=prestations | défaut | 401 « Clé API Iris requise »
+DC | GET /api/v1/catalogue/categories | — | défaut | 401 « Clé API Iris requise »
+DC | GET /api/v1/chantiers | — | défaut | 401 « Clé API Iris requise »
+DC | GET /api/v1/clients | — | défaut | 401 « Clé API Iris requise »
+DC | GET /api/v1/clients/:clientId/equipements | inexistant | défaut | 401 « Clé API Iris requise »
+DC | GET /api/v1/clients/:id | inexistant | défaut | 401 « Clé API Iris requise »
+DC | GET /api/v1/company | — | défaut | 401 « Clé API Iris requise »
+DC | GET /api/v1/devis | — | défaut | 401 « Clé API Iris requise »
+DC | GET /api/v1/heures | — | défaut | 401 « Clé API Iris requise »
+DC | PATCH /api/v1/devis/:id | inexistant | défaut | 401 « Clé API Iris requise »
+DC | POST /api/v1/catalogue/:family | family=prestations | défaut | 401 « Clé API Iris requise »
+DC | POST /api/v1/catalogue/categories | — | défaut | 401 « Clé API Iris requise »
+DC | POST /api/v1/clients | — | défaut | 401 « Clé API Iris requise »
+DC | POST /api/v1/clients/:clientId/contacts | inexistant | défaut | 401 « Clé API Iris requise »
+DC | POST /api/v1/clients/:clientId/equipements | inexistant | défaut | 401 « Clé API Iris requise »
+DC | POST /api/v1/clients/:clientId/equipements/:id/archiver | inexistant | défaut | 401 « Clé API Iris requise »
+DC | POST /api/v1/clients/:clientId/sites | inexistant | défaut | 401 « Clé API Iris requise »
+DC | POST /api/v1/devis | — | défaut | 401 « Clé API Iris requise »
+DC | POST /api/v1/devis/:id/convertir | inexistant | défaut | 401 « Clé API Iris requise »
+DC | POST /api/v1/devis/:id/revisions | inexistant | défaut | 401 « Clé API Iris requise »
+DC | PUT /api/v1/catalogue/:family/:id | inexistant | défaut | 401 « Clé API Iris requise »
+DC | PUT /api/v1/clients/:clientId/contacts/:id | inexistant | défaut | 401 « Clé API Iris requise »
+DC | PUT /api/v1/clients/:clientId/sites/:id | inexistant | défaut | 401 « Clé API Iris requise »
+DC | PUT /api/v1/clients/:id | inexistant | défaut | 401 « Clé API Iris requise »
+DC | PUT /api/v1/devis/:id/statut | inexistant | défaut | 401 « Clé API Iris requise »
+DIR | DELETE /api/v1/catalogue/:family/:id | inexistant | défaut | 401 « Clé API Iris requise »
+DIR | DELETE /api/v1/clients/:id | inexistant | défaut | 401 « Clé API Iris requise »
+DIR | GET /api/v1/achats | — | défaut | 401 « Clé API Iris requise »
+DIR | GET /api/v1/catalogue/:family | family=prestations | défaut | 401 « Clé API Iris requise »
+DIR | GET /api/v1/catalogue/categories | — | défaut | 401 « Clé API Iris requise »
+DIR | GET /api/v1/chantiers | — | défaut | 401 « Clé API Iris requise »
+DIR | GET /api/v1/clients | — | défaut | 401 « Clé API Iris requise »
+DIR | GET /api/v1/clients/:clientId/equipements | inexistant | défaut | 401 « Clé API Iris requise »
+DIR | GET /api/v1/clients/:id | inexistant | défaut | 401 « Clé API Iris requise »
+DIR | GET /api/v1/company | — | défaut | 401 « Clé API Iris requise »
+DIR | GET /api/v1/devis | — | défaut | 401 « Clé API Iris requise »
+DIR | GET /api/v1/heures | — | défaut | 401 « Clé API Iris requise »
+DIR | PATCH /api/v1/devis/:id | inexistant | défaut | 401 « Clé API Iris requise »
+DIR | POST /api/v1/catalogue/:family | family=prestations | défaut | 401 « Clé API Iris requise »
+DIR | POST /api/v1/catalogue/categories | — | défaut | 401 « Clé API Iris requise »
+DIR | POST /api/v1/clients | — | défaut | 401 « Clé API Iris requise »
+DIR | POST /api/v1/clients/:clientId/contacts | inexistant | défaut | 401 « Clé API Iris requise »
+DIR | POST /api/v1/clients/:clientId/equipements | inexistant | défaut | 401 « Clé API Iris requise »
+DIR | POST /api/v1/clients/:clientId/equipements/:id/archiver | inexistant | défaut | 401 « Clé API Iris requise »
+DIR | POST /api/v1/clients/:clientId/sites | inexistant | défaut | 401 « Clé API Iris requise »
+DIR | POST /api/v1/devis | — | défaut | 401 « Clé API Iris requise »
+DIR | POST /api/v1/devis/:id/convertir | inexistant | défaut | 401 « Clé API Iris requise »
+DIR | POST /api/v1/devis/:id/revisions | inexistant | défaut | 401 « Clé API Iris requise »
+DIR | PUT /api/v1/catalogue/:family/:id | inexistant | défaut | 401 « Clé API Iris requise »
+DIR | PUT /api/v1/clients/:clientId/contacts/:id | inexistant | défaut | 401 « Clé API Iris requise »
+DIR | PUT /api/v1/clients/:clientId/sites/:id | inexistant | défaut | 401 « Clé API Iris requise »
+DIR | PUT /api/v1/clients/:id | inexistant | défaut | 401 « Clé API Iris requise »
+DIR | PUT /api/v1/devis/:id/statut | inexistant | défaut | 401 « Clé API Iris requise »
+RESP | DELETE /api/v1/catalogue/:family/:id | inexistant | défaut | 401 « Clé API Iris requise »
+RESP | DELETE /api/v1/clients/:id | inexistant | défaut | 401 « Clé API Iris requise »
+RESP | GET /api/v1/achats | — | défaut | 401 « Clé API Iris requise »
+RESP | GET /api/v1/catalogue/:family | family=prestations | défaut | 401 « Clé API Iris requise »
+RESP | GET /api/v1/catalogue/categories | — | défaut | 401 « Clé API Iris requise »
+RESP | GET /api/v1/chantiers | — | défaut | 401 « Clé API Iris requise »
+RESP | GET /api/v1/clients | — | défaut | 401 « Clé API Iris requise »
+RESP | GET /api/v1/clients/:clientId/equipements | inexistant | défaut | 401 « Clé API Iris requise »
+RESP | GET /api/v1/clients/:id | inexistant | défaut | 401 « Clé API Iris requise »
+RESP | GET /api/v1/company | — | défaut | 401 « Clé API Iris requise »
+RESP | GET /api/v1/devis | — | défaut | 401 « Clé API Iris requise »
+RESP | GET /api/v1/heures | — | défaut | 401 « Clé API Iris requise »
+RESP | PATCH /api/v1/devis/:id | inexistant | défaut | 401 « Clé API Iris requise »
+RESP | POST /api/v1/catalogue/:family | family=prestations | défaut | 401 « Clé API Iris requise »
+RESP | POST /api/v1/catalogue/categories | — | défaut | 401 « Clé API Iris requise »
+RESP | POST /api/v1/clients | — | défaut | 401 « Clé API Iris requise »
+RESP | POST /api/v1/clients/:clientId/contacts | inexistant | défaut | 401 « Clé API Iris requise »
+RESP | POST /api/v1/clients/:clientId/equipements | inexistant | défaut | 401 « Clé API Iris requise »
+RESP | POST /api/v1/clients/:clientId/equipements/:id/archiver | inexistant | défaut | 401 « Clé API Iris requise »
+RESP | POST /api/v1/clients/:clientId/sites | inexistant | défaut | 401 « Clé API Iris requise »
+RESP | POST /api/v1/devis | — | défaut | 401 « Clé API Iris requise »
+RESP | POST /api/v1/devis/:id/convertir | inexistant | défaut | 401 « Clé API Iris requise »
+RESP | POST /api/v1/devis/:id/revisions | inexistant | défaut | 401 « Clé API Iris requise »
+RESP | PUT /api/v1/catalogue/:family/:id | inexistant | défaut | 401 « Clé API Iris requise »
+RESP | PUT /api/v1/clients/:clientId/contacts/:id | inexistant | défaut | 401 « Clé API Iris requise »
+RESP | PUT /api/v1/clients/:clientId/sites/:id | inexistant | défaut | 401 « Clé API Iris requise »
+RESP | PUT /api/v1/clients/:id | inexistant | défaut | 401 « Clé API Iris requise »
+RESP | PUT /api/v1/devis/:id/statut | inexistant | défaut | 401 « Clé API Iris requise »
+SA | DELETE /api/v1/catalogue/:family/:id | inexistant | défaut | 401 « Clé API Iris requise »
+SA | DELETE /api/v1/clients/:id | inexistant | défaut | 401 « Clé API Iris requise »
+SA | GET /api/v1/achats | — | défaut | 401 « Clé API Iris requise »
+SA | GET /api/v1/catalogue/:family | family=prestations | défaut | 401 « Clé API Iris requise »
+SA | GET /api/v1/catalogue/categories | — | défaut | 401 « Clé API Iris requise »
+SA | GET /api/v1/chantiers | — | défaut | 401 « Clé API Iris requise »
+SA | GET /api/v1/clients | — | défaut | 401 « Clé API Iris requise »
+SA | GET /api/v1/clients/:clientId/equipements | inexistant | défaut | 401 « Clé API Iris requise »
+SA | GET /api/v1/clients/:id | inexistant | défaut | 401 « Clé API Iris requise »
+SA | GET /api/v1/company | — | défaut | 401 « Clé API Iris requise »
+SA | GET /api/v1/devis | — | défaut | 401 « Clé API Iris requise »
+SA | GET /api/v1/heures | — | défaut | 401 « Clé API Iris requise »
+SA | PATCH /api/v1/devis/:id | inexistant | défaut | 401 « Clé API Iris requise »
+SA | POST /api/v1/catalogue/:family | family=prestations | défaut | 401 « Clé API Iris requise »
+SA | POST /api/v1/catalogue/categories | — | défaut | 401 « Clé API Iris requise »
+SA | POST /api/v1/clients | — | défaut | 401 « Clé API Iris requise »
+SA | POST /api/v1/clients/:clientId/contacts | inexistant | défaut | 401 « Clé API Iris requise »
+SA | POST /api/v1/clients/:clientId/equipements | inexistant | défaut | 401 « Clé API Iris requise »
+SA | POST /api/v1/clients/:clientId/equipements/:id/archiver | inexistant | défaut | 401 « Clé API Iris requise »
+SA | POST /api/v1/clients/:clientId/sites | inexistant | défaut | 401 « Clé API Iris requise »
+SA | POST /api/v1/devis | — | défaut | 401 « Clé API Iris requise »
+SA | POST /api/v1/devis/:id/convertir | inexistant | défaut | 401 « Clé API Iris requise »
+SA | POST /api/v1/devis/:id/revisions | inexistant | défaut | 401 « Clé API Iris requise »
+SA | PUT /api/v1/catalogue/:family/:id | inexistant | défaut | 401 « Clé API Iris requise »
+SA | PUT /api/v1/clients/:clientId/contacts/:id | inexistant | défaut | 401 « Clé API Iris requise »
+SA | PUT /api/v1/clients/:clientId/sites/:id | inexistant | défaut | 401 « Clé API Iris requise »
+SA | PUT /api/v1/clients/:id | inexistant | défaut | 401 « Clé API Iris requise »
+SA | PUT /api/v1/devis/:id/statut | inexistant | défaut | 401 « Clé API Iris requise »
+TECH | DELETE /api/v1/catalogue/:family/:id | inexistant | défaut | 401 « Clé API Iris requise »
+TECH | DELETE /api/v1/clients/:id | inexistant | défaut | 401 « Clé API Iris requise »
+TECH | GET /api/v1/achats | — | défaut | 401 « Clé API Iris requise »
+TECH | GET /api/v1/catalogue/:family | family=prestations | défaut | 401 « Clé API Iris requise »
+TECH | GET /api/v1/catalogue/categories | — | défaut | 401 « Clé API Iris requise »
+TECH | GET /api/v1/chantiers | — | défaut | 401 « Clé API Iris requise »
+TECH | GET /api/v1/clients | — | défaut | 401 « Clé API Iris requise »
+TECH | GET /api/v1/clients/:clientId/equipements | inexistant | défaut | 401 « Clé API Iris requise »
+TECH | GET /api/v1/clients/:id | inexistant | défaut | 401 « Clé API Iris requise »
+TECH | GET /api/v1/company | — | défaut | 401 « Clé API Iris requise »
+TECH | GET /api/v1/devis | — | défaut | 401 « Clé API Iris requise »
+TECH | GET /api/v1/heures | — | défaut | 401 « Clé API Iris requise »
+TECH | PATCH /api/v1/devis/:id | inexistant | défaut | 401 « Clé API Iris requise »
+TECH | POST /api/v1/catalogue/:family | family=prestations | défaut | 401 « Clé API Iris requise »
+TECH | POST /api/v1/catalogue/categories | — | défaut | 401 « Clé API Iris requise »
+TECH | POST /api/v1/clients | — | défaut | 401 « Clé API Iris requise »
+TECH | POST /api/v1/clients/:clientId/contacts | inexistant | défaut | 401 « Clé API Iris requise »
+TECH | POST /api/v1/clients/:clientId/equipements | inexistant | défaut | 401 « Clé API Iris requise »
+TECH | POST /api/v1/clients/:clientId/equipements/:id/archiver | inexistant | défaut | 401 « Clé API Iris requise »
+TECH | POST /api/v1/clients/:clientId/sites | inexistant | défaut | 401 « Clé API Iris requise »
+TECH | POST /api/v1/devis | — | défaut | 401 « Clé API Iris requise »
+TECH | POST /api/v1/devis/:id/convertir | inexistant | défaut | 401 « Clé API Iris requise »
+TECH | POST /api/v1/devis/:id/revisions | inexistant | défaut | 401 « Clé API Iris requise »
+TECH | PUT /api/v1/catalogue/:family/:id | inexistant | défaut | 401 « Clé API Iris requise »
+TECH | PUT /api/v1/clients/:clientId/contacts/:id | inexistant | défaut | 401 « Clé API Iris requise »
+TECH | PUT /api/v1/clients/:clientId/sites/:id | inexistant | défaut | 401 « Clé API Iris requise »
+TECH | PUT /api/v1/clients/:id | inexistant | défaut | 401 « Clé API Iris requise »
+TECH | PUT /api/v1/devis/:id/statut | inexistant | défaut | 401 « Clé API Iris requise »

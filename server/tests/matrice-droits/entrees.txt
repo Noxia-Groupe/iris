@@ -343,6 +343,8 @@ AC | PATCH /api/heures/:id | inexistant | défaut | 403 « Permission requise : 
 AC | PATCH /api/interventions/:id/couts/:type/:coutId | heures-tech-intervention-affectee | défaut | 404 « Intervention introuvable. »
 AC | PATCH /api/interventions/:id/couts/:type/:coutId | heures-tech-sous-intervention-autre | défaut | 404 « Intervention introuvable. »
 AC | PATCH /api/interventions/:id/couts/:type/:coutId | inexistant | défaut | 404 « Intervention introuvable. »
+AC | PATCH /api/interventions/:id/couts/:type/:coutId | materiel-intervention-affectee | défaut | 404 « Intervention introuvable. »
+AC | PATCH /api/interventions/:id/couts/:type/:coutId | materiel-intervention-chantier-ct | défaut | 404 « Intervention introuvable. »
 AC | PATCH /api/interventions/:id/statut | curative-sans-chantier-branche | défaut | 400 validation-avant-droit
 AC | PATCH /api/interventions/:id/statut | inexistant | défaut | 400 validation-avant-droit
 AC | PATCH /api/interventions/:id/statut | intervention-affectee-tech | défaut | 400 validation-avant-droit
@@ -489,6 +491,8 @@ AC | POST /api/interventions | — | défaut | 403 « Création réservée à l�
 AC | POST /api/interventions/:id/couts/:type/:coutId/:action | heures-tech-intervention-affectee | défaut | 404 « Intervention introuvable. »
 AC | POST /api/interventions/:id/couts/:type/:coutId/:action | heures-tech-sous-intervention-autre | défaut | 404 « Intervention introuvable. »
 AC | POST /api/interventions/:id/couts/:type/:coutId/:action | inexistant | défaut | 404 « Intervention introuvable. »
+AC | POST /api/interventions/:id/couts/:type/:coutId/:action | materiel-intervention-affectee | défaut | 404 « Intervention introuvable. »
+AC | POST /api/interventions/:id/couts/:type/:coutId/:action | materiel-intervention-chantier-ct | défaut | 404 « Intervention introuvable. »
 AC | POST /api/interventions/:id/couts/achats | curative-sans-chantier-branche | défaut | 404 « Intervention introuvable. »
 AC | POST /api/interventions/:id/couts/achats | inexistant | défaut | 404 « Intervention introuvable. »
 AC | POST /api/interventions/:id/couts/achats | intervention-affectee-tech | défaut | 404 « Intervention introuvable. »
@@ -1004,6 +1008,8 @@ AD | PATCH /api/heures/:id | inexistant | défaut | 404 « Pointage introuvable.
 AD | PATCH /api/interventions/:id/couts/:type/:coutId | heures-tech-intervention-affectee | défaut | 403 « Accès non autorisé. »
 AD | PATCH /api/interventions/:id/couts/:type/:coutId | heures-tech-sous-intervention-autre | défaut | 403 « Accès non autorisé. »
 AD | PATCH /api/interventions/:id/couts/:type/:coutId | inexistant | défaut | 403 « Accès non autorisé. »
+AD | PATCH /api/interventions/:id/couts/:type/:coutId | materiel-intervention-affectee | défaut | 400 validation-avant-droit
+AD | PATCH /api/interventions/:id/couts/:type/:coutId | materiel-intervention-chantier-ct | défaut | 400 validation-avant-droit
 AD | PATCH /api/interventions/:id/statut | curative-sans-chantier-branche | défaut | 400 validation-avant-droit
 AD | PATCH /api/interventions/:id/statut | inexistant | défaut | 400 validation-avant-droit
 AD | PATCH /api/interventions/:id/statut | intervention-affectee-tech | défaut | 400 validation-avant-droit
@@ -1150,6 +1156,8 @@ AD | POST /api/interventions | — | défaut | 400
 AD | POST /api/interventions/:id/couts/:type/:coutId/:action | heures-tech-intervention-affectee | défaut | 400
 AD | POST /api/interventions/:id/couts/:type/:coutId/:action | heures-tech-sous-intervention-autre | défaut | 404 « Coût introuvable. »
 AD | POST /api/interventions/:id/couts/:type/:coutId/:action | inexistant | défaut | 404 « Coût introuvable. »
+AD | POST /api/interventions/:id/couts/:type/:coutId/:action | materiel-intervention-affectee | défaut | 400
+AD | POST /api/interventions/:id/couts/:type/:coutId/:action | materiel-intervention-chantier-ct | défaut | 400
 AD | POST /api/interventions/:id/couts/achats | curative-sans-chantier-branche | défaut | 400
 AD | POST /api/interventions/:id/couts/achats | inexistant | défaut | 404 « Intervention introuvable. »
 AD | POST /api/interventions/:id/couts/achats | intervention-affectee-tech | défaut | 400
@@ -1665,6 +1673,8 @@ AD-COM | PATCH /api/heures/:id | inexistant | défaut | 404 « Pointage introuva
 AD-COM | PATCH /api/interventions/:id/couts/:type/:coutId | heures-tech-intervention-affectee | défaut | 403 « Accès non autorisé. »
 AD-COM | PATCH /api/interventions/:id/couts/:type/:coutId | heures-tech-sous-intervention-autre | défaut | 403 « Accès non autorisé. »
 AD-COM | PATCH /api/interventions/:id/couts/:type/:coutId | inexistant | défaut | 403 « Accès non autorisé. »
+AD-COM | PATCH /api/interventions/:id/couts/:type/:coutId | materiel-intervention-affectee | défaut | 400 validation-avant-droit
+AD-COM | PATCH /api/interventions/:id/couts/:type/:coutId | materiel-intervention-chantier-ct | défaut | 400 validation-avant-droit
 AD-COM | PATCH /api/interventions/:id/statut | curative-sans-chantier-branche | défaut | 400 validation-avant-droit
 AD-COM | PATCH /api/interventions/:id/statut | inexistant | défaut | 400 validation-avant-droit
 AD-COM | PATCH /api/interventions/:id/statut | intervention-affectee-tech | défaut | 400 validation-avant-droit
@@ -1811,6 +1821,8 @@ AD-COM | POST /api/interventions | — | défaut | 400
 AD-COM | POST /api/interventions/:id/couts/:type/:coutId/:action | heures-tech-intervention-affectee | défaut | 400
 AD-COM | POST /api/interventions/:id/couts/:type/:coutId/:action | heures-tech-sous-intervention-autre | défaut | 404 « Coût introuvable. »
 AD-COM | POST /api/interventions/:id/couts/:type/:coutId/:action | inexistant | défaut | 404 « Coût introuvable. »
+AD-COM | POST /api/interventions/:id/couts/:type/:coutId/:action | materiel-intervention-affectee | défaut | 400
+AD-COM | POST /api/interventions/:id/couts/:type/:coutId/:action | materiel-intervention-chantier-ct | défaut | 400
 AD-COM | POST /api/interventions/:id/couts/achats | curative-sans-chantier-branche | défaut | 400
 AD-COM | POST /api/interventions/:id/couts/achats | inexistant | défaut | 404 « Intervention introuvable. »
 AD-COM | POST /api/interventions/:id/couts/achats | intervention-affectee-tech | défaut | 400
@@ -2517,6 +2529,8 @@ COM | PATCH /api/heures/:id | inexistant | défaut | 403 « Permission requise :
 COM | PATCH /api/interventions/:id/couts/:type/:coutId | heures-tech-intervention-affectee | défaut | 403 « Accès non autorisé pour un compte commercial. »
 COM | PATCH /api/interventions/:id/couts/:type/:coutId | heures-tech-sous-intervention-autre | défaut | 403 « Accès non autorisé pour un compte commercial. »
 COM | PATCH /api/interventions/:id/couts/:type/:coutId | inexistant | défaut | 403 « Accès non autorisé pour un compte commercial. »
+COM | PATCH /api/interventions/:id/couts/:type/:coutId | materiel-intervention-affectee | défaut | 403 « Accès non autorisé pour un compte commercial. »
+COM | PATCH /api/interventions/:id/couts/:type/:coutId | materiel-intervention-chantier-ct | défaut | 403 « Accès non autorisé pour un compte commercial. »
 COM | PATCH /api/interventions/:id/statut | curative-sans-chantier-branche | défaut | 403 « Accès non autorisé pour un compte commercial. »
 COM | PATCH /api/interventions/:id/statut | inexistant | défaut | 403 « Accès non autorisé pour un compte commercial. »
 COM | PATCH /api/interventions/:id/statut | intervention-affectee-tech | défaut | 403 « Accès non autorisé pour un compte commercial. »
@@ -2663,6 +2677,8 @@ COM | POST /api/interventions | — | défaut | 403 « Accès non autorisé pour
 COM | POST /api/interventions/:id/couts/:type/:coutId/:action | heures-tech-intervention-affectee | défaut | 403 « Accès non autorisé pour un compte commercial. »
 COM | POST /api/interventions/:id/couts/:type/:coutId/:action | heures-tech-sous-intervention-autre | défaut | 403 « Accès non autorisé pour un compte commercial. »
 COM | POST /api/interventions/:id/couts/:type/:coutId/:action | inexistant | défaut | 403 « Accès non autorisé pour un compte commercial. »
+COM | POST /api/interventions/:id/couts/:type/:coutId/:action | materiel-intervention-affectee | défaut | 403 « Accès non autorisé pour un compte commercial. »
+COM | POST /api/interventions/:id/couts/:type/:coutId/:action | materiel-intervention-chantier-ct | défaut | 403 « Accès non autorisé pour un compte commercial. »
 COM | POST /api/interventions/:id/couts/achats | curative-sans-chantier-branche | défaut | 403 « Accès non autorisé pour un compte commercial. »
 COM | POST /api/interventions/:id/couts/achats | inexistant | défaut | 403 « Accès non autorisé pour un compte commercial. »
 COM | POST /api/interventions/:id/couts/achats | intervention-affectee-tech | défaut | 403 « Accès non autorisé pour un compte commercial. »
@@ -3178,6 +3194,8 @@ CPT | PATCH /api/heures/:id | inexistant | défaut | 403 « Permission requise :
 CPT | PATCH /api/interventions/:id/couts/:type/:coutId | heures-tech-intervention-affectee | défaut | 404 « Intervention introuvable. »
 CPT | PATCH /api/interventions/:id/couts/:type/:coutId | heures-tech-sous-intervention-autre | défaut | 404 « Intervention introuvable. »
 CPT | PATCH /api/interventions/:id/couts/:type/:coutId | inexistant | défaut | 404 « Intervention introuvable. »
+CPT | PATCH /api/interventions/:id/couts/:type/:coutId | materiel-intervention-affectee | défaut | 404 « Intervention introuvable. »
+CPT | PATCH /api/interventions/:id/couts/:type/:coutId | materiel-intervention-chantier-ct | défaut | 404 « Intervention introuvable. »
 CPT | PATCH /api/interventions/:id/statut | curative-sans-chantier-branche | défaut | 400 validation-avant-droit
 CPT | PATCH /api/interventions/:id/statut | inexistant | défaut | 400 validation-avant-droit
 CPT | PATCH /api/interventions/:id/statut | intervention-affectee-tech | défaut | 400 validation-avant-droit
@@ -3324,6 +3342,8 @@ CPT | POST /api/interventions | — | défaut | 403 « Création réservée à l
 CPT | POST /api/interventions/:id/couts/:type/:coutId/:action | heures-tech-intervention-affectee | défaut | 404 « Intervention introuvable. »
 CPT | POST /api/interventions/:id/couts/:type/:coutId/:action | heures-tech-sous-intervention-autre | défaut | 404 « Intervention introuvable. »
 CPT | POST /api/interventions/:id/couts/:type/:coutId/:action | inexistant | défaut | 404 « Intervention introuvable. »
+CPT | POST /api/interventions/:id/couts/:type/:coutId/:action | materiel-intervention-affectee | défaut | 404 « Intervention introuvable. »
+CPT | POST /api/interventions/:id/couts/:type/:coutId/:action | materiel-intervention-chantier-ct | défaut | 404 « Intervention introuvable. »
 CPT | POST /api/interventions/:id/couts/achats | curative-sans-chantier-branche | défaut | 404 « Intervention introuvable. »
 CPT | POST /api/interventions/:id/couts/achats | inexistant | défaut | 404 « Intervention introuvable. »
 CPT | POST /api/interventions/:id/couts/achats | intervention-affectee-tech | défaut | 404 « Intervention introuvable. »
@@ -3839,6 +3859,8 @@ CPT-FINANCE | PATCH /api/heures/:id | inexistant | défaut | 403 « Permission r
 CPT-FINANCE | PATCH /api/interventions/:id/couts/:type/:coutId | heures-tech-intervention-affectee | défaut | 404 « Intervention introuvable. »
 CPT-FINANCE | PATCH /api/interventions/:id/couts/:type/:coutId | heures-tech-sous-intervention-autre | défaut | 404 « Intervention introuvable. »
 CPT-FINANCE | PATCH /api/interventions/:id/couts/:type/:coutId | inexistant | défaut | 404 « Intervention introuvable. »
+CPT-FINANCE | PATCH /api/interventions/:id/couts/:type/:coutId | materiel-intervention-affectee | défaut | 404 « Intervention introuvable. »
+CPT-FINANCE | PATCH /api/interventions/:id/couts/:type/:coutId | materiel-intervention-chantier-ct | défaut | 404 « Intervention introuvable. »
 CPT-FINANCE | PATCH /api/interventions/:id/statut | curative-sans-chantier-branche | défaut | 400 validation-avant-droit
 CPT-FINANCE | PATCH /api/interventions/:id/statut | inexistant | défaut | 400 validation-avant-droit
 CPT-FINANCE | PATCH /api/interventions/:id/statut | intervention-affectee-tech | défaut | 400 validation-avant-droit
@@ -3985,6 +4007,8 @@ CPT-FINANCE | POST /api/interventions | — | défaut | 403 « Création réserv
 CPT-FINANCE | POST /api/interventions/:id/couts/:type/:coutId/:action | heures-tech-intervention-affectee | défaut | 404 « Intervention introuvable. »
 CPT-FINANCE | POST /api/interventions/:id/couts/:type/:coutId/:action | heures-tech-sous-intervention-autre | défaut | 404 « Intervention introuvable. »
 CPT-FINANCE | POST /api/interventions/:id/couts/:type/:coutId/:action | inexistant | défaut | 404 « Intervention introuvable. »
+CPT-FINANCE | POST /api/interventions/:id/couts/:type/:coutId/:action | materiel-intervention-affectee | défaut | 404 « Intervention introuvable. »
+CPT-FINANCE | POST /api/interventions/:id/couts/:type/:coutId/:action | materiel-intervention-chantier-ct | défaut | 404 « Intervention introuvable. »
 CPT-FINANCE | POST /api/interventions/:id/couts/achats | curative-sans-chantier-branche | défaut | 404 « Intervention introuvable. »
 CPT-FINANCE | POST /api/interventions/:id/couts/achats | inexistant | défaut | 404 « Intervention introuvable. »
 CPT-FINANCE | POST /api/interventions/:id/couts/achats | intervention-affectee-tech | défaut | 404 « Intervention introuvable. »
@@ -4500,6 +4524,8 @@ CT | PATCH /api/heures/:id | inexistant | défaut | 404 « Pointage introuvable.
 CT | PATCH /api/interventions/:id/couts/:type/:coutId | heures-tech-intervention-affectee | défaut | 404 « Intervention introuvable. »
 CT | PATCH /api/interventions/:id/couts/:type/:coutId | heures-tech-sous-intervention-autre | défaut | 404 « Intervention introuvable. »
 CT | PATCH /api/interventions/:id/couts/:type/:coutId | inexistant | défaut | 404 « Intervention introuvable. »
+CT | PATCH /api/interventions/:id/couts/:type/:coutId | materiel-intervention-affectee | défaut | 404 « Intervention introuvable. »
+CT | PATCH /api/interventions/:id/couts/:type/:coutId | materiel-intervention-chantier-ct | défaut | 400 validation-avant-droit
 CT | PATCH /api/interventions/:id/statut | curative-sans-chantier-branche | défaut | 400 validation-avant-droit
 CT | PATCH /api/interventions/:id/statut | inexistant | défaut | 400 validation-avant-droit
 CT | PATCH /api/interventions/:id/statut | intervention-affectee-tech | défaut | 400 validation-avant-droit
@@ -4646,6 +4672,8 @@ CT | POST /api/interventions | — | défaut | 400
 CT | POST /api/interventions/:id/couts/:type/:coutId/:action | heures-tech-intervention-affectee | défaut | 404 « Intervention introuvable. »
 CT | POST /api/interventions/:id/couts/:type/:coutId/:action | heures-tech-sous-intervention-autre | défaut | 404 « Intervention introuvable. »
 CT | POST /api/interventions/:id/couts/:type/:coutId/:action | inexistant | défaut | 404 « Intervention introuvable. »
+CT | POST /api/interventions/:id/couts/:type/:coutId/:action | materiel-intervention-affectee | défaut | 404 « Intervention introuvable. »
+CT | POST /api/interventions/:id/couts/:type/:coutId/:action | materiel-intervention-chantier-ct | défaut | 400
 CT | POST /api/interventions/:id/couts/achats | curative-sans-chantier-branche | défaut | 404 « Intervention introuvable. »
 CT | POST /api/interventions/:id/couts/achats | inexistant | défaut | 404 « Intervention introuvable. »
 CT | POST /api/interventions/:id/couts/achats | intervention-affectee-tech | défaut | 404 « Intervention introuvable. »
@@ -5161,6 +5189,8 @@ CT-N1 | PATCH /api/heures/:id | inexistant | défaut | 404 « Pointage introuvab
 CT-N1 | PATCH /api/interventions/:id/couts/:type/:coutId | heures-tech-intervention-affectee | défaut | 404 « Intervention introuvable. »
 CT-N1 | PATCH /api/interventions/:id/couts/:type/:coutId | heures-tech-sous-intervention-autre | défaut | 404 « Intervention introuvable. »
 CT-N1 | PATCH /api/interventions/:id/couts/:type/:coutId | inexistant | défaut | 404 « Intervention introuvable. »
+CT-N1 | PATCH /api/interventions/:id/couts/:type/:coutId | materiel-intervention-affectee | défaut | 404 « Intervention introuvable. »
+CT-N1 | PATCH /api/interventions/:id/couts/:type/:coutId | materiel-intervention-chantier-ct | défaut | 404 « Intervention introuvable. »
 CT-N1 | PATCH /api/interventions/:id/statut | curative-sans-chantier-branche | défaut | 400 validation-avant-droit
 CT-N1 | PATCH /api/interventions/:id/statut | inexistant | défaut | 400 validation-avant-droit
 CT-N1 | PATCH /api/interventions/:id/statut | intervention-affectee-tech | défaut | 400 validation-avant-droit
@@ -5307,6 +5337,8 @@ CT-N1 | POST /api/interventions | — | défaut | 400
 CT-N1 | POST /api/interventions/:id/couts/:type/:coutId/:action | heures-tech-intervention-affectee | défaut | 404 « Intervention introuvable. »
 CT-N1 | POST /api/interventions/:id/couts/:type/:coutId/:action | heures-tech-sous-intervention-autre | défaut | 404 « Intervention introuvable. »
 CT-N1 | POST /api/interventions/:id/couts/:type/:coutId/:action | inexistant | défaut | 404 « Intervention introuvable. »
+CT-N1 | POST /api/interventions/:id/couts/:type/:coutId/:action | materiel-intervention-affectee | défaut | 404 « Intervention introuvable. »
+CT-N1 | POST /api/interventions/:id/couts/:type/:coutId/:action | materiel-intervention-chantier-ct | défaut | 404 « Intervention introuvable. »
 CT-N1 | POST /api/interventions/:id/couts/achats | curative-sans-chantier-branche | défaut | 404 « Intervention introuvable. »
 CT-N1 | POST /api/interventions/:id/couts/achats | inexistant | défaut | 404 « Intervention introuvable. »
 CT-N1 | POST /api/interventions/:id/couts/achats | intervention-affectee-tech | défaut | 404 « Intervention introuvable. »
@@ -5822,6 +5854,8 @@ DC | PATCH /api/heures/:id | inexistant | défaut | 403 « Permission requise : 
 DC | PATCH /api/interventions/:id/couts/:type/:coutId | heures-tech-intervention-affectee | défaut | 404 « Intervention introuvable. »
 DC | PATCH /api/interventions/:id/couts/:type/:coutId | heures-tech-sous-intervention-autre | défaut | 404 « Intervention introuvable. »
 DC | PATCH /api/interventions/:id/couts/:type/:coutId | inexistant | défaut | 404 « Intervention introuvable. »
+DC | PATCH /api/interventions/:id/couts/:type/:coutId | materiel-intervention-affectee | défaut | 404 « Intervention introuvable. »
+DC | PATCH /api/interventions/:id/couts/:type/:coutId | materiel-intervention-chantier-ct | défaut | 404 « Intervention introuvable. »
 DC | PATCH /api/interventions/:id/statut | curative-sans-chantier-branche | défaut | 400 validation-avant-droit
 DC | PATCH /api/interventions/:id/statut | inexistant | défaut | 400 validation-avant-droit
 DC | PATCH /api/interventions/:id/statut | intervention-affectee-tech | défaut | 400 validation-avant-droit
@@ -5968,6 +6002,8 @@ DC | POST /api/interventions | — | défaut | 403 « Création réservée à l�
 DC | POST /api/interventions/:id/couts/:type/:coutId/:action | heures-tech-intervention-affectee | défaut | 404 « Intervention introuvable. »
 DC | POST /api/interventions/:id/couts/:type/:coutId/:action | heures-tech-sous-intervention-autre | défaut | 404 « Intervention introuvable. »
 DC | POST /api/interventions/:id/couts/:type/:coutId/:action | inexistant | défaut | 404 « Intervention introuvable. »
+DC | POST /api/interventions/:id/couts/:type/:coutId/:action | materiel-intervention-affectee | défaut | 404 « Intervention introuvable. »
+DC | POST /api/interventions/:id/couts/:type/:coutId/:action | materiel-intervention-chantier-ct | défaut | 404 « Intervention introuvable. »
 DC | POST /api/interventions/:id/couts/achats | curative-sans-chantier-branche | défaut | 404 « Intervention introuvable. »
 DC | POST /api/interventions/:id/couts/achats | inexistant | défaut | 404 « Intervention introuvable. »
 DC | POST /api/interventions/:id/couts/achats | intervention-affectee-tech | défaut | 404 « Intervention introuvable. »
@@ -6674,6 +6710,8 @@ DIR | PATCH /api/heures/:id | inexistant | défaut | 403 « Permission requise :
 DIR | PATCH /api/interventions/:id/couts/:type/:coutId | heures-tech-intervention-affectee | défaut | 403 « Accès non autorisé pour un compte directeur. »
 DIR | PATCH /api/interventions/:id/couts/:type/:coutId | heures-tech-sous-intervention-autre | défaut | 403 « Accès non autorisé pour un compte directeur. »
 DIR | PATCH /api/interventions/:id/couts/:type/:coutId | inexistant | défaut | 403 « Accès non autorisé pour un compte directeur. »
+DIR | PATCH /api/interventions/:id/couts/:type/:coutId | materiel-intervention-affectee | défaut | 403 « Accès non autorisé pour un compte directeur. »
+DIR | PATCH /api/interventions/:id/couts/:type/:coutId | materiel-intervention-chantier-ct | défaut | 403 « Accès non autorisé pour un compte directeur. »
 DIR | PATCH /api/interventions/:id/statut | curative-sans-chantier-branche | défaut | 403 « Accès non autorisé pour un compte directeur. »
 DIR | PATCH /api/interventions/:id/statut | inexistant | défaut | 403 « Accès non autorisé pour un compte directeur. »
 DIR | PATCH /api/interventions/:id/statut | intervention-affectee-tech | défaut | 403 « Accès non autorisé pour un compte directeur. »
@@ -6820,6 +6858,8 @@ DIR | POST /api/interventions | — | défaut | 403 « Accès non autorisé pour
 DIR | POST /api/interventions/:id/couts/:type/:coutId/:action | heures-tech-intervention-affectee | défaut | 403 « Accès non autorisé pour un compte directeur. »
 DIR | POST /api/interventions/:id/couts/:type/:coutId/:action | heures-tech-sous-intervention-autre | défaut | 403 « Accès non autorisé pour un compte directeur. »
 DIR | POST /api/interventions/:id/couts/:type/:coutId/:action | inexistant | défaut | 403 « Accès non autorisé pour un compte directeur. »
+DIR | POST /api/interventions/:id/couts/:type/:coutId/:action | materiel-intervention-affectee | défaut | 403 « Accès non autorisé pour un compte directeur. »
+DIR | POST /api/interventions/:id/couts/:type/:coutId/:action | materiel-intervention-chantier-ct | défaut | 403 « Accès non autorisé pour un compte directeur. »
 DIR | POST /api/interventions/:id/couts/achats | curative-sans-chantier-branche | défaut | 403 « Accès non autorisé pour un compte directeur. »
 DIR | POST /api/interventions/:id/couts/achats | inexistant | défaut | 403 « Accès non autorisé pour un compte directeur. »
 DIR | POST /api/interventions/:id/couts/achats | intervention-affectee-tech | défaut | 403 « Accès non autorisé pour un compte directeur. »
@@ -7530,6 +7570,8 @@ RESP | PATCH /api/heures/:id | inexistant | défaut | 404 « Pointage introuvabl
 RESP | PATCH /api/interventions/:id/couts/:type/:coutId | heures-tech-intervention-affectee | défaut | 403 « Accès non autorisé. »
 RESP | PATCH /api/interventions/:id/couts/:type/:coutId | heures-tech-sous-intervention-autre | défaut | 404 « Intervention introuvable. »
 RESP | PATCH /api/interventions/:id/couts/:type/:coutId | inexistant | défaut | 403 « Accès non autorisé. »
+RESP | PATCH /api/interventions/:id/couts/:type/:coutId | materiel-intervention-affectee | défaut | 403 « Accès non autorisé. »
+RESP | PATCH /api/interventions/:id/couts/:type/:coutId | materiel-intervention-chantier-ct | défaut | 404 « Intervention introuvable. »
 RESP | PATCH /api/interventions/:id/statut | curative-sans-chantier-branche | défaut | 400 validation-avant-droit
 RESP | PATCH /api/interventions/:id/statut | inexistant | défaut | 400 validation-avant-droit
 RESP | PATCH /api/interventions/:id/statut | intervention-affectee-tech | défaut | 400 validation-avant-droit
@@ -7676,6 +7718,8 @@ RESP | POST /api/interventions | — | défaut | 403 « Création réservée à 
 RESP | POST /api/interventions/:id/couts/:type/:coutId/:action | heures-tech-intervention-affectee | défaut | 403 « Accès non autorisé. »
 RESP | POST /api/interventions/:id/couts/:type/:coutId/:action | heures-tech-sous-intervention-autre | défaut | 404 « Intervention introuvable. »
 RESP | POST /api/interventions/:id/couts/:type/:coutId/:action | inexistant | défaut | 403 « Accès non autorisé. »
+RESP | POST /api/interventions/:id/couts/:type/:coutId/:action | materiel-intervention-affectee | défaut | 403 « Accès non autorisé. »
+RESP | POST /api/interventions/:id/couts/:type/:coutId/:action | materiel-intervention-chantier-ct | défaut | 404 « Intervention introuvable. »
 RESP | POST /api/interventions/:id/couts/achats | curative-sans-chantier-branche | défaut | 404 « Intervention introuvable. »
 RESP | POST /api/interventions/:id/couts/achats | inexistant | défaut | 404 « Intervention introuvable. »
 RESP | POST /api/interventions/:id/couts/achats | intervention-affectee-tech | défaut | 403 « Saisie de matériel réservée à l’encadrement. »
@@ -8191,6 +8235,8 @@ RESP-SANS-BRANCHE | PATCH /api/heures/:id | inexistant | défaut | 404 « Pointa
 RESP-SANS-BRANCHE | PATCH /api/interventions/:id/couts/:type/:coutId | heures-tech-intervention-affectee | défaut | 404 « Intervention introuvable. »
 RESP-SANS-BRANCHE | PATCH /api/interventions/:id/couts/:type/:coutId | heures-tech-sous-intervention-autre | défaut | 404 « Intervention introuvable. »
 RESP-SANS-BRANCHE | PATCH /api/interventions/:id/couts/:type/:coutId | inexistant | défaut | 404 « Intervention introuvable. »
+RESP-SANS-BRANCHE | PATCH /api/interventions/:id/couts/:type/:coutId | materiel-intervention-affectee | défaut | 404 « Intervention introuvable. »
+RESP-SANS-BRANCHE | PATCH /api/interventions/:id/couts/:type/:coutId | materiel-intervention-chantier-ct | défaut | 404 « Intervention introuvable. »
 RESP-SANS-BRANCHE | PATCH /api/interventions/:id/statut | curative-sans-chantier-branche | défaut | 400 validation-avant-droit
 RESP-SANS-BRANCHE | PATCH /api/interventions/:id/statut | inexistant | défaut | 400 validation-avant-droit
 RESP-SANS-BRANCHE | PATCH /api/interventions/:id/statut | intervention-affectee-tech | défaut | 400 validation-avant-droit
@@ -8337,6 +8383,8 @@ RESP-SANS-BRANCHE | POST /api/interventions | — | défaut | 403 « Création r
 RESP-SANS-BRANCHE | POST /api/interventions/:id/couts/:type/:coutId/:action | heures-tech-intervention-affectee | défaut | 404 « Intervention introuvable. »
 RESP-SANS-BRANCHE | POST /api/interventions/:id/couts/:type/:coutId/:action | heures-tech-sous-intervention-autre | défaut | 404 « Intervention introuvable. »
 RESP-SANS-BRANCHE | POST /api/interventions/:id/couts/:type/:coutId/:action | inexistant | défaut | 404 « Intervention introuvable. »
+RESP-SANS-BRANCHE | POST /api/interventions/:id/couts/:type/:coutId/:action | materiel-intervention-affectee | défaut | 404 « Intervention introuvable. »
+RESP-SANS-BRANCHE | POST /api/interventions/:id/couts/:type/:coutId/:action | materiel-intervention-chantier-ct | défaut | 404 « Intervention introuvable. »
 RESP-SANS-BRANCHE | POST /api/interventions/:id/couts/achats | curative-sans-chantier-branche | défaut | 404 « Intervention introuvable. »
 RESP-SANS-BRANCHE | POST /api/interventions/:id/couts/achats | inexistant | défaut | 404 « Intervention introuvable. »
 RESP-SANS-BRANCHE | POST /api/interventions/:id/couts/achats | intervention-affectee-tech | défaut | 404 « Intervention introuvable. »
@@ -8852,6 +8900,8 @@ SA | PATCH /api/heures/:id | inexistant | défaut | 404 « Pointage introuvable.
 SA | PATCH /api/interventions/:id/couts/:type/:coutId | heures-tech-intervention-affectee | défaut | 403 « Accès non autorisé. »
 SA | PATCH /api/interventions/:id/couts/:type/:coutId | heures-tech-sous-intervention-autre | défaut | 403 « Accès non autorisé. »
 SA | PATCH /api/interventions/:id/couts/:type/:coutId | inexistant | défaut | 403 « Accès non autorisé. »
+SA | PATCH /api/interventions/:id/couts/:type/:coutId | materiel-intervention-affectee | défaut | 400 validation-avant-droit
+SA | PATCH /api/interventions/:id/couts/:type/:coutId | materiel-intervention-chantier-ct | défaut | 400 validation-avant-droit
 SA | PATCH /api/interventions/:id/statut | curative-sans-chantier-branche | défaut | 400 validation-avant-droit
 SA | PATCH /api/interventions/:id/statut | inexistant | défaut | 400 validation-avant-droit
 SA | PATCH /api/interventions/:id/statut | intervention-affectee-tech | défaut | 400 validation-avant-droit
@@ -8998,6 +9048,8 @@ SA | POST /api/interventions | — | défaut | 400
 SA | POST /api/interventions/:id/couts/:type/:coutId/:action | heures-tech-intervention-affectee | défaut | 400
 SA | POST /api/interventions/:id/couts/:type/:coutId/:action | heures-tech-sous-intervention-autre | défaut | 404 « Coût introuvable. »
 SA | POST /api/interventions/:id/couts/:type/:coutId/:action | inexistant | défaut | 404 « Coût introuvable. »
+SA | POST /api/interventions/:id/couts/:type/:coutId/:action | materiel-intervention-affectee | défaut | 400
+SA | POST /api/interventions/:id/couts/:type/:coutId/:action | materiel-intervention-chantier-ct | défaut | 400
 SA | POST /api/interventions/:id/couts/achats | curative-sans-chantier-branche | défaut | 400
 SA | POST /api/interventions/:id/couts/achats | inexistant | défaut | 404 « Intervention introuvable. »
 SA | POST /api/interventions/:id/couts/achats | intervention-affectee-tech | défaut | 400
@@ -9895,6 +9947,8 @@ TECH | PATCH /api/heures/:id | inexistant | défaut | 403 « Permission requise 
 TECH | PATCH /api/interventions/:id/couts/:type/:coutId | heures-tech-intervention-affectee | défaut | 400 validation-avant-droit
 TECH | PATCH /api/interventions/:id/couts/:type/:coutId | heures-tech-sous-intervention-autre | défaut | 404 « Intervention introuvable. »
 TECH | PATCH /api/interventions/:id/couts/:type/:coutId | inexistant | défaut | 400 validation-avant-droit
+TECH | PATCH /api/interventions/:id/couts/:type/:coutId | materiel-intervention-affectee | défaut | 403 « Accès non autorisé. »
+TECH | PATCH /api/interventions/:id/couts/:type/:coutId | materiel-intervention-chantier-ct | défaut | 404 « Intervention introuvable. »
 TECH | PATCH /api/interventions/:id/statut | curative-sans-chantier-branche | défaut | 400 validation-avant-droit
 TECH | PATCH /api/interventions/:id/statut | inexistant | défaut | 400 validation-avant-droit
 TECH | PATCH /api/interventions/:id/statut | intervention-affectee-tech | défaut | 400 validation-avant-droit
@@ -10041,6 +10095,8 @@ TECH | POST /api/interventions | — | défaut | 403 « Création réservée à 
 TECH | POST /api/interventions/:id/couts/:type/:coutId/:action | heures-tech-intervention-affectee | défaut | 403 « Accès non autorisé. »
 TECH | POST /api/interventions/:id/couts/:type/:coutId/:action | heures-tech-sous-intervention-autre | défaut | 404 « Intervention introuvable. »
 TECH | POST /api/interventions/:id/couts/:type/:coutId/:action | inexistant | défaut | 403 « Accès non autorisé. »
+TECH | POST /api/interventions/:id/couts/:type/:coutId/:action | materiel-intervention-affectee | défaut | 403 « Accès non autorisé. »
+TECH | POST /api/interventions/:id/couts/:type/:coutId/:action | materiel-intervention-chantier-ct | défaut | 404 « Intervention introuvable. »
 TECH | POST /api/interventions/:id/couts/achats | curative-sans-chantier-branche | défaut | 403 « Saisie de matériel réservée à l’encadrement. »
 TECH | POST /api/interventions/:id/couts/achats | inexistant | défaut | 404 « Intervention introuvable. »
 TECH | POST /api/interventions/:id/couts/achats | intervention-affectee-tech | défaut | 403 « Saisie de matériel réservée à l’encadrement. »
@@ -10556,6 +10612,8 @@ TECH-SANS-FICHE | PATCH /api/heures/:id | inexistant | défaut | 403 « Permissi
 TECH-SANS-FICHE | PATCH /api/interventions/:id/couts/:type/:coutId | heures-tech-intervention-affectee | défaut | 404 « Intervention introuvable. »
 TECH-SANS-FICHE | PATCH /api/interventions/:id/couts/:type/:coutId | heures-tech-sous-intervention-autre | défaut | 404 « Intervention introuvable. »
 TECH-SANS-FICHE | PATCH /api/interventions/:id/couts/:type/:coutId | inexistant | défaut | 404 « Intervention introuvable. »
+TECH-SANS-FICHE | PATCH /api/interventions/:id/couts/:type/:coutId | materiel-intervention-affectee | défaut | 404 « Intervention introuvable. »
+TECH-SANS-FICHE | PATCH /api/interventions/:id/couts/:type/:coutId | materiel-intervention-chantier-ct | défaut | 404 « Intervention introuvable. »
 TECH-SANS-FICHE | PATCH /api/interventions/:id/statut | curative-sans-chantier-branche | défaut | 400 validation-avant-droit
 TECH-SANS-FICHE | PATCH /api/interventions/:id/statut | inexistant | défaut | 400 validation-avant-droit
 TECH-SANS-FICHE | PATCH /api/interventions/:id/statut | intervention-affectee-tech | défaut | 400 validation-avant-droit
@@ -10702,6 +10760,8 @@ TECH-SANS-FICHE | POST /api/interventions | — | défaut | 403 « Création ré
 TECH-SANS-FICHE | POST /api/interventions/:id/couts/:type/:coutId/:action | heures-tech-intervention-affectee | défaut | 404 « Intervention introuvable. »
 TECH-SANS-FICHE | POST /api/interventions/:id/couts/:type/:coutId/:action | heures-tech-sous-intervention-autre | défaut | 404 « Intervention introuvable. »
 TECH-SANS-FICHE | POST /api/interventions/:id/couts/:type/:coutId/:action | inexistant | défaut | 404 « Intervention introuvable. »
+TECH-SANS-FICHE | POST /api/interventions/:id/couts/:type/:coutId/:action | materiel-intervention-affectee | défaut | 404 « Intervention introuvable. »
+TECH-SANS-FICHE | POST /api/interventions/:id/couts/:type/:coutId/:action | materiel-intervention-chantier-ct | défaut | 404 « Intervention introuvable. »
 TECH-SANS-FICHE | POST /api/interventions/:id/couts/achats | curative-sans-chantier-branche | défaut | 404 « Intervention introuvable. »
 TECH-SANS-FICHE | POST /api/interventions/:id/couts/achats | inexistant | défaut | 404 « Intervention introuvable. »
 TECH-SANS-FICHE | POST /api/interventions/:id/couts/achats | intervention-affectee-tech | défaut | 404 « Intervention introuvable. »
