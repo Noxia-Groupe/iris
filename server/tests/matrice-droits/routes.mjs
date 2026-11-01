@@ -26,7 +26,8 @@ export const ROUTES_PUBLIQUES = [
   'GET /api/health', 'GET /api/config', 'POST /api/auth/sso', 'GET /api/auth/secours/etat', 'POST /api/auth/secours',
   'GET /api/planning/public/:token',
 ];
-// Routes /api/v1 (clés d'intégration) : exclues jusqu'à D1a-2 (cadrage §2.1).
+// Routes /api/v1 (clés d'intégration) : exclues de la matrice des sessions (D1a-1), elles ont leur propre table,
+// ROUTES_CLES en fin de fichier, et leur matrice, matrice-droits-cles.test.mjs (D1a-2).
 export const PREFIXE_CLES = '/api/v1/';
 
 const L = (famille = null, extra = {}) => ({ famille, lecture: true, ...extra });
@@ -244,4 +245,51 @@ export const ROUTES_SESSION = {
   'GET /api/stats/commerciaux': L(),
   // --- Analyse d'un chantier (bouchon 410) ---
   'POST /api/chantiers/:id/analyze': A('chantier'),
+};
+
+// --- Routes /api/v1 des clés d'intégration (lot D1a-2, cadrage §3) ---
+// Chaque route /api/v1 de l'application a ici une entrée, et une seule : la famille de cibles que désigne son
+// paramètre de dossier, sa nature (lecture, ou écriture classée (a), (b) ou (c) comme ci-dessus) et le scope que sa
+// porte exige. Le test de couverture de matrice-droits-cles.test.mjs vérifie que la porte de chaque route est
+// requireApiKey, en tête, que le scope relevé sur la fermeture de la porte est celui de la table, et qu'une route
+// montée par routeMixte a le gestionnaire, la famille et le classement de sa jumelle de session. Une route /api/v1
+// ajoutée sans entrée, ou une entrée sans route, fait échouer ce test.
+// Les scopes chantiers:write, chantiers:archive et finances:read n'ouvrent aucune route /api/v1 : finances:read
+// démasque des montants dans les réponses (lot D1a-3), les deux autres ne servent à rien aujourd'hui (CIBLE §4.2).
+const K = (scope, definition) => ({ ...definition, scope });
+export const ROUTES_CLES = {
+  // --- Chantiers et saisies Travaux (routeMixte, sans garde de rôle côté session) ---
+  'GET /api/v1/chantiers': K('chantiers:read', L()),
+  'GET /api/v1/achats': K('chantiers:read', L()),
+  'GET /api/v1/heures': K('chantiers:read', L()),
+  // --- Société (route propre à la clé, distincte de GET /api/company) ---
+  'GET /api/v1/company': K('company:read', L()),
+  // --- Clients, contacts, sites ---
+  'GET /api/v1/clients': K('clients:read', L()),
+  'POST /api/v1/clients': K('clients:write', A()),
+  'GET /api/v1/clients/:id': K('clients:read', L('client')),
+  'PUT /api/v1/clients/:id': K('clients:write', A('client')),
+  'DELETE /api/v1/clients/:id': K('clients:write', B('client')),
+  'POST /api/v1/clients/:clientId/contacts': K('clients:write', A('client')),
+  'PUT /api/v1/clients/:clientId/contacts/:id': K('clients:write', A('contact')),
+  'POST /api/v1/clients/:clientId/sites': K('clients:write', A('client')),
+  'PUT /api/v1/clients/:clientId/sites/:id': K('clients:write', A('site')),
+  // --- Parc d'équipements ---
+  'GET /api/v1/clients/:clientId/equipements': K('equipements:read', L('client')),
+  'POST /api/v1/clients/:clientId/equipements': K('equipements:write', A('client')),
+  'POST /api/v1/clients/:clientId/equipements/:id/archiver': K('equipements:write', B('equipement')),
+  // --- Catalogue ---
+  'GET /api/v1/catalogue/categories': K('catalogue:read', L()),
+  'POST /api/v1/catalogue/categories': K('catalogue:write', A()),
+  'GET /api/v1/catalogue/:family': K('catalogue:read', L()),
+  'POST /api/v1/catalogue/:family': K('catalogue:write', A()),
+  'PUT /api/v1/catalogue/:family/:id': K('catalogue:write', A('fiche-catalogue')),
+  'DELETE /api/v1/catalogue/:family/:id': K('catalogue:write', B('fiche-catalogue')),
+  // --- Devis ---
+  'GET /api/v1/devis': K('devis:read', L()),
+  'POST /api/v1/devis': K('devis:write', A(null, VAD)),
+  'PATCH /api/v1/devis/:id': K('devis:write', A('devis', VAD)),
+  'POST /api/v1/devis/:id/revisions': K('devis:write', B('devis')),
+  'PUT /api/v1/devis/:id/statut': K('devis:write', A('devis')),
+  'POST /api/v1/devis/:id/convertir': K('devis:write', A('devis', VAD)),
 };

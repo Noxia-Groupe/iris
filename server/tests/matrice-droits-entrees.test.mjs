@@ -28,7 +28,9 @@ import {
   comparerAvecReference, empreinteBase, enParallele, formaterReponse, ligneMatrice, routesDeLApplication, tablesChangees, tablesDeLaBase,
 } from './matrice-droits/outils.mjs';
 import { COMPTES_JOUES, REFUS_AUTHENTIFICATION, creerComptes } from './matrice-droits/comptes.mjs';
-import { FAMILLES, INEXISTANT, VALEURS_FIXES, cibleDe, construireJeuDeDonnees, jourSociete } from './matrice-droits/donnees.mjs';
+import {
+  FAMILLES, INEXISTANT, cheminPour, cibleDe, cibleSansFamille, ciblesDe, construireJeuDeDonnees, jourSociete,
+} from './matrice-droits/donnees.mjs';
 import { PREFIXE_CLES, ROUTES_PUBLIQUES, ROUTES_SESSION } from './matrice-droits/routes.mjs';
 
 const TITRE = 'Lot D1a-1 : matrice des droits à l’entrée de chaque route de session';
@@ -41,33 +43,6 @@ const ROUTE_PUBLIQUE = 'GET /api/planning/public/:token';
 const REQUETES = {
   plage: () => ({ start: jourSociete(-3), end: jourSociete(3) }),
 };
-
-// Chemin d'une route pour une cible : chaque paramètre de dossier reçoit l'identifiant de la cible, chaque autre
-// paramètre sa valeur fixe (cadrage §2.3).
-function cheminPour(chemin, famille, cible) {
-  return chemin.replace(/:([A-Za-z]+)/g, (_, nom) => {
-    if (famille && cible) {
-      const ids = cible.ids;
-      if (nom === 'coutId') return ids.coutId;
-      if (nom === 'clientId') return ids.clientId ?? ids.id;
-      if (nom === 'id' || nom === 'rapportId') return ids.id;
-    }
-    assert.ok(Object.hasOwn(VALEURS_FIXES, nom), `paramètre sans valeur : ${nom} (${chemin})`);
-    return VALEURS_FIXES[nom];
-  });
-}
-// Cible d'une route sans paramètre de dossier : « — », ou ses valeurs fixes (par exemple « cle=CLIENT »).
-function cibleSansFamille(chemin) {
-  const noms = [...chemin.matchAll(/:([A-Za-z]+)/g)].map(([, nom]) => nom);
-  return noms.length ? noms.map((nom) => `${nom}=${VALEURS_FIXES[nom]}`).join(',') : SANS_CIBLE;
-}
-// Cibles jouées pour une route : toutes celles de sa famille (lecture, écriture (a)), la seule cible `inexistant`
-// (écriture (b)), aucune cible nommée pour une route sans paramètre de dossier.
-function ciblesDe(definition, chemin) {
-  if (!definition.famille) return [{ nom: cibleSansFamille(chemin) }];
-  const cibles = FAMILLES[definition.famille].cibles;
-  return definition.ecriture === 'b' ? cibles.filter((c) => c.nom === INEXISTANT) : cibles;
-}
 
 if (!TEST_DATABASE_URL) {
   describe(TITRE, { skip: 'TEST_DATABASE_URL absent — voir tests/README.md' }, () => {
@@ -176,6 +151,10 @@ if (!TEST_DATABASE_URL) {
     test('couverture : chaque route de session a son entrée dans la table, chaque écriture est classée (a), (b) ou (c), et la table ne nomme aucune route absente', () => {
       const cles = routesApplication.map((r) => cleRoute(r.methode, r.chemin));
       assert.equal(new Set(cles).size, cles.length, 'une route n’est montée qu’une fois');
+      // Le relevé ne lit que les couches qui portent une route : un sous-routeur (app.use(chemin, routeur))
+      // cacherait ses routes à la matrice, comme à scripts/routes.mjs. Aucun n'est monté aujourd'hui.
+      const sousRouteurs = appli.app.router.stack.filter((couche) => !couche.route && Array.isArray(couche.handle?.stack));
+      assert.deepEqual(sousRouteurs.map((couche) => couche.name), [], 'sous-routeur monté : ses routes échappent à la matrice');
       const publiques = cles.filter((cle) => ROUTES_PUBLIQUES.includes(cle));
       assert.deepEqual([...publiques].sort(), [...ROUTES_PUBLIQUES].sort(), 'les 6 routes publiques exclues existent');
       for (const route of routesApplication) {
@@ -209,7 +188,9 @@ if (!TEST_DATABASE_URL) {
     // Cadrage §2.2 : « Refus à l'authentification : sans session (401) ; compte désactivé (401 COMPTE_DESACTIVE) ;
     // compte système (401 « Compte introuvable ou révoqué ») ; jeton d'un compte supprimé (N7). » Chaque refus est
     // joué sur chaque route de session, contre une seule cible (`inexistant`, ou aucune) : requireAuth précède tout
-    // gestionnaire (vérifié par le test de couverture), la cible ne peut donc pas changer sa réponse.
+    // gestionnaire (vérifié par le test de couverture), la cible ne peut donc pas changer sa réponse. Les cas sont
+    // d'abord tous joués et leurs lignes gardées, puis vérifiés : un cas admis à tort ne coupe pas le lot, et le diff de
+    // la référence (dernier test) le montre.
     test('refus à l’authentification : chaque route de session répond 401 sans session, avec un jeton invalide, d’un compte désactivé, système ou supprimé, sans rien écrire', async () => {
       const avant = await empreinte();
       const taches = [];
@@ -220,13 +201,15 @@ if (!TEST_DATABASE_URL) {
         for (const { cle: compte } of REFUS_AUTHENTIFICATION) {
           taches.push(async () => {
             const { res, ligne } = await jouer({ compte, methode, chemin, definition, cible });
-            assert.equal(res.status, 401, `${compte} sur ${cle} : ${res.status} ${JSON.stringify(res.body)}`);
-            return ligne();
+            return { ligne: ligne(), nonRefuse: res.status === 401 ? null : `${compte} sur ${cle} : ${res.status} ${JSON.stringify(res.body)?.slice(0, 200)}` };
           });
         }
       }
-      lignes.push(...await enParallele(taches, 8));
-      assert.deepEqual(tablesChangees(avant, await empreinte()), [], 'un refus à l’authentification n’écrit rien');
+      const resultats = await enParallele(taches, 8);
+      lignes.push(...resultats.map((r) => r.ligne));
+      const changees = tablesChangees(avant, await empreinte());
+      assert.deepEqual(resultats.map((r) => r.nonRefuse).filter(Boolean), [], 'refus à l’authentification qui ne répondent pas 401');
+      assert.deepEqual(changees, [], 'un refus à l’authentification n’écrit rien');
     });
 
     // Cadrage §3, D1a-1 : « Pour chaque route de session × chaque compte × chaque cible de sa famille : réponse à
