@@ -337,6 +337,22 @@ if (!TEST_DATABASE_URL) {
       const [ligne] = await prisma.$queryRawUnsafe(`SELECT ${colonnes.join(', ')}`);
       return ligne;
     };
+    // Dernière utilisation d'une clé d'intégration (#417). La porte /api/v1 la note sans l'attendre
+    // (server/src/http/cles-api.ts, « sans attente ni échec bloquant ») : l'écriture peut tomber après la réponse, entre
+    // l'empreinte « avant » et celle d'« après » d'un refus qui suit, et faire échouer le test sans défaut réel. Après
+    // chaque appel admis par la clé, on attend donc, dans un délai borné, que la base porte une dernière utilisation
+    // postérieure au début de l'appel (l'application tourne dans ce processus : même horloge). L'empreinte garde toute la
+    // table ApiAccessKey : une écriture faite par un refus, nouvelle dernière utilisation comprise, la change toujours.
+    const derniereUtilisation = async (cleId) => (await prisma.apiAccessKey.findUniqueOrThrow({ where: { id: cleId }, select: { dernierUsageLe: true } })).dernierUsageLe;
+    const appelAdmisParCle = async (cleId, appel, contexte) => {
+      const debut = new Date();
+      const res = await appel();
+      await attendre(async () => {
+        const instant = await derniereUtilisation(cleId);
+        return instant !== null && instant.getTime() >= debut.getTime();
+      }, 10_000, `${contexte} (${res.status} ${JSON.stringify(res.body)}) : la dernière utilisation de la clé n’est pas notée en base`);
+      return res;
+    };
     const ligneEnvoi = async (id) => (await prisma.$queryRaw`SELECT * FROM "EnvoiDocument" WHERE "id" = ${id}`)[0];
     const sansJetonDans = (res, contexte) => {
       const texte = `${JSON.stringify(res.body ?? null)}\n${res.text ?? ''}\n${JSON.stringify(res.headers ?? {})}`;
@@ -1591,10 +1607,14 @@ if (!TEST_DATABASE_URL) {
     });
 
     // Cadrage, « Sécurité » : « Une clé d'intégration ne peut pas envoyer : 401 » ; aucune route /api/v1 (404).
+    // #417 : la lecture qui prouve la clé valide note sa dernière utilisation sans l'attendre ; elle est attendue avant
+    // la première empreinte. Les appels suivants n'en notent aucune : une clé n'est pas une session (requireAuth répond
+    // 401 avant toute lecture de la base) et aucune route /api/v1 ne les sert (404) ; la fin du test le vérifie.
     test('clé d’intégration : 401 exact sur les cinq routes pour Microsoft 365, sans appel à Graph ni écriture ; aucune route /api/v1', async () => {
       const cle = await ok(appeler('post', '/admin/api-keys', { nom: `TEST clé envoi 6b1b ${suffixe()}`, scopes: TOUS_LES_SCOPES }), 201);
       const parCle = entete(cle.apiKey);
-      assert.equal((await appeler('get', '/v1/clients', null, parCle)).status, 200, 'la clé est valide');
+      assert.equal((await appelAdmisParCle(cle.key.id, () => appeler('get', '/v1/clients', null, parCle), 'GET /api/v1/clients par la clé')).status, 200, 'la clé est valide');
+      const utilisation = await derniereUtilisation(cle.key.id);
       for (const nature of Object.keys(CHEMINS)) {
         await refus(() => envoyer(nature, f.ids[nature], 'client@client-6b1b.test', { auth: parCle, jeton: nouveauJeton(secours.email) }), 401, SESSION_INVALIDE, `${nature}, clé d’intégration`, { me: false });
         // Aucune route /api/v1 : 404 (le corps d'un 404 d'Express n'est pas du JSON), sans appel ni écriture.
@@ -1605,6 +1625,8 @@ if (!TEST_DATABASE_URL) {
         assert.deepEqual(await etatBase(), avant, `${nature}, /api/v1 : rien n’est écrit`);
         assert.deepEqual(graph.requetes(), [], `${nature}, /api/v1 : aucun appel à Graph`);
       }
+      // Une utilisation notée sans attente par un refus, et tombée après son empreinte « après », se verrait ici.
+      assert.deepEqual(await derniereUtilisation(cle.key.id), utilisation, 'aucun refus ne note une utilisation de la clé');
     });
 
     // ------------------------------------------------------------------------------------------------
