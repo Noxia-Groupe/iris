@@ -16,7 +16,7 @@ const auth = (token: string) => ({ Authorization: `Bearer ${token}` });
 // l'envoi » télécharge le PDF, enregistre l'envoi au journal, puis propose le lien de la messagerie, que ces
 // parcours ne cliquent pas : seul son href est lu. Si le PDF est refusé, rien n'est enregistré.
 
-type Chantier = { id: string; nom: string; statut: string };
+type Chantier = { id: string; nom: string; statut: string; numeroDevis: string };
 type Intervention = { id: string; reference: string; titre: string };
 type Envoi = { id: string; destinataire: string; objet: string; auteurNom: string; createdAt: string };
 type Compte = { id: string; name: string; email: string; role: string };
@@ -35,6 +35,26 @@ const nomReduit = (nom: string) => nom.normalize('NFD').replace(/\p{M}/gu, '').r
 const fichierRapport = (nom: string) => `Rapport-chantier-${nomReduit(nom)}.pdf`;
 const REFUS_OUVERTURE = 'Identité de la société incomplète : renseignez SIRET dans l’écran Société avant d’envoyer un rapport de chantier.';
 const REFUS_PDF = 'Identité de la société incomplète : renseignez SIRET dans l’écran Société avant d’imprimer un rapport de chantier.';
+// Montants et heures du chantier témoin, qu'aucun rapport remis au client n'imprime et qu'aucun courriel n'écrit (#412,
+// comme rapport-chantier-pdf.spec.ts). Chacun est cherché comme un nombre entier, borné par (?<!\d) et (?!\d), et non
+// comme une simple sous-chaîne : le texte du PDF imprime trois horodatages Date.now() de 13 chiffres posés par le test
+// (nom du chantier et du client, titre de la demande, compte rendu), et l'objet et le texte du courriel portent le nom
+// du chantier ; « 4321 » ou « 2235 » s'y trouvent environ une fois sur cent (1793501743219, CI de #410). Un nombre
+// écrit est borné par un caractère qui n'est pas un chiffre ; à l'intérieur d'une suite plus longue, ce n'est pas ce
+// nombre. Les écritures de l'ancienne liste restent toutes refusées, et d'autres s'y ajoutent : milliers séparés par
+// une espace, une insécable, une fine, une fine insécable, un point ou une virgule, ou sans séparateur ; décimales à
+// la virgule ou au point.
+const MONTANTS_ET_HEURES_INTERDITS: ReadonlyArray<readonly [RegExp, string]> = [
+  // Le vendu, 4 321,09 € HT : 4 321,09, 4 321 (arrondi à l'euro), 4321.09, 4.321,09, et 432109 (en centimes).
+  [/(?<!\d)4[ \u00a0\u2009\u202f.,]?321(?:[,.]?09)?(?!\d)/, 'le vendu, 4 321,09'],
+  // Les heures pointées, 37,25 h : en heures décimales, en heures et minutes (37 h 15, 37h15, 37 heures), et en
+  // minutes (2235, 2 235).
+  [/(?<!\d)37[,.]25(?!\d)/, 'les heures pointées, 37,25'],
+  [/(?<!\d)37[ \u00a0\u2009\u202f]?h/, 'les heures pointées, 37 h 15'],
+  [/(?<!\d)2[ \u00a0\u2009\u202f.,]?235(?!\d)/, 'les heures pointées en minutes, 2 235'],
+  // Le taux horaire chargé de l'intervenant, 48,13 €.
+  [/(?<!\d)48[,.]13(?!\d)/, 'le taux horaire, 48,13'],
+];
 
 // Même procédé que les autres parcours : un jeton signé avec le secret du backend jetable ouvre une session dans un
 // rôle non administrateur.
@@ -180,8 +200,16 @@ test('rapport de chantier : envoi préparé depuis la fiche, PDF téléchargé s
   const texte = await pdfTelecharge(page, () => dialogue.getByRole('button', { name: 'Préparer l’envoi' }).click(), fichierRapport(nom));
   expect(fichierRapport(nom)).toBe(`Rapport-chantier-E2E-Envoi-rapport-${suffixe}.pdf`);
   for (const attendu of ['Rapport de chantier', nom, client.raisonSociale, intervention!.reference, compteRendu]) expect(texte, `absent du PDF : ${attendu}`).toContain(attendu);
-  // Le PDF joint est le rapport remis au client : ni le vendu (4 321,09), ni les 37,25 h pointées, ni symbole monétaire.
-  for (const interdit of ['4 321', '4321', '37,25', '37.25', '37 h', '2235', '48,13', '€', '\x80']) expect(texte, `imprimé à tort : ${interdit}`).not.toContain(interdit);
+  // Le PDF joint est le rapport remis au client : ni le vendu (4 321,09), ni les 37,25 h pointées, ni le taux, ni
+  // symbole monétaire. Les références de l'affaire (A26-0042) et de l'intervention (I26-0042) sont numérotées par des
+  // séquences annuelles : sur une base qui a servi, le numéro 4321 ou 2235 y serait lui aussi un nombre borné. Elles
+  // sont retirées du texte avant la recherche des nombres interdits, et rien d'autre ne l'est : chacune est non vide et
+  // imprimée.
+  const references = [chantier.numeroDevis, intervention!.reference];
+  for (const reference of references) expect(Boolean(reference) && texte.includes(reference), `référence absente du PDF : ${reference}`).toBe(true);
+  const sansReferences = references.reduce((reste, reference) => reste.split(reference).join('‹référence›'), texte);
+  for (const [motif, libelle] of MONTANTS_ET_HEURES_INTERDITS) expect(sansReferences, `imprimé à tort : ${libelle}`).not.toMatch(motif);
+  for (const interdit of ['€', '\x80']) expect(texte, `imprimé à tort : ${interdit}`).not.toContain(interdit);
   const lien = dialogue.getByRole('link', { name: 'Ouvrir la messagerie' });
   await expect(lien).toHaveAttribute('href', lienAttendu(principal, objet, corps));
   await expect(dialogue.getByRole('status')).toContainText(`Le PDF ${fichierRapport(nom)} vient d’être téléchargé : joignez-le à la main au courriel.`);
@@ -190,8 +218,9 @@ test('rapport de chantier : envoi préparé depuis la fiche, PDF téléchargé s
   expect(envois[0]).toMatchObject({ destinataire: principal, objet, auteurNom: auteur });
   const liste = dialogue.getByRole('region', { name: 'Envois' }).getByRole('listitem');
   await expect(liste).toHaveText([`Envoi préparé le ${dateHeure(envois[0].createdAt, fuseauHoraire || 'Europe/Paris')} à ${principal} par ${auteur}`]);
-  // Ni l'objet ni le texte ne portent de montant ni d'heures.
-  for (const interdit of ['4 321', '4321', '37,25', '37 h', '€']) expect(`${objet}\n${corps}`).not.toContain(interdit);
+  // Ni l'objet ni le texte ne portent de montant ni d'heures (nombres bornés : l'objet porte l'horodatage du nom).
+  for (const [motif, libelle] of MONTANTS_ET_HEURES_INTERDITS) expect(`${objet}\n${corps}`, `écrit à tort : ${libelle}`).not.toMatch(motif);
+  expect(`${objet}\n${corps}`).not.toContain('€');
 
   // Fermée par « Fermer » ; le journal se relit à la réouverture.
   await page.mouse.click(5, 5);

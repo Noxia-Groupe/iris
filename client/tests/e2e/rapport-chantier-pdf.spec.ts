@@ -44,8 +44,28 @@ async function envoyer(request: APIRequestContext, headers: Record<string, strin
   return reponse.json();
 }
 
-type Chantier = { id: string; nom: string };
+type Chantier = { id: string; nom: string; numeroDevis: string };
 type Intervention = { id: string; reference: string; titre: string };
+
+// Montants et heures du chantier témoin, qu'aucun rapport remis au client n'imprime (#412). Chacun est cherché comme
+// un nombre entier, borné par (?<!\d) et (?!\d), et non comme une simple sous-chaîne : le texte du PDF imprime trois
+// horodatages Date.now() de 13 chiffres posés par le test (nom du chantier et du client, titre de la demande, compte
+// rendu), où « 4321 » ou « 2235 » se trouvent environ une fois sur cent (1793501743219, CI de #410). Un nombre
+// imprimé est borné par un caractère qui n'est pas un chiffre ; à l'intérieur d'une suite plus longue, ce n'est pas
+// ce nombre. Les écritures de l'ancienne liste restent toutes refusées, et d'autres s'y ajoutent : milliers séparés
+// par une espace, une insécable, une fine, une fine insécable, un point ou une virgule, ou sans séparateur ; décimales
+// à la virgule ou au point.
+const MONTANTS_ET_HEURES_INTERDITS: ReadonlyArray<readonly [RegExp, string]> = [
+  // Le vendu, 4 321,09 € HT : 4 321,09, 4 321 (arrondi à l'euro), 4321.09, 4.321,09, et 432109 (en centimes).
+  [/(?<!\d)4[ \u00a0\u2009\u202f.,]?321(?:[,.]?09)?(?!\d)/, 'le vendu, 4 321,09'],
+  // Les heures pointées, 37,25 h : en heures décimales, en heures et minutes (37 h 15, 37h15, 37 heures), et en
+  // minutes (2235, 2 235).
+  [/(?<!\d)37[,.]25(?!\d)/, 'les heures pointées, 37,25'],
+  [/(?<!\d)37[ \u00a0\u2009\u202f]?h/, 'les heures pointées, 37 h 15'],
+  [/(?<!\d)2[ \u00a0\u2009\u202f.,]?235(?!\d)/, 'les heures pointées en minutes, 2 235'],
+  // Le taux horaire chargé de l'intervenant, 48,13 €.
+  [/(?<!\d)48[,.]13(?!\d)/, 'le taux horaire, 48,13'],
+];
 
 // Chantier ouvert par la conversion d'un devis signé, au montant témoin de 4 321,09 € HT (vendu), avec 37,25 h
 // pointées (37 h 15) et une intervention rattachée qui porte un compte rendu.
@@ -139,10 +159,15 @@ test('rapport client : l’administration télécharge le PDF du serveur, sans m
     expect(texte, `absent du PDF : ${attendu}`).toContain(attendu);
   }
   expect(texte).toMatch(new RegExp(`${dateDuJour()} \\d{2}:\\d{2}`));
-  // Ni montant ni heures : ni le vendu (4 321,09), ni les 37,25 h pointées, ni le taux, ni symbole monétaire.
-  for (const interdit of ['4 321', '4321', '4 321', '4 321', '37,25', '37.25', '37 h', '2235', '48,13', '48.13', '\x80', '€']) {
-    expect(texte, `imprimé à tort : ${interdit}`).not.toContain(interdit);
-  }
+  // Ni montant ni heures : ni le vendu (4 321,09), ni les 37,25 h pointées, ni le taux, ni symbole monétaire. Les
+  // références de l'affaire (A26-0042) et de l'intervention (I26-0042) sont numérotées par des séquences annuelles :
+  // sur une base qui a servi, le numéro 4321 ou 2235 y serait lui aussi un nombre borné. Elles sont retirées du texte
+  // avant la recherche des nombres interdits, et rien d'autre ne l'est : chacune est non vide et imprimée.
+  const references = [chantier.numeroDevis, intervention.reference];
+  for (const reference of references) expect(Boolean(reference) && texte.includes(reference), `référence absente du PDF : ${reference}`).toBe(true);
+  const sansReferences = references.reduce((reste, reference) => reste.split(reference).join('‹référence›'), texte);
+  for (const [motif, libelle] of MONTANTS_ET_HEURES_INTERDITS) expect(sansReferences, `imprimé à tort : ${libelle}`).not.toMatch(motif);
+  for (const interdit of ['\x80', '€']) expect(texte, `imprimé à tort : ${interdit}`).not.toContain(interdit);
   expect(texte).not.toMatch(/\d,\d{2}(?!\d)/);
   expect(texte).not.toMatch(/(?<![A-Za-z])(HT|TTC)(?![A-Za-z])/);
 
