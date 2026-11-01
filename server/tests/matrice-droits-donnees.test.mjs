@@ -41,7 +41,7 @@ import {
 import { COMPTES_JOUES, COMPTE_SYSTEME_ID, creerComptes } from './matrice-droits/comptes.mjs';
 import { FAMILLES, INEXISTANT, cheminPour, cibleDe, ciblesDe, construireJeuDeDonnees, jourSociete } from './matrice-droits/donnees.mjs';
 import { ROUTES_CLES, ROUTES_SESSION } from './matrice-droits/routes.mjs';
-import { CHAMPS_MASQUES_HORS_MONTANTS, MONTANTS_MASQUES, TYPES_MONTANTS, VALEURS_DERIVEES } from './matrice-droits/montants-masques.mjs';
+import { CHAMPS_MASQUES_HORS_MONTANTS, MONTANTS_MASQUES, MONTANTS_MIS_A_ZERO, TYPES_MONTANTS, VALEURS_DERIVEES } from './matrice-droits/montants-masques.mjs';
 import {
   ABSENT, NUL, PRESENT, afficherChemin, cheminGenerique, clesDecrites, comparer, creerRegistre, listeDeNoms, listePremierNiveau, nommer,
   objetsAuChemin, parcourir, parentDe, presences, statut, valeurDecrite,
@@ -66,11 +66,16 @@ const isoDe = (jour) => jour.split('-').reverse().join('-');
 //  - plage du planning : celle de D1a-1 (sans elle, 400 pour tous les comptes admis) ;
 //  - statistiques des intervenants et des fournisseurs : la période qui contient la veille, jour des saisies du jeu de
 //    données ; sans `ref`, la semaine ou le mois en cours ne la contient pas toujours (un lundi, un premier du mois),
-//    et la liste changerait avec le jour d'exécution.
+//    et la liste changerait avec le jour d'exécution ;
+//  - assiduité des conducteurs : la semaine qui précède la semaine en cours. La route compte les heures par leur
+//    date de saisie (createdAt, l'instant de la construction du jeu de données), du lundi au vendredi de la semaine
+//    demandée, la semaine en cours par défaut : un jour ouvré, elle les compterait (tranchesHoraires remplies), un
+//    samedi ou un dimanche, non. Une semaine passée n'en contient jamais : la ligne ne dépend plus du jour.
 const REQUETES = {
   'GET /api/planning/events': () => ({ start: jourSociete(-3), end: jourSociete(3) }),
   'GET /api/stats/intervenants': () => ({ period: 'week', ref: isoDe(jourSociete(-1)) }),
   'GET /api/stats/fournisseurs': () => ({ period: 'month', ref: isoDe(jourSociete(-1)) }),
+  'GET /api/stats/conducteurs/assiduite': () => ({ week: isoDe(jourSociete(-7)) }),
 };
 // Cibles de plus pour une liste filtrée par un paramètre : la liste des clients désactivés (cadrage §3, D1a-3 :
 // « client désactivé : sa visibilité dans les listes et les fiches »). Un technicien ne la reçoit pas
@@ -602,6 +607,132 @@ if (!TEST_DATABASE_URL) {
         return `${a.filter((m) => !b.includes(m)).join(', ') || '(rien)'} → ${b.filter((m) => !a.includes(m)).join(', ') || '(rien)'}`;
       };
       comparerAvecReference(lignes, REFERENCE, 'donnees.txt', { champsCle: CHAMPS_CLE, resumer });
+    });
+
+    // Cadrage §2.2 : « accesFinance (sans effet en session, à prouver) ». CPT-FINANCE n'est titulaire d'aucun chantier :
+    // il ne lit aucune rentabilité et ne peut donc pas prouver que l'accès financier ne l'ouvre pas. Le comptable CPT,
+    // titulaire de chantier-cpt, reçoit ici l'accès financier le temps de rejouer ses lectures (super administrateur,
+    // PATCH /api/users/:id/acces-finance, remis même en cas d'échec) : chacune doit décrire exactement ce qu'elle décrit
+    // sans lui, hors GET /api/me (ses permissions). Placé après la comparaison à la référence : les lignes de ce
+    // contexte n'y entrent pas ; et avant tout test qui écrit dans la base, puisque ses lignes attendues sont celles du
+    // test 2. Dans un contexte autre que « défaut », une ligne « clés » ou « éléments » n'est écrite
+    // que si elle change : toute ligne de ce genre est donc un écart.
+    test('accès financier sans effet en session : le comptable titulaire qui le reçoit lit les mêmes données, montants compris', async () => {
+      const CONTEXTE = 'accesFinance=oui';
+      const acces = async (valeur) => {
+        const res = await appeler(appli.adresse, 'PATCH', `/api/users/${comptes.CPT.id}/acces-finance`, { jeton: comptes.SA.jeton, corps: { accesFinance: valeur } });
+        assert.equal(res.status, 200, JSON.stringify(res.body));
+      };
+      const depart = lignes.length;
+      await acces(true);
+      try {
+        await jouerLectures(lecturesSession, ['CPT'], CONTEXTE, { selonDefaut: true });
+      } finally {
+        await acces(false);
+      }
+      const sansContexte = (ligne) => { const champs = ligne.split(SEPARATEUR); champs.splice(3, 1); return champs.join(SEPARATEUR); };
+      const obtenues = lignes.slice(depart).filter((ligne) => ligne.split(SEPARATEUR)[1] !== 'GET /api/me').map(sansContexte).sort(comparer);
+      const attendues = lignes.slice(0, depart).filter((ligne) => {
+        const [compte, route, , contexte, objet] = ligne.split(SEPARATEUR);
+        return compte === 'CPT' && contexte === CONTEXTE_DEFAUT && route !== 'GET /api/me' && !/^(clés|éléments) /.test(objet);
+      }).map(sansContexte).sort(comparer);
+      assert.ok(attendues.some((ligne) => ligne.includes(' | montants chantier-cpt | ')), 'CPT lit chantier-cpt et ses montants');
+      assert.deepEqual(obtenues, attendues, 'lectures du comptable avec l’accès financier');
+    });
+
+    // Cadrage §6 : un montant masqué par une MISE À ZÉRO, et non par null ou absent, échappe aux statuts de la matrice
+    // (un zéro est « présent ») et au test « aucun champ masqué hors de la liste » (un zéro est un nombre). Ces montants
+    // sont listés à part (MONTANTS_MIS_A_ZERO) et observés ici, APRÈS la matrice, qu'ils ne changent pas : deux affaires
+    // du commercial COM, l'une au barème standard, l'autre au barème réduit, ouvertes, clôturées et encaissées par
+    // l'administration, donnent à chaque total une valeur non nulle par défaut, que le réglage remet à zéro. Aucune
+    // valeur n'est écrite ni comparée : seulement « non nul », « zéro », « null » ou « absent ».
+    test('montants mis à zéro par un réglage (MONTANTS_MIS_A_ZERO) : non nuls par défaut pour chaque compte qui les lit, zéro sous le réglage, jamais null ni absent', async () => {
+      const id = (famille, nom) => cibleDe(famille, nom).ids.id;
+      const clotures = [];
+      for (const baremeReduit of [false, true]) {
+        const devis = await api(SA, 'POST', '/api/devis', { clientId: id('client', 'client-actif'), objet: `TEST Affaire encaissée de COM${baremeReduit ? ', barème réduit' : ''}`, lignes: [{ designation: 'TEST Ligne de l’affaire encaissée', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 1000, tauxTva: 20 }] }, 201);
+        await api(SA, 'PUT', `/api/devis/${devis.id}/statut`, { statut: 'ENVOYE' });
+        await api(SA, 'POST', `/api/devis/${devis.id}/signature`, { signataire: 'TEST Signataire matrice', confirme: true }, 201);
+        const conversion = await api(SA, 'POST', `/api/devis/${devis.id}/convertir`, { cible: 'CHANTIER', responsableId: comptes.CT.id, commercialId: comptes.COM.id, dateDebut: jourSociete(-1) }, 201);
+        const chantierId = conversion.chantier?.id ?? conversion.chantierId ?? conversion.id;
+        assert.ok(chantierId, JSON.stringify(conversion).slice(0, 300));
+        if (baremeReduit) await api(SA, 'PATCH', `/api/chantiers/${chantierId}`, { baremeReduit: true });
+        clotures.push((await api(SA, 'PATCH', `/api/chantiers/${chantierId}/statut`, { statut: 'TERMINE' })).dateFin);
+        await api(SA, 'PATCH', `/api/chantiers/${chantierId}/encaisse`, { encaisse: true });
+      }
+      // Mois de la clôture (jour AAAA-MM-JJ de la première), et non le mois en cours : la lecture ne dépend pas de
+      // l'heure d'exécution.
+      const ref = String(clotures[0]).slice(0, 10);
+      assert.equal(String(clotures[1]).slice(0, 7), ref.slice(0, 7), 'les deux affaires sont clôturées le même mois');
+      const decrire = (valeur, present) => (!present ? ABSENT : valeur === null ? NUL : typeof valeur !== 'number' ? `${typeof valeur}` : valeur === 0 ? 'zéro' : 'non nul');
+      for (const entree of MONTANTS_MIS_A_ZERO) {
+        assert.ok(lecturesSession.includes(entree.route), `${entree.route} : lecture de session de la matrice`);
+        const reglage = CONTEXTES_REGLAGE.find((c) => c.contexte === entree.reglage);
+        assert.ok(reglage, `${entree.reglage} : contexte de réglage connu`);
+        const lire = async (compte) => {
+          const res = await appeler(appli.adresse, 'GET', entree.route.split(' ')[1], { ...authDe(compte), requete: { period: 'month', ref } });
+          assert.equal(res.status, 200, `${compte} : ${res.status} ${JSON.stringify(res.body)?.slice(0, 300)}`);
+          const ligne = res.body.commerciaux.find((c) => c.id === comptes.COM.id);
+          assert.ok(ligne, `${compte} : ligne du commercial COM`);
+          return Object.fromEntries(entree.champs.map((champ) => [champ, decrire(ligne[champ], champ in ligne)]));
+        };
+        const attendu = (statut) => Object.fromEntries(entree.champs.map((champ) => [champ, statut]));
+        for (const compte of entree.voit) assert.deepEqual(await lire(compte), attendu('non nul'), `${compte}, réglages par défaut`);
+        await regler(reglage.route, reglage.corps);
+        try {
+          for (const compte of entree.voit) assert.deepEqual(await lire(compte), attendu('zéro'), `${compte}, ${entree.reglage}`);
+        } finally {
+          await regler(reglage.route, reglage.retour);
+        }
+      }
+    });
+
+    // GET /api/interventions/:id/facture-temps-passe ne répond 200 sur aucune cible du jeu de données (aucune
+    // intervention au temps passé : 409 partout dans entrees.txt) : sa réponse n'est décrite pour aucun compte. Une
+    // intervention au temps passé, terminée, est créée ici, après la comparaison à la référence : l'aperçu, réservé à
+    // l'administration, doit avoir la même forme (clés, montants présents ou nuls) pour chaque administrateur, et être
+    // refusé (403) à tout autre compte. Le statut « terminée » est écrit en base : terminer par l'API exige un compte
+    // rendu signé, sans rapport avec ce qui est lu ici. Le pas du temps passé, vide par défaut, est réglé puis remis ;
+    // l'aperçu reprend les heures saisies : le technicien affecté en saisit une.
+    test('aperçu de la facture au temps passé : même réponse pour chaque administrateur, refus pour les autres comptes', async () => {
+      const prestations = await api(SA, 'GET', '/api/catalogue/prestations');
+      const mainOeuvre = prestations.find((fiche) => fiche.reference === 'TEST-MATRICE-MO');
+      assert.ok(mainOeuvre, 'main d’œuvre du jeu de données');
+      const { pasTempsPasseMinutes } = await api(SA, 'GET', '/api/parametres');
+      await regler('/api/parametres', { pasTempsPasseMinutes: 15 });
+      let intervention;
+      try {
+        const devis = await api(SA, 'POST', '/api/devis', { clientId: cibleDe('client', 'client-actif').ids.id, objet: 'TEST Devis au temps passé matrice', auTempsPasse: true, lignes: [
+          { tempsPasse: true, designation: 'TEST Main d’œuvre au temps passé', quantite: 1, tarifTempsPasse: 'HORS_CONTRAT', catalogueFamille: 'prestations', catalogueId: mainOeuvre.id },
+        ] }, 201);
+        await api(SA, 'PUT', `/api/devis/${devis.id}/statut`, { statut: 'ENVOYE' });
+        await api(SA, 'POST', `/api/devis/${devis.id}/signature`, { signataire: 'TEST Signataire temps passé', confirme: true }, 201);
+        intervention = await api(SA, 'POST', `/api/devis/${devis.id}/convertir`, { cible: 'INTERVENTION' }, 201);
+      } finally {
+        await regler('/api/parametres', { pasTempsPasseMinutes });
+      }
+      assert.equal(intervention.auTempsPasse, true);
+      // Une heure du technicien, saisie par lui (l'aperçu reprend les heures saisies), puis la fin en base.
+      const ficheTech = cibleDe('fiche-intervenant', 'fiche-tech').ids.id;
+      await api(SA, 'PUT', `/api/interventions/${intervention.id}/planning`, { dateDebut: jourSociete(-1), creneau: 'JOURNEE', intervenantIds: [ficheTech] }, [200, 201]);
+      if ((await api(SA, 'GET', `/api/interventions/${intervention.id}`)).statut === 'A_PLANIFIER') await api(SA, 'PATCH', `/api/interventions/${intervention.id}/statut`, { statut: 'PLANIFIEE' });
+      await api(SA, 'PATCH', `/api/interventions/${intervention.id}/statut`, { statut: 'EN_COURS' });
+      await api('TECH', 'POST', `/api/interventions/${intervention.id}/couts/heures`, { date: jourSociete(-1), nbrHeures: 1 }, 201);
+      await appli.prisma.intervention.update({ where: { id: intervention.id }, data: { statut: 'TERMINEE' } });
+      const formes = new Map();
+      for (const compte of COMPTES_JOUES) {
+        const res = await appeler(appli.adresse, 'GET', `/api/interventions/${intervention.id}/facture-temps-passe`, { jeton: comptes[compte].jeton });
+        if (!['SA', 'AD', 'AD-COM'].includes(compte)) { assert.equal(res.status, 403, `${compte} : ${res.status}`); continue; }
+        assert.equal(res.status, 200, `${compte} : ${res.status} ${JSON.stringify(res.body)?.slice(0, 200)}`);
+        const { objets } = parcourir(res.body, registre);
+        const { champs } = presences(res.body, registre);
+        formes.set(compte, JSON.stringify({
+          cles: [...objets].map(([chemin, objet]) => `${chemin} ${clesDecrites(objet)}`).sort(comparer),
+          presences: [...champs].map(([chemin, statuts]) => `${chemin}=${[...statuts].sort(comparer).join('/')}`).sort(comparer),
+        }));
+      }
+      assert.equal(new Set(formes.values()).size, 1, 'l’aperçu diffère d’un administrateur à l’autre');
+      assert.ok(JSON.parse(formes.get('SA')).cles.length > 0, 'aperçu décrit');
     });
   });
 }

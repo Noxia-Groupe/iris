@@ -15,7 +15,7 @@
 //  3. les décisions selon le rôle qui retirent un champ : `isAdmin ? … : null`, `role === …`, `canSeeMarge`,
 //     `…Visible ? … : null`, `delete copie[…]`, les déstructurations `{ champ: _masque, ...reste }` ;
 //  4. chaque route de lecture qui répond 200 avec un montant a été relue (inventaire des 75 lectures de session et
-//     des 11 lectures /api/v1), et ses réponses explorées pour chaque compte.
+//     des 10 lectures /api/v1), et ses réponses explorées pour chaque compte.
 // Le test « aucun champ masqué hors de la liste » de matrice-droits-donnees.test.mjs complète ce relevé à
 // l'exécution : un champ numérique, ou un objet, présent pour un compte et nul ou absent pour un autre sur le même
 // objet, doit figurer ici ou dans CHAMPS_MASQUES_HORS_MONTANTS (non-montants, avec leur raison).
@@ -177,6 +177,23 @@ export const CHAMPS_MASQUES_HORS_MONTANTS = {
   'GET /api/stats/global . nbTerminesNonEncaisses': 'compteur de chantiers, réservé à l’administration (statistiques/routes.ts:77-81)',
   'GET /api/stats/global . heuresTotal': 'heures, et non montant : ni l’administration ni le commercial ne le reçoivent (statistiques/routes.ts:89-92)',
 };
+
+// Montants masqués par une MISE À ZÉRO, et non par null ou absent, selon un réglage : un zéro est un nombre
+// « présent », que ni le statut de la matrice ni le test « aucun champ masqué hors de la liste » ne distinguent d'une
+// valeur visible. Ils sont observés par le test « montants mis à zéro » de matrice-droits-donnees.test.mjs : non nuls
+// par défaut pour chaque compte de `voit`, zéro sous le réglage, jamais null ni absent. Résultat commercial : la marge
+// de chaque chantier est nulle quand la marge commerciale est coupée (chantiers/suivi.ts:139-141), et chaque total du
+// commercial la compte pour zéro (commissions/metier.ts:78-79 et :93-96). Les commissions et primes du même résultat
+// (commissionBareme, commissionStandard, commissionReduite, primeCA, primeMarge, primeAdmin, commissionTotal, et
+// chantiers[].commissionEstimee) suivent la même marge, mais valent zéro avec ou sans le réglage tant qu'aucun plan
+// commercial n'existe (commissions/metier.ts:46-52, décision du 17-10-2026) : rien à observer aujourd'hui.
+export const MONTANTS_MIS_A_ZERO = [
+  {
+    route: 'GET /api/stats/commerciaux', element: 'ligne du commercial COM (commerciaux[])', champs: ['margeTotal', 'margeStandard', 'margeReduite'],
+    regle: 'margeCommercialeActive : la marge de chaque chantier est nulle et comptée zéro dans les totaux du commercial',
+    source: 'commissions/metier.ts:78-79 et :93-96 ; commissions/routes.ts:47-54', voit: ['SA', 'AD', 'AD-COM', 'COM'], reglage: 'margeCommercialeActive=non',
+  },
+];
 
 // Montants masqués dans les RÉPONSES D'ÉCRITURE : même règle que la lecture, mais une écriture réelle est nécessaire
 // pour les voir. Ils relèvent de D1a-5 (écritures réelles, cadrage §3) et ne sont pas observés ici ; ils sont listés
