@@ -77,8 +77,8 @@ const REQUETES = {
   'GET /api/stats/fournisseurs': () => ({ period: 'month', ref: isoDe(jourSociete(-1)) }),
   'GET /api/stats/conducteurs/assiduite': () => ({ week: isoDe(jourSociete(-7)) }),
 };
-// Cibles de plus pour une liste filtrée par un paramètre : la liste des clients désactivés (cadrage §3, D1a-3 :
-// « client désactivé : sa visibilité dans les listes et les fiches »). Un technicien ne la reçoit pas
+// Cibles de plus pour une liste filtrée par un paramètre : la liste des clients désactivés (cadrage §3, ligne
+// D1a-3 : « comptes super administrateur, client désactivé »). Un technicien ne la reçoit pas
 // (clients/routes.ts:51-55, décision de Nelson du 14-10-2026).
 const VARIANTES = {
   'GET /api/clients': [{ nom: 'actif=false', requete: { actif: 'false' } }],
@@ -440,7 +440,8 @@ if (!TEST_DATABASE_URL) {
       registre.ajouter(devisPrixAchat.id, 'devis-prix-achat');
 
       // --- Clés d'intégration : pour chaque scope qui ouvre une lecture /api/v1, la clé de ce scope seul et la même
-      //     avec finances:read (cadrage §3, D1a-3 : « quels montants une clé voit »).
+      //     avec finances:read, pour savoir quels montants une clé voit (CIBLE §7.1, lignes « Données renvoyées » et
+      //     « Clés d'intégration »).
       for (const scope of scopesLus) {
         const [seule, avecFinances] = clesDuScope(scope);
         for (const [nom, scopes] of [[seule, [scope]], [avecFinances, [scope, 'finances:read']]]) {
@@ -484,7 +485,7 @@ if (!TEST_DATABASE_URL) {
       assert.ok(Object.keys(cles).length === scopesLus.length * 2 && scopesLus.length === 6, `scopes lus par /api/v1 : ${scopesLus.join(', ')}`);
     });
 
-    // Cadrage §3, D1a-3 : « pour chaque lecture : éléments visibles d'une liste (par cible), champs présents ou
+    // Cadrage §3, D1a-3 : « Pour chaque lecture : éléments visibles d'une liste (par cible), champs présents ou
     // masqués, permissions de /api/me et de /api/users, comptes super administrateur, client désactivé ».
     test('lectures de session, réglages par défaut : chaque compte, chaque cible ; éléments visibles, clés, montants, permissions et logo, sans rien écrire', async () => {
       const avant = await empreinteBase(appli.prisma, tables);
@@ -498,8 +499,8 @@ if (!TEST_DATABASE_URL) {
       assert.ok(logo.every((ligne) => ligne.endsWith('| 200 image/jpeg, contenu identique au logo posé')), logo.join('\n'));
     });
 
-    // Cadrage §3, D1a-3 : « les lectures /api/v1 avec et sans finances:read, pour savoir quels montants une clé voit.
-    // Le démasquage par finances:read est un montant. »
+    // Lectures /api/v1, avec et sans finances:read, pour savoir quels montants une clé voit (CIBLE §7.1, lignes
+    // « Données renvoyées » et « Clés d'intégration ») : le démasquage par finances:read touche un montant.
     test('clés d’intégration : chaque lecture /api/v1, par la clé de son scope seule puis avec finances:read', async () => {
       for (const scope of scopesLus) {
         await jouerLectures(lecturesCles.filter((route) => ROUTES_CLES[route].scope === scope), clesDuScope(scope), CONTEXTE_DEFAUT);
@@ -531,9 +532,10 @@ if (!TEST_DATABASE_URL) {
       }
     });
 
-    // Cadrage §3, D1a-3, et §6 : « Un test vérifie que chaque champ de la liste est observé au moins une fois, sur un
-    // objet qui le porte, pour un compte qui le voit et pour un compte qui ne le voit pas. » La règle de chaque champ
-    // est aussi éprouvée dans l'autre sens : un compte qui ne le voit pas ne l'a jamais présent, réglages par défaut.
+    // Cadrage §3, ligne D1a-3, et §6 : la liste fermée est rendue exécutable. Chaque champ de la liste est observé au
+    // moins une fois, sur un objet qui le porte, pour un compte qui le voit et pour un compte qui ne le voit pas. La
+    // règle de chaque champ est aussi éprouvée dans l'autre sens : un compte qui ne le voit pas ne l'a jamais présent,
+    // réglages par défaut.
     test('liste fermée des montants masqués : chaque champ est vu présent par un compte qui le voit, nul ou absent par un compte qui ne le voit pas ou sous le réglage qui le masque, et jamais présent pour un compte qui ne le voit pas', () => {
       const manques = [];
       const nomEntree = (entree) => `${entree.type}${entree.cible ? ` (${entree.cible})` : ''} ${entree.chemins.join(' / ')}`;
@@ -553,7 +555,7 @@ if (!TEST_DATABASE_URL) {
       assert.deepEqual(manques, [], 'liste fermée des montants masqués (matrice-droits/montants-masques.mjs)');
     });
 
-    // Cadrage §6 : « Un champ de montant masqué absent de la liste est classé C ». Ce test cherche, dans toutes les
+    // Cadrage §6 : un champ de montant masqué absent de la liste fermée est classé C. Ce test cherche, dans toutes les
     // réponses enregistrées, un champ masqué selon le demandeur : un nombre, un objet ou une liste présent pour un
     // compte, et nul ou absent (son parent présent) pour un autre, sur le même objet de la même réponse (route, cible,
     // contexte). Chacun doit figurer dans la liste fermée, ou parmi les champs masqués qui ne sont pas des montants.

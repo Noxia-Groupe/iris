@@ -1,0 +1,224 @@
+CT | chantiers:archive | DELETE /api/achats/:id | achat-chantier-ct | défaut | entrée | 403 « Permission requise : chantiers:archive » → 400
+CT | chantiers:archive | DELETE /api/heures/:id | heure-chantier-ct | défaut | entrée | 403 « Permission requise : chantiers:archive » → 400
+CT | chantiers:archive | POST /api/achats/:id/restaurer | achat-archive-chantier-ct | défaut | entrée | 403 « Permission requise : chantiers:archive » → 400
+CT | chantiers:archive | POST /api/heures/:id/restaurer | heure-archivee-chantier-ct | défaut | entrée | 403 « Permission requise : chantiers:archive » → 400
+CT | devis:read | GET /api/devis | — | défaut | entrée | 403 « Permission requise : devis:read » → 200
+CT | devis:read | GET /api/devis | — | défaut | montants | + lignes[].prixAchatUnitaireHt=absent
+CT | devis:read | GET /api/devis | — | défaut | éléments [] | + devis-brouillon, devis-converti, devis-intervention, devis-intervention-ct, devis-prix-achat, devis-signe, « TEST Devis de chantier-ac », « TEST Devis de chantier-ad », « TEST Devis de chantier-annule », « TEST Devis de chantier-autre », « TEST Devis de chantier-com », « TEST Devis de chantier-com-titulaire », « TEST Devis de chantier-cpt », « TEST Devis de chantier-ct-branche-resp », « TEST Devis de chantier-dc », « TEST Devis de chantier-dir », « TEST Devis de chantier-resp », « TEST Devis de chantier-tech-branche-resp », « TEST Devis de chantier-termine »
+CT | devis:read | GET /api/devis/:id/document.pdf | devis-brouillon | défaut | entrée | 403 « Permission requise : devis:read » → 200
+CT | devis:read | GET /api/devis/:id/document.pdf | devis-converti | défaut | entrée | 403 « Permission requise : devis:read » → 200
+CT | devis:read | GET /api/devis/:id/document.pdf | devis-signe | défaut | entrée | 403 « Permission requise : devis:read » → 200
+CT | devis:read | GET /api/devis/:id/envois | devis-brouillon | défaut | entrée | 403 « Permission requise : devis:read » → 200
+CT | devis:read | GET /api/devis/:id/envois | devis-brouillon | défaut | éléments .envois[] | + (aucun)
+CT | devis:read | GET /api/devis/:id/envois | devis-converti | défaut | entrée | 403 « Permission requise : devis:read » → 200
+CT | devis:read | GET /api/devis/:id/envois | devis-converti | défaut | éléments .envois[] | + (aucun)
+CT | devis:read | GET /api/devis/:id/envois | devis-signe | défaut | entrée | 403 « Permission requise : devis:read » → 200
+CT | devis:read | GET /api/devis/:id/envois | devis-signe | défaut | éléments .envois[] | + (aucun)
+CT | devis:write | GET /api/devis/catalogue | — | défaut | entrée | 403 « Permission requise : devis:write » → 200
+CT | devis:write | GET /api/devis/catalogue | — | défaut | montants | + prixAchatHt=absent
+CT | devis:write | GET /api/devis/catalogue | — | défaut | éléments [] | + main-oeuvre-matrice, modele-equipement, prestation-catalogue
+CT | devis:write | POST /api/devis/:id/envois | devis-brouillon | défaut | entrée | 403 « Permission requise : devis:write » → 400
+CT | devis:write | POST /api/devis/:id/envois | devis-converti | défaut | entrée | 403 « Permission requise : devis:write » → 400
+CT | devis:write | POST /api/devis/:id/envois | devis-signe | défaut | entrée | 403 « Permission requise : devis:write » → 400
+CT | devis:write | POST /api/devis/:id/envois | inexistant | défaut | entrée | 403 « Permission requise : devis:write » → 400
+CT | devis:write | POST /api/devis/:id/revisions | inexistant | défaut | entrée | 403 « Permission requise : devis:write » → 400
+CT | devis:write | POST /api/devis/:id/signature | devis-brouillon | défaut | entrée | 403 « Permission requise : devis:write » → 400
+CT | devis:write | POST /api/devis/:id/signature | devis-converti | défaut | entrée | 403 « Permission requise : devis:write » → 400
+CT | devis:write | POST /api/devis/:id/signature | devis-signe | défaut | entrée | 403 « Permission requise : devis:write » → 400
+CT | devis:write | POST /api/devis/:id/signature | inexistant | défaut | entrée | 403 « Permission requise : devis:write » → 400
+CT | devis:write | PUT /api/devis/:id/statut | devis-brouillon | défaut | entrée | 403 « Permission requise : devis:write » → 400
+CT | devis:write | PUT /api/devis/:id/statut | devis-converti | défaut | entrée | 403 « Permission requise : devis:write » → 400
+CT | devis:write | PUT /api/devis/:id/statut | devis-signe | défaut | entrée | 403 « Permission requise : devis:write » → 400
+CT | droit devis | GET /api/devis | — | défaut | entrée | 403 « Permission requise : devis:read » → 200
+CT | droit devis | GET /api/devis | — | défaut | montants | + lignes[].prixAchatUnitaireHt=absent
+CT | droit devis | GET /api/devis | — | défaut | éléments [] | + devis-brouillon, devis-converti, devis-intervention, devis-intervention-ct, devis-prix-achat, devis-signe, « TEST Devis de chantier-ac », « TEST Devis de chantier-ad », « TEST Devis de chantier-annule », « TEST Devis de chantier-autre », « TEST Devis de chantier-com », « TEST Devis de chantier-com-titulaire », « TEST Devis de chantier-cpt », « TEST Devis de chantier-ct-branche-resp », « TEST Devis de chantier-dc », « TEST Devis de chantier-dir », « TEST Devis de chantier-resp », « TEST Devis de chantier-tech-branche-resp », « TEST Devis de chantier-termine »
+CT | droit devis | GET /api/devis/:id/document.pdf | devis-brouillon | défaut | entrée | 403 « Permission requise : devis:read » → 200
+CT | droit devis | GET /api/devis/:id/document.pdf | devis-converti | défaut | entrée | 403 « Permission requise : devis:read » → 200
+CT | droit devis | GET /api/devis/:id/document.pdf | devis-signe | défaut | entrée | 403 « Permission requise : devis:read » → 200
+CT | droit devis | GET /api/devis/:id/envois | devis-brouillon | défaut | entrée | 403 « Permission requise : devis:read » → 200
+CT | droit devis | GET /api/devis/:id/envois | devis-brouillon | défaut | éléments .envois[] | + (aucun)
+CT | droit devis | GET /api/devis/:id/envois | devis-converti | défaut | entrée | 403 « Permission requise : devis:read » → 200
+CT | droit devis | GET /api/devis/:id/envois | devis-converti | défaut | éléments .envois[] | + (aucun)
+CT | droit devis | GET /api/devis/:id/envois | devis-signe | défaut | entrée | 403 « Permission requise : devis:read » → 200
+CT | droit devis | GET /api/devis/:id/envois | devis-signe | défaut | éléments .envois[] | + (aucun)
+CT | droit devis | GET /api/devis/a-convertir | — | défaut | entrée | 403 « Permission requise : devis:read » → 200
+CT | droit devis | GET /api/devis/a-convertir | — | défaut | éléments [] | + devis-intervention, devis-intervention-ct, devis-signe
+CT | droit devis | GET /api/devis/catalogue | — | défaut | entrée | 403 « Permission requise : devis:write » → 200
+CT | droit devis | GET /api/devis/catalogue | — | défaut | montants | + prixAchatHt=absent
+CT | droit devis | GET /api/devis/catalogue | — | défaut | éléments [] | + main-oeuvre-matrice, modele-equipement, prestation-catalogue
+CT | droit devis | POST /api/devis/:id/envois | devis-brouillon | défaut | entrée | 403 « Permission requise : devis:write » → 400
+CT | droit devis | POST /api/devis/:id/envois | devis-converti | défaut | entrée | 403 « Permission requise : devis:write » → 400
+CT | droit devis | POST /api/devis/:id/envois | devis-signe | défaut | entrée | 403 « Permission requise : devis:write » → 400
+CT | droit devis | POST /api/devis/:id/envois | inexistant | défaut | entrée | 403 « Permission requise : devis:write » → 400
+CT | droit devis | POST /api/devis/:id/revisions | inexistant | défaut | entrée | 403 « Permission requise : devis:write » → 400
+CT | droit devis | POST /api/devis/:id/signature | devis-brouillon | défaut | entrée | 403 « Permission requise : devis:write » → 400
+CT | droit devis | POST /api/devis/:id/signature | devis-converti | défaut | entrée | 403 « Permission requise : devis:write » → 400
+CT | droit devis | POST /api/devis/:id/signature | devis-signe | défaut | entrée | 403 « Permission requise : devis:write » → 400
+CT | droit devis | POST /api/devis/:id/signature | inexistant | défaut | entrée | 403 « Permission requise : devis:write » → 400
+CT | droit devis | PUT /api/devis/:id/statut | devis-brouillon | défaut | entrée | 403 « Permission requise : devis:write » → 400
+CT | droit devis | PUT /api/devis/:id/statut | devis-converti | défaut | entrée | 403 « Permission requise : devis:write » → 400
+CT | droit devis | PUT /api/devis/:id/statut | devis-signe | défaut | entrée | 403 « Permission requise : devis:write » → 400
+DIR | clients:read | GET /api/clients | — | défaut | entrée | 403 « Permission requise : clients:read » → 200
+DIR | clients:read | GET /api/clients | — | défaut | éléments .clients[] | + client-actif
+DIR | clients:read | GET /api/clients/:id | client-actif | défaut | entrée | 403 « Permission requise : clients:read » → 200
+DIR | clients:read | GET /api/clients/:id | client-actif | défaut | éléments .contacts[] | + contact-client-actif
+DIR | clients:read | GET /api/clients/:id | client-actif | défaut | éléments .sites[] | + site-client-actif
+DIR | clients:read | GET /api/clients/:id | client-desactive | défaut | entrée | 403 « Permission requise : clients:read » → 200
+DIR | clients:read | GET /api/clients/:id | client-desactive | défaut | éléments .contacts[] | + contact-client-desactive
+DIR | clients:read | GET /api/clients/:id | client-desactive | défaut | éléments .sites[] | + site-client-desactive
+DIR | clients:read | GET /api/clients/:id/chantiers | client-actif | défaut | entrée | 403 « Permission requise : clients:read » → 200
+DIR | clients:read | GET /api/clients/:id/chantiers | client-actif | défaut | éléments [] | + chantier-ac, chantier-ad, chantier-autre, chantier-com, chantier-com-titulaire, chantier-cpt, chantier-ct, chantier-ct-branche-resp, chantier-dc, chantier-dir, chantier-resp, chantier-tech-branche-resp, chantier-termine
+DIR | clients:read | GET /api/clients/:id/chantiers | client-desactive | défaut | entrée | 403 « Permission requise : clients:read » → 200
+DIR | clients:read | GET /api/clients/:id/chantiers | client-desactive | défaut | éléments [] | + (aucun)
+DIR | devis:read | GET /api/devis | — | défaut | entrée | 403 « Permission requise : devis:read » → 200
+DIR | devis:read | GET /api/devis | — | défaut | montants | + lignes[].prixAchatUnitaireHt=absent
+DIR | devis:read | GET /api/devis | — | défaut | éléments [] | + devis-brouillon, devis-converti, devis-intervention, devis-intervention-ct, devis-prix-achat, devis-signe, « TEST Devis de chantier-ac », « TEST Devis de chantier-ad », « TEST Devis de chantier-annule », « TEST Devis de chantier-autre », « TEST Devis de chantier-com », « TEST Devis de chantier-com-titulaire », « TEST Devis de chantier-cpt », « TEST Devis de chantier-ct-branche-resp », « TEST Devis de chantier-dc », « TEST Devis de chantier-dir », « TEST Devis de chantier-resp », « TEST Devis de chantier-tech-branche-resp », « TEST Devis de chantier-termine »
+DIR | devis:read | GET /api/devis/:id/document.pdf | devis-brouillon | défaut | entrée | 403 « Permission requise : devis:read » → 200
+DIR | devis:read | GET /api/devis/:id/document.pdf | devis-converti | défaut | entrée | 403 « Permission requise : devis:read » → 200
+DIR | devis:read | GET /api/devis/:id/document.pdf | devis-signe | défaut | entrée | 403 « Permission requise : devis:read » → 200
+DIR | devis:read | GET /api/devis/:id/envois | devis-brouillon | défaut | entrée | 403 « Permission requise : devis:read » → 200
+DIR | devis:read | GET /api/devis/:id/envois | devis-brouillon | défaut | éléments .envois[] | + (aucun)
+DIR | devis:read | GET /api/devis/:id/envois | devis-converti | défaut | entrée | 403 « Permission requise : devis:read » → 200
+DIR | devis:read | GET /api/devis/:id/envois | devis-converti | défaut | éléments .envois[] | + (aucun)
+DIR | devis:read | GET /api/devis/:id/envois | devis-signe | défaut | entrée | 403 « Permission requise : devis:read » → 200
+DIR | devis:read | GET /api/devis/:id/envois | devis-signe | défaut | éléments .envois[] | + (aucun)
+DIR | devis:write | GET /api/devis/catalogue | — | défaut | entrée | 403 « Permission requise : devis:write » → 200
+DIR | devis:write | GET /api/devis/catalogue | — | défaut | montants | + prixAchatHt=absent
+DIR | devis:write | GET /api/devis/catalogue | — | défaut | éléments [] | + main-oeuvre-matrice, modele-equipement, prestation-catalogue
+DIR | devis:write | POST /api/devis/:id/envois | devis-brouillon | défaut | entrée | 403 « Permission requise : devis:write » → 400
+DIR | devis:write | POST /api/devis/:id/envois | devis-converti | défaut | entrée | 403 « Permission requise : devis:write » → 400
+DIR | devis:write | POST /api/devis/:id/envois | devis-signe | défaut | entrée | 403 « Permission requise : devis:write » → 400
+DIR | devis:write | POST /api/devis/:id/envois | inexistant | défaut | entrée | 403 « Permission requise : devis:write » → 400
+DIR | devis:write | POST /api/devis/:id/revisions | inexistant | défaut | entrée | 403 « Permission requise : devis:write » → 400
+DIR | devis:write | POST /api/devis/:id/signature | devis-brouillon | défaut | entrée | 403 « Permission requise : devis:write » → 400
+DIR | devis:write | POST /api/devis/:id/signature | devis-converti | défaut | entrée | 403 « Permission requise : devis:write » → 400
+DIR | devis:write | POST /api/devis/:id/signature | devis-signe | défaut | entrée | 403 « Permission requise : devis:write » → 400
+DIR | devis:write | POST /api/devis/:id/signature | inexistant | défaut | entrée | 403 « Permission requise : devis:write » → 400
+DIR | devis:write | PUT /api/devis/:id/statut | devis-brouillon | défaut | entrée | 403 « Permission requise : devis:write » → 400
+DIR | devis:write | PUT /api/devis/:id/statut | devis-converti | défaut | entrée | 403 « Permission requise : devis:write » → 400
+DIR | devis:write | PUT /api/devis/:id/statut | devis-signe | défaut | entrée | 403 « Permission requise : devis:write » → 400
+DIR | droit devis | GET /api/clients | — | défaut | entrée | 403 « Permission requise : clients:read » → 200
+DIR | droit devis | GET /api/clients | — | défaut | éléments .clients[] | + client-actif
+DIR | droit devis | GET /api/clients/:id | client-actif | défaut | entrée | 403 « Permission requise : clients:read » → 200
+DIR | droit devis | GET /api/clients/:id | client-actif | défaut | éléments .contacts[] | + contact-client-actif
+DIR | droit devis | GET /api/clients/:id | client-actif | défaut | éléments .sites[] | + site-client-actif
+DIR | droit devis | GET /api/clients/:id | client-desactive | défaut | entrée | 403 « Permission requise : clients:read » → 200
+DIR | droit devis | GET /api/clients/:id | client-desactive | défaut | éléments .contacts[] | + contact-client-desactive
+DIR | droit devis | GET /api/clients/:id | client-desactive | défaut | éléments .sites[] | + site-client-desactive
+DIR | droit devis | GET /api/clients/:id/chantiers | client-actif | défaut | entrée | 403 « Permission requise : clients:read » → 200
+DIR | droit devis | GET /api/clients/:id/chantiers | client-actif | défaut | éléments [] | + chantier-ac, chantier-ad, chantier-autre, chantier-com, chantier-com-titulaire, chantier-cpt, chantier-ct, chantier-ct-branche-resp, chantier-dc, chantier-dir, chantier-resp, chantier-tech-branche-resp, chantier-termine
+DIR | droit devis | GET /api/clients/:id/chantiers | client-desactive | défaut | entrée | 403 « Permission requise : clients:read » → 200
+DIR | droit devis | GET /api/clients/:id/chantiers | client-desactive | défaut | éléments [] | + (aucun)
+DIR | droit devis | GET /api/devis | — | défaut | entrée | 403 « Permission requise : devis:read » → 200
+DIR | droit devis | GET /api/devis | — | défaut | montants | + lignes[].prixAchatUnitaireHt=absent
+DIR | droit devis | GET /api/devis | — | défaut | éléments [] | + devis-brouillon, devis-converti, devis-intervention, devis-intervention-ct, devis-prix-achat, devis-signe, « TEST Devis de chantier-ac », « TEST Devis de chantier-ad », « TEST Devis de chantier-annule », « TEST Devis de chantier-autre », « TEST Devis de chantier-com », « TEST Devis de chantier-com-titulaire », « TEST Devis de chantier-cpt », « TEST Devis de chantier-ct-branche-resp », « TEST Devis de chantier-dc », « TEST Devis de chantier-dir », « TEST Devis de chantier-resp », « TEST Devis de chantier-tech-branche-resp », « TEST Devis de chantier-termine »
+DIR | droit devis | GET /api/devis/:id/document.pdf | devis-brouillon | défaut | entrée | 403 « Permission requise : devis:read » → 200
+DIR | droit devis | GET /api/devis/:id/document.pdf | devis-converti | défaut | entrée | 403 « Permission requise : devis:read » → 200
+DIR | droit devis | GET /api/devis/:id/document.pdf | devis-signe | défaut | entrée | 403 « Permission requise : devis:read » → 200
+DIR | droit devis | GET /api/devis/:id/envois | devis-brouillon | défaut | entrée | 403 « Permission requise : devis:read » → 200
+DIR | droit devis | GET /api/devis/:id/envois | devis-brouillon | défaut | éléments .envois[] | + (aucun)
+DIR | droit devis | GET /api/devis/:id/envois | devis-converti | défaut | entrée | 403 « Permission requise : devis:read » → 200
+DIR | droit devis | GET /api/devis/:id/envois | devis-converti | défaut | éléments .envois[] | + (aucun)
+DIR | droit devis | GET /api/devis/:id/envois | devis-signe | défaut | entrée | 403 « Permission requise : devis:read » → 200
+DIR | droit devis | GET /api/devis/:id/envois | devis-signe | défaut | éléments .envois[] | + (aucun)
+DIR | droit devis | GET /api/devis/a-convertir | — | défaut | entrée | 403 « Permission requise : devis:read » → 200
+DIR | droit devis | GET /api/devis/a-convertir | — | défaut | éléments [] | + devis-intervention, devis-intervention-ct, devis-signe
+DIR | droit devis | GET /api/devis/catalogue | — | défaut | entrée | 403 « Permission requise : devis:write » → 200
+DIR | droit devis | GET /api/devis/catalogue | — | défaut | montants | + prixAchatHt=absent
+DIR | droit devis | GET /api/devis/catalogue | — | défaut | éléments [] | + main-oeuvre-matrice, modele-equipement, prestation-catalogue
+DIR | droit devis | POST /api/devis/:id/envois | devis-brouillon | défaut | entrée | 403 « Permission requise : devis:write » → 400
+DIR | droit devis | POST /api/devis/:id/envois | devis-converti | défaut | entrée | 403 « Permission requise : devis:write » → 400
+DIR | droit devis | POST /api/devis/:id/envois | devis-signe | défaut | entrée | 403 « Permission requise : devis:write » → 400
+DIR | droit devis | POST /api/devis/:id/envois | inexistant | défaut | entrée | 403 « Permission requise : devis:write » → 400
+DIR | droit devis | POST /api/devis/:id/revisions | inexistant | défaut | entrée | 403 « Permission requise : devis:write » → 400
+DIR | droit devis | POST /api/devis/:id/signature | devis-brouillon | défaut | entrée | 403 « Permission requise : devis:write » → 400
+DIR | droit devis | POST /api/devis/:id/signature | devis-converti | défaut | entrée | 403 « Permission requise : devis:write » → 400
+DIR | droit devis | POST /api/devis/:id/signature | devis-signe | défaut | entrée | 403 « Permission requise : devis:write » → 400
+DIR | droit devis | POST /api/devis/:id/signature | inexistant | défaut | entrée | 403 « Permission requise : devis:write » → 400
+DIR | droit devis | PUT /api/devis/:id/statut | devis-brouillon | défaut | entrée | 403 « Permission requise : devis:write » → 400
+DIR | droit devis | PUT /api/devis/:id/statut | devis-converti | défaut | entrée | 403 « Permission requise : devis:write » → 400
+DIR | droit devis | PUT /api/devis/:id/statut | devis-signe | défaut | entrée | 403 « Permission requise : devis:write » → 400
+RESP | clients:read | GET /api/clients | — | défaut | entrée | 403 « Permission requise : clients:read » → 200
+RESP | clients:read | GET /api/clients | — | défaut | éléments .clients[] | + client-actif
+RESP | clients:read | GET /api/clients/:id | client-actif | défaut | entrée | 403 « Permission requise : clients:read » → 200
+RESP | clients:read | GET /api/clients/:id | client-actif | défaut | éléments .contacts[] | + contact-client-actif
+RESP | clients:read | GET /api/clients/:id | client-actif | défaut | éléments .sites[] | + site-client-actif
+RESP | clients:read | GET /api/clients/:id | client-desactive | défaut | entrée | 403 « Permission requise : clients:read » → 200
+RESP | clients:read | GET /api/clients/:id | client-desactive | défaut | éléments .contacts[] | + contact-client-desactive
+RESP | clients:read | GET /api/clients/:id | client-desactive | défaut | éléments .sites[] | + site-client-desactive
+RESP | clients:read | GET /api/clients/:id/chantiers | client-actif | défaut | entrée | 403 « Permission requise : clients:read » → 200
+RESP | clients:read | GET /api/clients/:id/chantiers | client-actif | défaut | éléments [] | + chantier-ct-branche-resp, chantier-resp, chantier-tech-branche-resp
+RESP | clients:read | GET /api/clients/:id/chantiers | client-desactive | défaut | entrée | 403 « Permission requise : clients:read » → 200
+RESP | clients:read | GET /api/clients/:id/chantiers | client-desactive | défaut | éléments [] | + (aucun)
+RESP | clients:read | GET /api/interventions/:id/envois | intervention-affectee-tech | défaut | entrée | 403 « Permission requise : clients:read » → 200
+RESP | clients:read | GET /api/interventions/:id/envois | intervention-affectee-tech | défaut | éléments .envois[] | + (aucun)
+RESP | devis:read | GET /api/devis | — | défaut | entrée | 403 « Permission requise : devis:read » → 200
+RESP | devis:read | GET /api/devis | — | défaut | montants | + lignes[].prixAchatUnitaireHt=absent
+RESP | devis:read | GET /api/devis | — | défaut | éléments [] | + devis-brouillon, devis-converti, devis-intervention, devis-intervention-ct, devis-prix-achat, devis-signe, « TEST Devis de chantier-ac », « TEST Devis de chantier-ad », « TEST Devis de chantier-annule », « TEST Devis de chantier-autre », « TEST Devis de chantier-com », « TEST Devis de chantier-com-titulaire », « TEST Devis de chantier-cpt », « TEST Devis de chantier-ct-branche-resp », « TEST Devis de chantier-dc », « TEST Devis de chantier-dir », « TEST Devis de chantier-resp », « TEST Devis de chantier-tech-branche-resp », « TEST Devis de chantier-termine »
+RESP | devis:read | GET /api/devis/:id/document.pdf | devis-brouillon | défaut | entrée | 403 « Permission requise : devis:read » → 200
+RESP | devis:read | GET /api/devis/:id/document.pdf | devis-converti | défaut | entrée | 403 « Permission requise : devis:read » → 200
+RESP | devis:read | GET /api/devis/:id/document.pdf | devis-signe | défaut | entrée | 403 « Permission requise : devis:read » → 200
+RESP | devis:read | GET /api/devis/:id/envois | devis-brouillon | défaut | entrée | 403 « Permission requise : devis:read » → 200
+RESP | devis:read | GET /api/devis/:id/envois | devis-brouillon | défaut | éléments .envois[] | + (aucun)
+RESP | devis:read | GET /api/devis/:id/envois | devis-converti | défaut | entrée | 403 « Permission requise : devis:read » → 200
+RESP | devis:read | GET /api/devis/:id/envois | devis-converti | défaut | éléments .envois[] | + (aucun)
+RESP | devis:read | GET /api/devis/:id/envois | devis-signe | défaut | entrée | 403 « Permission requise : devis:read » → 200
+RESP | devis:read | GET /api/devis/:id/envois | devis-signe | défaut | éléments .envois[] | + (aucun)
+RESP | devis:write | GET /api/devis/catalogue | — | défaut | entrée | 403 « Permission requise : devis:write » → 200
+RESP | devis:write | GET /api/devis/catalogue | — | défaut | montants | + prixAchatHt=absent
+RESP | devis:write | GET /api/devis/catalogue | — | défaut | éléments [] | + main-oeuvre-matrice, modele-equipement, prestation-catalogue
+RESP | devis:write | POST /api/devis/:id/envois | devis-brouillon | défaut | entrée | 403 « Permission requise : devis:write » → 400
+RESP | devis:write | POST /api/devis/:id/envois | devis-converti | défaut | entrée | 403 « Permission requise : devis:write » → 400
+RESP | devis:write | POST /api/devis/:id/envois | devis-signe | défaut | entrée | 403 « Permission requise : devis:write » → 400
+RESP | devis:write | POST /api/devis/:id/envois | inexistant | défaut | entrée | 403 « Permission requise : devis:write » → 400
+RESP | devis:write | POST /api/devis/:id/revisions | inexistant | défaut | entrée | 403 « Permission requise : devis:write » → 400
+RESP | devis:write | POST /api/devis/:id/signature | devis-brouillon | défaut | entrée | 403 « Permission requise : devis:write » → 400
+RESP | devis:write | POST /api/devis/:id/signature | devis-converti | défaut | entrée | 403 « Permission requise : devis:write » → 400
+RESP | devis:write | POST /api/devis/:id/signature | devis-signe | défaut | entrée | 403 « Permission requise : devis:write » → 400
+RESP | devis:write | POST /api/devis/:id/signature | inexistant | défaut | entrée | 403 « Permission requise : devis:write » → 400
+RESP | devis:write | PUT /api/devis/:id/statut | devis-brouillon | défaut | entrée | 403 « Permission requise : devis:write » → 400
+RESP | devis:write | PUT /api/devis/:id/statut | devis-converti | défaut | entrée | 403 « Permission requise : devis:write » → 400
+RESP | devis:write | PUT /api/devis/:id/statut | devis-signe | défaut | entrée | 403 « Permission requise : devis:write » → 400
+RESP | droit devis | GET /api/clients | — | défaut | entrée | 403 « Permission requise : clients:read » → 200
+RESP | droit devis | GET /api/clients | — | défaut | éléments .clients[] | + client-actif
+RESP | droit devis | GET /api/clients/:id | client-actif | défaut | entrée | 403 « Permission requise : clients:read » → 200
+RESP | droit devis | GET /api/clients/:id | client-actif | défaut | éléments .contacts[] | + contact-client-actif
+RESP | droit devis | GET /api/clients/:id | client-actif | défaut | éléments .sites[] | + site-client-actif
+RESP | droit devis | GET /api/clients/:id | client-desactive | défaut | entrée | 403 « Permission requise : clients:read » → 200
+RESP | droit devis | GET /api/clients/:id | client-desactive | défaut | éléments .contacts[] | + contact-client-desactive
+RESP | droit devis | GET /api/clients/:id | client-desactive | défaut | éléments .sites[] | + site-client-desactive
+RESP | droit devis | GET /api/clients/:id/chantiers | client-actif | défaut | entrée | 403 « Permission requise : clients:read » → 200
+RESP | droit devis | GET /api/clients/:id/chantiers | client-actif | défaut | éléments [] | + chantier-ct-branche-resp, chantier-resp, chantier-tech-branche-resp
+RESP | droit devis | GET /api/clients/:id/chantiers | client-desactive | défaut | entrée | 403 « Permission requise : clients:read » → 200
+RESP | droit devis | GET /api/clients/:id/chantiers | client-desactive | défaut | éléments [] | + (aucun)
+RESP | droit devis | GET /api/devis | — | défaut | entrée | 403 « Permission requise : devis:read » → 200
+RESP | droit devis | GET /api/devis | — | défaut | montants | + lignes[].prixAchatUnitaireHt=absent
+RESP | droit devis | GET /api/devis | — | défaut | éléments [] | + devis-brouillon, devis-converti, devis-intervention, devis-intervention-ct, devis-prix-achat, devis-signe, « TEST Devis de chantier-ac », « TEST Devis de chantier-ad », « TEST Devis de chantier-annule », « TEST Devis de chantier-autre », « TEST Devis de chantier-com », « TEST Devis de chantier-com-titulaire », « TEST Devis de chantier-cpt », « TEST Devis de chantier-ct-branche-resp », « TEST Devis de chantier-dc », « TEST Devis de chantier-dir », « TEST Devis de chantier-resp », « TEST Devis de chantier-tech-branche-resp », « TEST Devis de chantier-termine »
+RESP | droit devis | GET /api/devis/:id/document.pdf | devis-brouillon | défaut | entrée | 403 « Permission requise : devis:read » → 200
+RESP | droit devis | GET /api/devis/:id/document.pdf | devis-converti | défaut | entrée | 403 « Permission requise : devis:read » → 200
+RESP | droit devis | GET /api/devis/:id/document.pdf | devis-signe | défaut | entrée | 403 « Permission requise : devis:read » → 200
+RESP | droit devis | GET /api/devis/:id/envois | devis-brouillon | défaut | entrée | 403 « Permission requise : devis:read » → 200
+RESP | droit devis | GET /api/devis/:id/envois | devis-brouillon | défaut | éléments .envois[] | + (aucun)
+RESP | droit devis | GET /api/devis/:id/envois | devis-converti | défaut | entrée | 403 « Permission requise : devis:read » → 200
+RESP | droit devis | GET /api/devis/:id/envois | devis-converti | défaut | éléments .envois[] | + (aucun)
+RESP | droit devis | GET /api/devis/:id/envois | devis-signe | défaut | entrée | 403 « Permission requise : devis:read » → 200
+RESP | droit devis | GET /api/devis/:id/envois | devis-signe | défaut | éléments .envois[] | + (aucun)
+RESP | droit devis | GET /api/devis/a-convertir | — | défaut | entrée | 403 « Permission requise : devis:read » → 200
+RESP | droit devis | GET /api/devis/a-convertir | — | défaut | éléments [] | + devis-intervention, devis-intervention-ct, devis-signe
+RESP | droit devis | GET /api/devis/catalogue | — | défaut | entrée | 403 « Permission requise : devis:write » → 200
+RESP | droit devis | GET /api/devis/catalogue | — | défaut | montants | + prixAchatHt=absent
+RESP | droit devis | GET /api/devis/catalogue | — | défaut | éléments [] | + main-oeuvre-matrice, modele-equipement, prestation-catalogue
+RESP | droit devis | GET /api/interventions/:id/envois | intervention-affectee-tech | défaut | entrée | 403 « Permission requise : clients:read » → 200
+RESP | droit devis | GET /api/interventions/:id/envois | intervention-affectee-tech | défaut | éléments .envois[] | + (aucun)
+RESP | droit devis | POST /api/devis/:id/envois | devis-brouillon | défaut | entrée | 403 « Permission requise : devis:write » → 400
+RESP | droit devis | POST /api/devis/:id/envois | devis-converti | défaut | entrée | 403 « Permission requise : devis:write » → 400
+RESP | droit devis | POST /api/devis/:id/envois | devis-signe | défaut | entrée | 403 « Permission requise : devis:write » → 400
+RESP | droit devis | POST /api/devis/:id/envois | inexistant | défaut | entrée | 403 « Permission requise : devis:write » → 400
+RESP | droit devis | POST /api/devis/:id/revisions | inexistant | défaut | entrée | 403 « Permission requise : devis:write » → 400
+RESP | droit devis | POST /api/devis/:id/signature | devis-brouillon | défaut | entrée | 403 « Permission requise : devis:write » → 400
+RESP | droit devis | POST /api/devis/:id/signature | devis-converti | défaut | entrée | 403 « Permission requise : devis:write » → 400
+RESP | droit devis | POST /api/devis/:id/signature | devis-signe | défaut | entrée | 403 « Permission requise : devis:write » → 400
+RESP | droit devis | POST /api/devis/:id/signature | inexistant | défaut | entrée | 403 « Permission requise : devis:write » → 400
+RESP | droit devis | PUT /api/devis/:id/statut | devis-brouillon | défaut | entrée | 403 « Permission requise : devis:write » → 400
+RESP | droit devis | PUT /api/devis/:id/statut | devis-converti | défaut | entrée | 403 « Permission requise : devis:write » → 400
+RESP | droit devis | PUT /api/devis/:id/statut | devis-signe | défaut | entrée | 403 « Permission requise : devis:write » → 400
