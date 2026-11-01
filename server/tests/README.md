@@ -58,7 +58,10 @@ npm test          # tout ; les tests HTTP sont ignorés s'il n'y a pas de base d
 ```
 
 `npm test` compile d'abord (`tsc`) puis exécute `tests/run.mjs`, qui découvre les fichiers
-`*.test.mjs` de ce dossier et les passe à `node --test`.
+`*.test.mjs` de ce dossier et les passe à `node --test`. Les matrices de droits
+(`matrice-droits-*.test.mjs`), les plus longues, sont passées en premier : `node --test` lance
+les fichiers dans l'ordre donné, quelques-uns à la fois, et elles tournent ainsi pendant les
+autres au lieu d'allonger la suite. Les autres fichiers suivent l'ordre alphabétique.
 
 Ce petit lanceur remplace un glob `node --test "tests/**/*.test.mjs"` : les globs ne sont
 développés qu'à partir de Node 21, alors que la production et la CI tournent sous Node 20
