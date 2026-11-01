@@ -6,6 +6,7 @@ import { roleLabel, useCurrentUser } from '../roles';
 import { clearCachedModules, useModules } from '../modules';
 import { useSociete } from '../companyTimezoneContext';
 import { effacerCacheSociete } from '../lib/cacheSociete';
+import { viderCacheMicrosoft365 } from '../lib/microsoft365';
 import { sectionsMenu } from '../lib/menu';
 import './Sidebar.css';
 
@@ -36,6 +37,9 @@ const Sidebar = ({ ouvert = false, onFermer = () => {}, onNaviguer = () => {} }:
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     effacerCacheSociete();
+    // Cache MSAL de l'onglet (jeton de l'envoi par Microsoft 365, lot 6b-2), sans fermer la session
+    // Microsoft du navigateur.
+    viderCacheMicrosoft365();
     clearCachedModules();
     applyTheme('light');
     navigate('/login');

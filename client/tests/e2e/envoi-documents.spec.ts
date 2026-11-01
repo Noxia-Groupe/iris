@@ -106,7 +106,7 @@ test('devis : destinataire proposé et modifiable, PDF téléchargé, envoi list
   await expect(dialogue.getByRole('status')).toContainText(`Le PDF ${devis.numero}-v1.pdf vient d’être téléchargé : joignez-le à la main au courriel.`);
   const [premier] = await envoisDe(request, session.token, `devis/${devis.id}`);
   expect(premier).toMatchObject({ destinataire: principal, objet, auteurNom: auteur });
-  const liste = dialogue.getByRole('region', { name: 'Envois préparés' }).getByRole('listitem');
+  const liste = dialogue.getByRole('region', { name: 'Envois' }).getByRole('listitem');
   await expect(liste).toHaveText([`Envoi préparé le ${dateHeure(premier.createdAt, fuseauHoraire || 'Europe/Paris')} à ${principal} par ${auteur}`]);
   // Le brouillon est passé « envoyé » : la liste l'affiche, le dialogue restant ouvert.
   await expect(ligne).toContainText('v1 · ENVOYE');
@@ -131,7 +131,7 @@ test('devis : destinataire proposé et modifiable, PDF téléchargé, envoi list
   await dialogue.getByRole('button', { name: 'Fermer' }).click();
   await expect(dialogue).toHaveCount(0);
   await page.getByRole('button', { name: `Envoyer le devis ${devis.numero} version 1`, exact: true }).click();
-  await expect(dialogue.getByRole('region', { name: 'Envois préparés' }).getByRole('listitem')).toHaveCount(2);
+  await expect(dialogue.getByRole('region', { name: 'Envois' }).getByRole('listitem')).toHaveCount(2);
   await dialogue.getByRole('button', { name: 'Fermer' }).click();
 
   // Le courriel n'est finalement pas parti : « Repasser en brouillon » ramène le devis en brouillon,
@@ -174,7 +174,7 @@ test('facture : envoi d’une facture émise depuis l’écran Factures, au cour
   await expect(dialogue).toContainText(`Objet : ${objet}`);
   await pdfTelecharge(page, () => dialogue.getByRole('button', { name: 'Préparer l’envoi' }).click(), `${facture.numero}.pdf`, `Facture ${facture.numero}`);
   await expect(dialogue.getByRole('link', { name: 'Ouvrir la messagerie' })).toHaveAttribute('href', lienAttendu(courriel, objet, corps));
-  await expect(dialogue.getByRole('region', { name: 'Envois préparés' }).getByRole('listitem')).toHaveCount(1);
+  await expect(dialogue.getByRole('region', { name: 'Envois' }).getByRole('listitem')).toHaveCount(1);
   const envois = await envoisDe(request, session.token, `factures/${facture.id}`);
   expect(envois).toHaveLength(1);
   expect(envois[0]).toMatchObject({ destinataire: courriel, objet });
@@ -255,7 +255,7 @@ test('à 375 px : dialogue d’envoi d’un devis et d’une facture sans défil
   await pdfTelecharge(page, () => dialogue.getByRole('button', { name: 'Préparer l’envoi' }).click(), `${devis.numero}-v1.pdf`, `Devis ${devis.numero} version 1`);
   const lien = dialogue.getByRole('link', { name: 'Ouvrir la messagerie' });
   await expect(lien).toBeVisible();
-  await sansDebordement(page, 375, [dialogue, lien, dialogue.getByRole('button', { name: 'Préparer l’envoi' }), dialogue.getByRole('button', { name: 'Fermer' }), dialogue.getByRole('region', { name: 'Envois préparés' }).getByRole('listitem').first()]);
+  await sansDebordement(page, 375, [dialogue, lien, dialogue.getByRole('button', { name: 'Préparer l’envoi' }), dialogue.getByRole('button', { name: 'Fermer' }), dialogue.getByRole('region', { name: 'Envois' }).getByRole('listitem').first()]);
   // Le devis est passé « envoyé » : « Repasser en brouillon » tient dans sa ligne, et le ramène.
   const ligneDevis = page.locator('li', { hasText: devis.objet });
   await expect(ligneDevis).toContainText('v1 · ENVOYE');

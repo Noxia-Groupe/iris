@@ -158,7 +158,7 @@ test('compte rendu : envoi préparé depuis la fiche de l’intervention, PDF t�
   await expect(dialogue.getByRole('status')).toContainText(`Le PDF ${fichierCompteRendu(intervention.reference)} vient d’être téléchargé : joignez-le à la main au courriel.`);
   const [premier] = await envoisDe(request, token, `/interventions/${intervention.id}`);
   expect(premier).toMatchObject({ destinataire: principal, objet, auteurNom: auteur });
-  const liste = dialogue.getByRole('region', { name: 'Envois préparés' }).getByRole('listitem');
+  const liste = dialogue.getByRole('region', { name: 'Envois' }).getByRole('listitem');
   await expect(liste).toHaveText([`Envoi préparé le ${dateHeure(premier.createdAt, fuseauHoraire || 'Europe/Paris')} à ${principal} par ${auteur}`]);
 
   // Le destinataire se corrige : le second envoi passe en tête, le lien suit la nouvelle adresse.
@@ -173,7 +173,7 @@ test('compte rendu : envoi préparé depuis la fiche de l’intervention, PDF t�
   await dialogue.getByRole('button', { name: 'Fermer' }).click();
   await expect(dialogue).toHaveCount(0);
   await bouton.click();
-  await expect(dialogue.getByRole('region', { name: 'Envois préparés' }).getByRole('listitem')).toHaveCount(2);
+  await expect(dialogue.getByRole('region', { name: 'Envois' }).getByRole('listitem')).toHaveCount(2);
 
   // L'envoi ne change pas le statut de l'intervention, relu par l'API.
   expect((await appel<Intervention>(request, token, 'get', `/interventions/${intervention.id}`)).statut).toBe('EN_COURS');
@@ -224,7 +224,7 @@ test('contrat : envoi préparé depuis la liste des contrats ; un contrat suspen
   const envois = await envoisDe(request, token, `/contrats-maintenance/${actif.id}`);
   expect(envois).toHaveLength(1);
   expect(envois[0]).toMatchObject({ destinataire: courriel, objet, auteurNom: auteur });
-  await expect(dialogue.getByRole('region', { name: 'Envois préparés' }).getByRole('listitem'))
+  await expect(dialogue.getByRole('region', { name: 'Envois' }).getByRole('listitem'))
     .toHaveText([`Envoi préparé le ${dateHeure(envois[0].createdAt, fuseauHoraire || 'Europe/Paris')} à ${courriel} par ${auteur}`]);
   // Le statut des contrats ne change pas, relu par l'API.
   const contrats = await appel<Contrat[]>(request, token, 'get', '/contrats-maintenance');
@@ -378,7 +378,7 @@ test('à 375 px : boutons et dialogue d’envoi du compte rendu et du contrat sa
   await pdfTelecharge(page, () => dialogue.getByRole('button', { name: 'Préparer l’envoi' }).click(), fichierCompteRendu(intervention.reference));
   const lien = dialogue.getByRole('link', { name: 'Ouvrir la messagerie' });
   await expect(lien).toBeVisible();
-  await sansDebordement(page, 375, [dialogue, lien, dialogue.getByRole('button', { name: 'Préparer l’envoi' }), dialogue.getByRole('button', { name: 'Fermer' }), dialogue.getByRole('region', { name: 'Envois préparés' }).getByRole('listitem').first()]);
+  await sansDebordement(page, 375, [dialogue, lien, dialogue.getByRole('button', { name: 'Préparer l’envoi' }), dialogue.getByRole('button', { name: 'Fermer' }), dialogue.getByRole('region', { name: 'Envois' }).getByRole('listitem').first()]);
 
   await page.goto('/contrats-maintenance', { waitUntil: 'networkidle' });
   const boutonContrat = page.getByRole('button', { name: nomEnvoiContrat(contrat.titre), exact: true });
@@ -390,5 +390,5 @@ test('à 375 px : boutons et dialogue d’envoi du compte rendu et du contrat sa
   await expect(dialogueContrat).toBeInViewport();
   await pdfTelecharge(page, () => dialogueContrat.getByRole('button', { name: 'Préparer l’envoi' }).click(), fichierContrat(contrat.titre));
   await expect(dialogueContrat.getByRole('link', { name: 'Ouvrir la messagerie' })).toBeVisible();
-  await sansDebordement(page, 375, [dialogueContrat, dialogueContrat.getByRole('link', { name: 'Ouvrir la messagerie' }), dialogueContrat.getByRole('button', { name: 'Préparer l’envoi' }), dialogueContrat.getByRole('region', { name: 'Envois préparés' }).getByRole('listitem').first()]);
+  await sansDebordement(page, 375, [dialogueContrat, dialogueContrat.getByRole('link', { name: 'Ouvrir la messagerie' }), dialogueContrat.getByRole('button', { name: 'Préparer l’envoi' }), dialogueContrat.getByRole('region', { name: 'Envois' }).getByRole('listitem').first()]);
 });

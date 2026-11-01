@@ -40,6 +40,11 @@ export default defineConfig({
         // Aucun passage quotidien de la génération des visites pendant les tests, même à minuit :
         // les visites ne se créent que par les actions des tests.
         GENERATION_VISITES_AUTOMATIQUE: '0',
+        // Connexion Microsoft non configurée, même si `server/.env` la configure : dotenv ne remplace pas
+        // une variable déjà posée, même vide. Les parcours de l'envoi par Microsoft 365 (lot 6b-2, N4 du
+        // contrôle du cadrage) supposent la configuration de la CI, et simulent le reste dans le navigateur.
+        AZURE_TENANT_ID: '',
+        AZURE_CLIENT_ID: '',
       },
       reuseExistingServer: !process.env.CI,
       stdout: 'pipe',
