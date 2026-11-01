@@ -13,6 +13,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { Agent, request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -91,6 +92,7 @@ export async function chargerApplication(base) {
     serveur, app: serveur.app, prisma, jwt, adresse,
     signer: (id, options) => jwt.sign({ id }, process.env.JWT_SECRET, options),
     async fermer() {
+      agentHttp.destroy();
       http.closeAllConnections?.();
       await new Promise((ok) => http.close(() => ok()));
       await prisma.$disconnect().catch(() => {});
@@ -99,26 +101,43 @@ export async function chargerApplication(base) {
   };
 }
 
-// Appel HTTP réel. `jeton` : chaîne (en-tête Bearer), ou null pour un appel sans session. Le corps est toujours
-// envoyé en JSON pour une écriture (un objet vide pour un « corps vide », cadrage §2.4) ; rien pour une lecture.
-export async function appeler(adresse, methode, chemin, { jeton = null, corps, requete } = {}) {
+// Appel HTTP réel, par node:http et un agent qui garde les connexions ouvertes. `jeton` : chaîne (en-tête
+// Bearer), ou null pour un appel sans session. Le corps est toujours envoyé en JSON pour une écriture (un objet
+// vide pour un « corps vide », cadrage §2.4) ; rien pour une lecture. Pourquoi pas `fetch` : sur les quelque
+// 11 000 appels de la matrice d'entrée, il coûte environ 20 % de processeur de plus (mesure du 01-11-2026), et la
+// CI partage ce processeur avec les autres fichiers de tests, que la matrice ralentit d'autant.
+const agentHttp = new Agent({ keepAlive: true, maxSockets: 16 });
+export function appeler(adresse, methode, chemin, { jeton = null, corps, requete } = {}) {
   const url = new URL(chemin, adresse);
   for (const [cle, valeur] of Object.entries(requete ?? {})) url.searchParams.set(cle, valeur);
   const entetes = {};
   if (jeton !== null) entetes.Authorization = `Bearer ${jeton}`;
-  const avecCorps = methode !== 'GET';
-  if (avecCorps) entetes['Content-Type'] = 'application/json';
-  const reponse = await fetch(url, { method: methode, headers: entetes, body: avecCorps ? JSON.stringify(corps ?? {}) : undefined });
-  const type = reponse.headers.get('content-type') ?? '';
-  let corpsLu = null; let texte = '';
-  if (type.includes('application/json')) {
-    texte = await reponse.text();
-    try { corpsLu = JSON.parse(texte); } catch { corpsLu = null; }
-  } else {
-    // PDF, CSV : le contenu n'entre jamais dans la matrice d'entrée (code seul pour un 2xx).
-    await reponse.arrayBuffer();
+  const donnees = methode !== 'GET' ? Buffer.from(JSON.stringify(corps ?? {})) : null;
+  if (donnees) {
+    entetes['Content-Type'] = 'application/json';
+    entetes['Content-Length'] = donnees.length;
   }
-  return { status: reponse.status, body: corpsLu, texte, type };
+  return new Promise((ok, ko) => {
+    const requeteHttp = request(url, { method: methode, headers: entetes, agent: agentHttp }, (reponse) => {
+      const type = reponse.headers['content-type'] ?? '';
+      const json = type.includes('application/json');
+      const morceaux = [];
+      // PDF, CSV : lus puis jetés, le contenu n'entre jamais dans la matrice d'entrée (code seul pour un 2xx).
+      reponse.on('data', (morceau) => { if (json) morceaux.push(morceau); });
+      reponse.on('error', ko);
+      reponse.on('end', () => {
+        const texte = json ? Buffer.concat(morceaux).toString('utf8') : '';
+        let corpsLu = null;
+        if (json) {
+          try { corpsLu = JSON.parse(texte); } catch { corpsLu = null; }
+        }
+        ok({ status: reponse.statusCode, body: corpsLu, texte, type });
+      });
+    });
+    requeteHttp.on('error', ko);
+    if (donnees) requeteHttp.write(donnees);
+    requeteHttp.end();
+  });
 }
 
 // Exécute des tâches avec au plus `limite` en cours à la fois ; rend les résultats dans l'ordre des tâches.

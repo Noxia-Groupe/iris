@@ -13,18 +13,10 @@ import { readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// Ordre de lancement : `node --test` lance les fichiers dans l'ordre donné, quelques-uns à
-// la fois. Les matrices de droits (`matrice-droits-*.test.mjs`, lot D1a) sont les fichiers
-// les plus longs : lancées en premier, elles tournent pendant les autres, au lieu de finir
-// seules après eux et d'allonger d'autant la suite. Les autres fichiers gardent l'ordre
-// alphabétique (le second tri est stable).
-const enPremier = (f) => (f.startsWith('matrice-droits-') ? 0 : 1);
-
 const dossier = dirname(fileURLToPath(import.meta.url));
 const fichiers = readdirSync(dossier)
   .filter((f) => f.endsWith('.test.mjs'))
   .sort()
-  .sort((a, b) => enPremier(a) - enPremier(b))
   .map((f) => join(dossier, f));
 
 if (fichiers.length === 0) {
