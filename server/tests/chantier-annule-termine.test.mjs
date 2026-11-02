@@ -802,6 +802,47 @@ if (!TEST_DATABASE_URL) {
       assert.ok(relu.dateFin);
     });
 
+    // Mois du CA et de la marge validés (commissions/metier.ts, dateClotureChantier) : la clôture date le chantier du jour
+    // de la société, « si elle n'a pas déjà été saisie à la main » (PATCH /api/chantiers/:id/statut). Le correctif relit
+    // cette date sous le verrou de la ligne, avec le statut : une date de fin saisie avant la clôture, ou pendant son
+    // attente (fiche modifiée par le titulaire ou l'administration), est gardée. Écarte une clôture qui écrase toujours
+    // la date de fin (mutant A8 de l'audit des montants) et une date de fin lue avant le verrou, comme avant le correctif
+    // (mutant A7). La date saisie est antérieure au jour de tout passage : elle ne peut pas se confondre avec lui.
+    test('clôture : une date de fin déjà saisie est gardée, y compris saisie pendant l’attente de la clôture (relue sous le verrou) ; le mois du CA validé ne bouge pas', async () => {
+      const SAISIE = new Date('2025-12-15T00:00:00.000Z');
+      for (const [quoi, auth] of [['titulaire', () => comptes.CT.auth], ['administration', () => admin()]]) {
+        const avant = await creerChantier({ dateFin: SAISIE });
+        const cloture = await changerStatut(avant.id, { statut: 'TERMINE' }, auth());
+        assert.equal(cloture.status, 200, `${quoi} : ${JSON.stringify(cloture.body)}`);
+        let relu = await ligne(avant.id);
+        assert.deepEqual([relu.statut, relu.dateFin.toISOString()], ['TERMINE', SAISIE.toISOString()], `${quoi}, date de fin saisie avant la clôture`);
+        const pendant = await creerChantier();
+        const { res } = await sousVerrou(pendant.id, () => changerStatut(pendant.id, { statut: 'TERMINE' }, auth()), (tx) => tx.chantier.update({ where: { id: pendant.id }, data: { dateFin: SAISIE } }));
+        assert.equal(res.status, 200, `${quoi} : ${JSON.stringify(res.body)}`);
+        relu = await ligne(pendant.id);
+        assert.deepEqual([relu.statut, relu.dateFin.toISOString()], ['TERMINE', SAISIE.toISOString()], `${quoi}, date de fin saisie pendant l’attente de la clôture`);
+      }
+      // Témoin : sans date saisie, la clôture pose une date de fin, distincte de la date saisie plus haut.
+      const sansDate = await creerChantier();
+      assert.equal((await changerStatut(sansDate.id, { statut: 'TERMINE' }, comptes.CT.auth)).status, 200);
+      const relu = await ligne(sansDate.id);
+      assert.ok(relu.dateFin && relu.dateFin.toISOString() !== SAISIE.toISOString(), 'date de fin posée à la clôture');
+    });
+
+    // Décision « A. Non, admin seule » : un chantier clôturé pendant que son titulaire le clôture aussi ne reçoit plus
+    // rien de lui. Relue sous le verrou, la règle « seul un administrateur rouvre un chantier clôturé » vaut pour tout
+    // chantier qui n'est plus en cours, et pas seulement pour une affaire annulée : sans elle, la clôture du titulaire
+    // écrirait le chantier terminé, dont sa date de fin, mois du CA validé, quand elle est vide (clôture par la fiche,
+    // réservée à l'administration). Écarte une relecture limitée à l'affaire annulée (mutant A9 de l'audit des montants).
+    test('course : chantier clôturé pendant l’attente de la clôture de son titulaire : 403, sans écriture ni date de fin', async () => {
+      const chantier = await creerChantier();
+      const course = await sousVerrou(chantier.id, () => changerStatut(chantier.id, { statut: 'TERMINE' }, comptes.CT.auth), (tx) => tx.chantier.update({ where: { id: chantier.id }, data: { statut: 'TERMINE' } }));
+      await courseRefusee(course, 403, 'Seul un administrateur peut réouvrir un chantier clôturé.', 'clôture du titulaire, chantier clôturé pendant l’attente');
+      const relu = await ligne(chantier.id);
+      assert.deepEqual([relu.statut, relu.dateFin], ['TERMINE', null]);
+      assert.equal((await journal(chantier.id)).length, 0);
+    });
+
     // Point 2 bis, par le chemin réel : l'annulation du devis d'un chantier clôturé non encaissé passe ; la clôture
     // ou la réouverture de cette affaire annulée sont ensuite refusées (409), sans écriture.
     test('affaire annulée par son devis : ni clôture, ni réouverture, ni fiche, ni commercial, ni encaissement ; chacun 409 sans écriture', async () => {
