@@ -843,6 +843,29 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await journal(chantier.id)).length, 0);
     });
 
+    // Note N1 de l'audit des droits de #449 (défaut préexistant, hors du cadrage, signalé par le corps de la PR) : la clôture
+    // relit le titulaire sous le verrou de la ligne, comme la fiche et le commercial (#285, point 1). Un ancien titulaire,
+    // ou le responsable de la branche d'un technicien qui n'est plus titulaire, ne clôture plus l'affaire réattribuée
+    // pendant l'attente (404, sans écriture ni journal) ; le directeur, qui clôture tout chantier en cours, si (témoin).
+    test('course : clôture par un compte qui n’en a plus le droit, titulaire changé pendant l’attente : 404, sans écriture ni journal ; le directeur clôture toujours', async () => {
+      const technicien = await creerCompte('TECHNICIEN', 'TECH-BRANCHE', { responsableHierarchiqueId: comptes.RESP.id });
+      for (const [quoi, depart, auth] of [
+        ['ancien titulaire', {}, () => comptes.CT.auth],
+        ['responsable de la branche de l’ancien titulaire technicien', { responsableId: technicien.id }, () => comptes.RESP.auth],
+      ]) {
+        const chantier = await creerChantier(depart);
+        const course = await sousVerrou(chantier.id, () => changerStatut(chantier.id, { statut: 'TERMINE' }, auth()), (tx) => tx.chantier.update({ where: { id: chantier.id }, data: { responsableId: comptes.CT2.id } }));
+        await courseRefusee(course, 404, REFUS.introuvable, `clôture par le ${quoi}, titulaire changé pendant l’attente`);
+        const relu = await ligne(chantier.id);
+        assert.deepEqual([relu.statut, relu.dateFin, relu.responsableId], ['EN_COURS', null, comptes.CT2.id], quoi);
+        assert.equal((await journal(chantier.id)).length, 0, quoi);
+      }
+      const temoin = await creerChantier();
+      const { res } = await sousVerrou(temoin.id, () => changerStatut(temoin.id, { statut: 'TERMINE' }, comptes.DIR.auth), (tx) => tx.chantier.update({ where: { id: temoin.id }, data: { responsableId: comptes.CT2.id } }));
+      assert.equal(res.status, 200, JSON.stringify(res.body));
+      assert.equal((await ligne(temoin.id)).statut, 'TERMINE');
+    });
+
     // Point 2 bis, par le chemin réel : l'annulation du devis d'un chantier clôturé non encaissé passe ; la clôture
     // ou la réouverture de cette affaire annulée sont ensuite refusées (409), sans écriture.
     test('affaire annulée par son devis : ni clôture, ni réouverture, ni fiche, ni commercial, ni encaissement ; chacun 409 sans écriture', async () => {

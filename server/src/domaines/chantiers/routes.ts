@@ -444,7 +444,15 @@ export function enregistrerRoutesChantiers(app: Express): void {
       // et rester à minuit UTC, comme toute date métier stockée en base.
       const societe = nextStatut === 'TERMINE' ? await getCompanySettings() : null;
       const updated = await transactionVerifiee(async (tx) => {
-        const [ligne] = await tx.$queryRaw<Array<{ statut: string; dateFin: Date | null }>>(Prisma.sql`SELECT "statut", "dateFin" FROM "Chantier" WHERE "id" = ${chantier.id} FOR UPDATE`);
+        const [ligne] = await tx.$queryRaw<Array<{ statut: string; dateFin: Date | null; responsableId: string | null }>>(Prisma.sql`SELECT "statut", "dateFin", "responsableId" FROM "Chantier" WHERE "id" = ${chantier.id} FOR UPDATE`);
+        // Titulaire changé pendant l'attente : le droit de clôturer est refait sur la ligne verrouillée, comme pour la
+        // fiche et le commercial (#285) ; hors de ce droit, le chantier n'existe plus pour le demandeur (404).
+        if (!isAdmin && ligne.responsableId !== chantier.responsableId) {
+          const titulaire = ligne.responsableId ? await tx.user.findUnique({ where: { id: ligne.responsableId }, select: { role: true } }) : null;
+          if (ligne.responsableId !== authUser.id && !peutCloturerChantier(authUser, { responsableId: ligne.responsableId, responsableRole: titulaire?.role })) {
+            throw new RefusChantier(404, 'Chantier introuvable');
+          }
+        }
         const refusSousVerrou = refusStatut(ligne.statut);
         if (refusSousVerrou) throw refusSousVerrou;
         // La date de clôture sert de mois de rattachement au résultat commercial (CA et marge
