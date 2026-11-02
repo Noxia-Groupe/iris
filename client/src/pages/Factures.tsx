@@ -17,6 +17,7 @@ type NatureLigne = 'PRESTATION' | 'ARTICLE';
 type Source = {
   id: string; nom?: string; titre?: string; reference?: string; clientId?: string; client?: Client; auTempsPasse?: boolean;
   statut?: string; contratMaintenanceId?: string | null; chantier?: { statut?: string } | null;
+  numeroDevis?: string | null; site?: { nom: string } | null; dateDebut?: string;
 };
 type Ligne = { designation: string; nature: NatureLigne; quantite: string; prixUnitaireHt: string; tauxTva: string };
 type Trace = {
@@ -440,12 +441,17 @@ export default function Factures() {
   const emissionImpossible = (facture: Facture) => !!derniereDateEmission && facture.dateEmission.slice(0, 10) < derniereDateEmission.slice(0, 10);
   // Ni affaire, ni contrat, ni intervention d'origine annulée : le serveur refuse leur facture.
   const sources = sourcesFacturables(origine === 'CHANTIER' ? chantiers : origine === 'INTERVENTION' ? interventions : contrats, contrats, clientSelection);
-  // Une intervention se désigne par sa référence, comme dans sa liste, sa fiche, son compte rendu et la
-  // file du planning : les visites d'un même contrat portent toutes le même titre (« Maintenance
-  // préventive — … »), et le rattachement choisi ici est figé à l'émission.
-  const sourceName = (source: Source) => source.reference
-    ? `${source.reference} — ${source.titre ?? ''}`
-    : source.nom || source.titre || source.id;
+  // Le rattachement choisi ici est figé à l'émission : chaque origine se désigne par ce qui la distingue
+  // d'une homonyme du même client. Une intervention par sa référence, comme dans sa liste, sa fiche, son
+  // compte rendu et la file du planning (les visites d'un même contrat portent toutes le même titre,
+  // « Maintenance préventive — … ») ; une affaire par son numéro de devis, comme dans « Origine de la
+  // facture » ; un contrat, sans numéro, par son site et sa date de début, comme dans sa liste.
+  const sourceName = (source: Source) => {
+    if (source.reference) return `${source.reference} — ${source.titre ?? ''}`;
+    if (source.nom) return source.numeroDevis ? `${source.nom} — ${source.numeroDevis}` : source.nom;
+    if (source.titre) return [source.titre, source.site?.nom, source.dateDebut ? `début le ${formatDate(source.dateDebut)}` : ''].filter(Boolean).join(' — ');
+    return source.id;
+  };
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
