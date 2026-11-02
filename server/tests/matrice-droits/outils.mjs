@@ -4,7 +4,8 @@
 // premier niveau de server/tests, et les fichiers « matrice-droits-<partie>.test.mjs » importent ces outils
 // (cadrage §2.1, N4). Ils servent à D1a-1 (entrées) et resserviront à D1a-2 à D1a-5 :
 //  - base jetable propre au fichier, migrée puis supprimée (modèle : production-pdf.test.mjs) ;
-//  - application montée une fois sur un port libre de la boucle locale, appelée en HTTP réel ;
+//  - application montée une fois sur un port libre de la boucle locale, avec les délais de connexion du serveur réel
+//    (reglerDelaisConnexion, #464), appelée en HTTP réel ;
 //  - empreinte de toute la base (toutes les tables, comme envoi-microsoft-365.test.mjs) ;
 //  - normalisation des messages et format d'une ligne de matrice ;
 //  - comparaison avec la référence versionnée, diff imprimé dans le message d'échec (N8) ;
@@ -87,6 +88,13 @@ export async function chargerApplication(base) {
     const s = serveur.app.listen(0, '127.0.0.1', () => ok(s));
     s.on('error', ko);
   });
+  // Délais de connexion du serveur réel (reglerDelaisConnexion, src/demarrage.ts, ré-exporté par index.ts), posés avant
+  // tout appel (#464) : sans eux, le serveur de test garde le keepAliveTimeout de Node, 5 s, et l'agent keep-alive
+  // d'`appeler` peut réutiliser une connexion inactive à l'instant où le serveur la ferme (`read ECONNRESET`, CI de #462).
+  // Aucun appel n'est rejoué : une écriture n'est pas idempotente.
+  assert.equal(typeof serveur.reglerDelaisConnexion, 'function', 'reglerDelaisConnexion absent de dist/index.js : recompiler le serveur (npm run build)');
+  serveur.reglerDelaisConnexion(http);
+  assert.ok(http.keepAliveTimeout > 5_000 && http.headersTimeout > http.keepAliveTimeout, 'délais de connexion du serveur de test : ceux du serveur réel (src/demarrage.ts)');
   const adresse = `http://127.0.0.1:${http.address().port}`;
   return {
     serveur, app: serveur.app, prisma, jwt, adresse,

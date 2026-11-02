@@ -1,7 +1,10 @@
 // Outils de lecture des journaux des matrices de droits (lot D1a-5c ; cadrage de D1a-5c, version 3, §3), repris par
 // D1a-5d sans changer d'interface : 5d ajoute ses tables à TABLES_DE_JOURNAL, et D1a-5d-1 (factures, avoirs et
 // règlements ; cadrage de D1a-5d, version 3, §4.6) une option de nommerEntree, `pieces`, sans effet sur le comportement
-// par défaut, que la référence de 5c rejouée prouve.
+// par défaut, que la référence de 5c rejouée prouve. D1a-5d-2 (montants des écritures de session et réglages ; même
+// cadrage, §5.4, notes T1 et N4 de l'audit des droits de #456, suivies par #457) ajoute verifierLectureExport et
+// lignesNonReconnues, et l'option `lignesExport` de lireVisibilite, sans effet sur le comportement par défaut, que les
+// références de 5c et de 5d-1 rejouées prouvent.
 //
 // Ce fichier n'est pas un fichier de tests (pas de suffixe « .test.mjs »). Il sert aux matrices des écritures réelles,
 // une fois l'instantané de la base pris par l'outil de remise en état (remise-en-etat.mjs, dont il ne reprend que le
@@ -19,7 +22,9 @@
 //  - finDeLigneCsv, lireExports et compterFinDeLigne : l'export CSV du journal d'administration ne porte aucun
 //    identifiant ; une entrée y est reconnue par la fin de sa ligne, de l'auteur au détail, mise en forme comme
 //    l'application (valeursJournalCsv de domaines/administration/journal.ts, csvComptable de commun/csv.ts), et
-//    comptée avant et après l'écriture (cadrage §2.2).
+//    comptée avant et après l'écriture (cadrage §2.2) ;
+//  - verifierLectureExport (D1a-5d-2, #457 T1) : l'outil ne conclut sur l'export que s'il en reconnaît les lignes ;
+//    lignesNonReconnues (D1a-5d-2, #457 N4) : lignes d'un export qui ne sont la fin de ligne d'aucune entrée de la base.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import pg from 'pg';
@@ -44,7 +49,8 @@ const presentParId = (id) => (res) => elementsDe(res.body).some((e) => e?.id ===
 // --- Export CSV du journal d'administration ---
 // Même mise en forme que l'application : csvComptable (commun/csv.ts) pour chaque champ, valeursJournalCsv
 // (domaines/administration/journal.ts) pour l'avant et l'après. Recopiée ici, et non importée de dist, pour qu'un
-// changement de l'export ne change pas aussi l'outil qui le lit : l'outil échoue alors, faute de pouvoir conclure.
+// changement de l'export ne change pas aussi l'outil qui le lit : verifierLectureExport (plus bas) échoue alors, faute
+// de pouvoir conclure, dans les fichiers qui l'appellent (D1a-5d-2).
 export function csvComptable(valeur) {
   const texte = String(valeur ?? '');
   const formule = /^[=+@\t\r]/.test(texte) || (texte.startsWith('-') && !Number.isFinite(Number(texte)));
@@ -65,6 +71,36 @@ export function compterFinDeLigne(texte, fin) {
   let n = 0; let position = texte.indexOf(motif);
   while (position !== -1) { n += 1; position = texte.indexOf(motif, position + motif.length); }
   return n;
+}
+// L'outil ne conclut sur l'export que s'il en reconnaît les lignes (cadrage de D1a-5c, §2.2 : « S'il ne peut pas
+// conclure, il échoue avec un message clair » ; T1 de l'audit des droits de #456, patch de #457 repris par D1a-5d-2).
+// Le super administrateur voit toutes les entrées (aucun filtre de visibilité) : chacune doit se retrouver, par sa fin
+// de ligne, dans son export. Sinon, la mise en forme de l'export a changé, ou le super administrateur ne voit plus
+// toutes les entrées : sans ce contrôle, chaque lecture de l'export conclurait à tort « absente », pour le super
+// administrateur comme pour l'administrateur.
+export async function verifierLectureExport(connexion, texteSuperAdmin) {
+  const { rows } = await connexion.query('SELECT to_jsonb(j) AS ligne FROM public."JournalAdministration" j');
+  const introuvables = rows.filter(({ ligne }) => compterFinDeLigne(texteSuperAdmin, finDeLigneCsv(ligne)) === 0);
+  assert.equal(introuvables.length, 0, `Export CSV du journal d’administration : ${introuvables.length} entrée(s) de la base sur ${rows.length} introuvable(s) dans l’export du super administrateur, qui les voit toutes. L’outil ne reconnaît plus l’export (mise en forme changée, ou entrées masquées au super administrateur) : il ne peut pas conclure.`);
+  return rows.length;
+}
+// Lignes d'un export qui ne sont la fin de ligne d'aucune entrée de la base (N4 de l'audit des droits de #456, suivie
+// par #457) : le nombre de lignes de l'export, en-tête retirée, comparé au nombre de celles que l'outil y reconnaît,
+// c'est-à-dire aux entrées qu'il déclare visibles. Une fin de ligne est comptée au plus autant de fois que la base porte
+// d'entrées de même fin, et un champ qui contiendrait un saut de ligne compte pour autant de lignes. Rend 0 quand chaque
+// ligne de l'export est une entrée reconnue ; un export qui montrerait une entrée sous un libellé changé (une ligne de
+// plus, que la fin de ligne ne reconnaît pas) rend un nombre positif, là où la fin de ligne seule conclurait « absente ».
+const sautsDeLigne = (texte) => texte.split('\n').length - 1;
+export async function lignesNonReconnues(connexion, texte) {
+  const { rows } = await connexion.query('SELECT to_jsonb(j) AS ligne FROM public."JournalAdministration" j');
+  const parFin = new Map();
+  for (const { ligne } of rows) {
+    const fin = finDeLigneCsv(ligne);
+    parFin.set(fin, (parFin.get(fin) ?? 0) + 1);
+  }
+  let reconnues = 0;
+  for (const [fin, n] of parFin) reconnues += Math.min(compterFinDeLigne(texte, fin), n) * (1 + sautsDeLigne(fin));
+  return sautsDeLigne(texte) - 1 - reconnues;
 }
 // Exports CSV du journal d'administration, lus par chaque lecteur (texte décodé, sans la marque d'ordre des octets).
 export async function lireExports({ appeler, adresse, jetons, lecteurs = LECTEURS_ADMINISTRATION, requete }) {
@@ -262,8 +298,11 @@ export function lecteursDe(lecture, auteur, refuse = lecture.refuse) {
 // « 200 visible », « 200 absente », ou le refus (formaterReponse). Pour l'export CSV : la fin de ligne de l'entrée est
 // comptée dans l'export du lecteur et dans son export de référence (`exportsReference`, la base remise étant à l'état de
 // référence avant l'écriture) ; « visible » si l'écart est le nombre d'entrées nouvelles de même fin de ligne
-// (`entreesDuCas`), « absente » s'il est nul ; sinon, l'outil échoue avec un message clair.
-export async function lireVisibilite({ appeler, adresse, jetons, entree, auteur, exportsReference, entreesDuCas, refuses = {}, nom = '' }) {
+// (`entreesDuCas`), « absente » s'il est nul ; sinon, l'outil échoue avec un message clair. Option `lignesExport`
+// (D1a-5d-2, #457 N4), la connexion de lecture : chaque export lu est aussi compté en lignes (lignesNonReconnues) ; une
+// ligne qu'aucune entrée de la base ne reconnaît change le verdict en « 200 ; visible, lignes de l’export non
+// reconnues » (ou « absente, … »), sans chiffre. Sans l'option, le verdict est celui de D1a-5c.
+export async function lireVisibilite({ appeler, adresse, jetons, entree, auteur, exportsReference, entreesDuCas, refuses = {}, nom = '', lignesExport = null }) {
   const taches = [];
   for (const lecture of lecturesDe(entree)) {
     for (const lecteur of lecteursDe(lecture, auteur, refuses[lecture.route] ?? lecture.refuse)) {
@@ -277,8 +316,12 @@ export async function lireVisibilite({ appeler, adresse, jetons, entree, auteur,
         const avant = compterFinDeLigne(reference, lecture.finCsv);
         const apres = compterFinDeLigne(texte, lecture.finCsv);
         const attendues = entreesDuCas.filter((e) => e.table === 'JournalAdministration' && finDeLigneCsv(e.ligne) === lecture.finCsv).length;
-        if (attendues > 0 && apres === avant + attendues) return { lecteur, route: lecture.route, verdict: '200 visible' };
-        if (apres === avant) return { lecteur, route: lecture.route, verdict: '200 absente' };
+        const verdictExport = async (mot) => {
+          if (!lignesExport || (await lignesNonReconnues(lignesExport, texte)) === 0) return `200 ${mot}`;
+          return `200 ; ${mot}, lignes de l’export non reconnues`;
+        };
+        if (attendues > 0 && apres === avant + attendues) return { lecteur, route: lecture.route, verdict: await verdictExport('visible') };
+        if (apres === avant) return { lecteur, route: lecture.route, verdict: await verdictExport('absente') };
         return assert.fail(`Export CSV du journal d’administration lu par ${lecteur} : impossible de conclure sur l’entrée « ${nom} ». Sa fin de ligne y figure ${apres} fois, contre ${avant} fois dans l’export de référence, pour ${attendues} entrée(s) nouvelle(s) de même fin de ligne : ni toutes visibles, ni toutes absentes.`);
       });
     }
