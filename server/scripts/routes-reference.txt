@@ -112,10 +112,10 @@ GET /api/chantiers/:id/document.pdf requireAuth#07b983da0ce5 > requireAdmin#7244
 GET /api/chantiers/:id/envois requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > lireEnvoisRapportChantier#686d69fd2e44
 POST /api/chantiers/:id/envois requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > envoyerRapportChantier#b8c79c1eee9b
 POST /api/chantiers requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#5a2a6ae542c5
-PATCH /api/chantiers/:id requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#3653fa783163
+PATCH /api/chantiers/:id requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#7562b7339ffa
 DELETE /api/chantiers/:id requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#c4bcd35fe13f
-PATCH /api/chantiers/:id/statut requireAuth#07b983da0ce5 > blockCommercialSeulement#f36b50e5b6cd > <anonymous>#b69e5b3dc15a
-PATCH /api/chantiers/:id/commercial requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#a888c4b20222
+PATCH /api/chantiers/:id/statut requireAuth#07b983da0ce5 > blockCommercialSeulement#f36b50e5b6cd > <anonymous>#4ab844b07f34
+PATCH /api/chantiers/:id/commercial requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#0c5a1625d12f
 GET /api/users requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#25aa992576b7
 POST /api/users requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#d2a05dc6e5a0
 DELETE /api/users/:id requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#b402a62e9497
@@ -166,7 +166,7 @@ POST /api/heures requireAuth#07b983da0ce5 > <anonymous>{permission="chantiers:wr
 PATCH /api/heures/:id requireAuth#07b983da0ce5 > <anonymous>{permission="chantiers:write"}#c4dc4769916b > <anonymous>#f7414586d918
 DELETE /api/heures/:id requireAuth#07b983da0ce5 > <anonymous>{permission="chantiers:archive"}#c4dc4769916b > <anonymous>#a964dff53d9c
 POST /api/heures/:id/restaurer requireAuth#07b983da0ce5 > <anonymous>{permission="chantiers:archive"}#c4dc4769916b > <anonymous>#bc81f9477fc9
-PATCH /api/chantiers/:id/encaisse requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#76321f646549
+PATCH /api/chantiers/:id/encaisse requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#42ef50f4bcae
 PUT /api/commerciaux/:id/prime-mensuelle requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#1e069a7e8edc
 GET /api/parametres requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#b469f501b945
 GET /api/registry/companies requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#9636734be755
