@@ -262,8 +262,13 @@ export const SEPARATEUR = ' | ';
 //  - le passage automatique de la génération des visites (route « passage automatique », au nom du compte système,
 //    SYSTEME, que l'appelant ajoute à `comptes`) s'écrit « passage » ou « aucun passage », puis « inchangé » ou les
 //    tables écrites, puis des constats sans chiffre.
-export function lignesAvecMontant(lignes, { comptes, constat = false, ciblesAdmises = [], journaux = false }) {
-  if (journaux) return lignesAvecMontantJournaux(lignes, { comptes, ciblesAdmises });
+// Option `comptesAChiffre` (D1a-5d-1 ; cadrage de D1a-5d, version 3, §4.2, d'après le patch joint à #457, notes N2 de
+// l'audit des droits et N7 de l'audit des montants), avec `journaux` seulement et sans effet sans elle : le nom d'un
+// compte joué qui porte un chiffre (CT-N1), auteur d'une entrée ou cité par la cible d'une lecture, n'est pas un
+// montant ; il est remplacé par « COMPTE » dans la cible et la réponse avant le contrôle. Un nom inconnu (CT-N2) reste
+// refusé. Sans cette option, un mutant qui fait écrire CT-N1 échouerait sur la garde avant d'imprimer son diff.
+export function lignesAvecMontant(lignes, { comptes, constat = false, ciblesAdmises = [], journaux = false, comptesAChiffre = false }) {
+  if (journaux) return lignesAvecMontantJournaux(lignes, { comptes, ciblesAdmises, comptesAChiffre });
   const deuxCents = constat ? /^2\d\d (inchangé|écrit \([^()\d]+\))( ; [^\d;|]+)?$/ : /^2\d\d (inchangé|écrit \([^()\d]+\))$/;
   return lignes.filter((l) => {
     const [compte, , cible, contexte, reponse] = l.split(SEPARATEUR);
@@ -272,7 +277,7 @@ export function lignesAvecMontant(lignes, { comptes, constat = false, ciblesAdmi
     return /\d/.test(reponse.replace(/^\d{3} /, '').replace(/\b\d+ [^\s()]+\(s\)/g, ''));
   });
 }
-function lignesAvecMontantJournaux(lignes, { comptes, ciblesAdmises }) {
+function lignesAvecMontantJournaux(lignes, { comptes, ciblesAdmises, comptesAChiffre }) {
   const chiffre = /\p{Nd}/u;
   const tables = String.raw`écrit \([^()\p{Nd}]+\)`;
   const constats = String.raw`( ; [^\p{Nd};|]+)*`;
@@ -280,8 +285,14 @@ function lignesAvecMontantJournaux(lignes, { comptes, ciblesAdmises }) {
   const lecture = /^2\p{Nd}{2} (visible|absente)$/u;
   const filtre = /^2\p{Nd}{2}( ; [^\p{Nd};|]+)+$/u;
   const passage = new RegExp(`^(passage|aucun passage) (inchangé|${tables})${constats}$`, 'u');
+  // Noms de comptes joués à chiffre, du plus long au plus court (un nom n'en masque pas un autre plus long).
+  const aChiffre = comptesAChiffre ? comptes.filter((c) => chiffre.test(c)).sort((x, y) => y.length - x.length) : [];
+  // Sans l'option, le texte est rendu tel quel (même valeur, même comportement que D1a-5c, ligne mal formée comprise).
+  const sansComptes = (texte) => (aChiffre.length ? aChiffre.reduce((t, c) => t.split(c).join('COMPTE'), texte) : texte);
   return lignes.filter((l) => {
-    const [compte, route, cible, contexte, reponse] = l.split(SEPARATEUR);
+    const [compte, route, cibleBrute, contexte, reponseBrute] = l.split(SEPARATEUR);
+    const cible = sansComptes(cibleBrute);
+    const reponse = sansComptes(reponseBrute);
     let cibleControlee = ciblesAdmises.includes(cible) ? '' : cible;
     if (cibleControlee && cible.includes(' ← ')) {
       const admise = ciblesAdmises.find((a) => cible.endsWith(` sur ${a}`));
