@@ -156,7 +156,10 @@ const MONTANTS = {
   // arrondi au pair, 77,12 ; sans le pas (1,1 h), 67,87 ; au pas le plus proche (60 minutes), 61,70 ; prix de la main
   // d'œuvre du catalogue, changé à 99,99 après la signature : 124,99. 1,1 h ne départage pas le minimum de 60 minutes
   // (lu au-dessus) : un mutant qui l'ignore survit à ce fichier ; il est couvert par api.test.mjs (#348).
-  tempsPasse: { heures: 1.1, prixDevis: 61.7, prixApresSignature: 99.99, minimumMinutes: 60, pasMinutes: 15, totalHtAutre: 77.12 },
+  // Réglages de la société changés après la signature (pas de 60 minutes, minimum de 120 minutes) : la facture garde le
+  // pas et le minimum figés sur le devis. Lectures écartées : pas du jour, 60 + 60 minutes, 2 h, 123,40 ; minimum du
+  // jour, 120 minutes, 2 h, 123,40.
+  tempsPasse: { heures: 1.1, prixDevis: 61.7, prixApresSignature: 99.99, minimumMinutes: 60, pasMinutes: 15, totalHtAutre: 77.12, pasApresSignature: 60, minimumApresSignature: 120 },
   factureTempsPasse: {
     type: 'FACTURE', statut: 'BROUILLON', totalHt: 77.13, totalTva: 15.43, totalTtc: 92.56,
     lignes: [{ nature: 'PRESTATION', quantite: 1.25, prixUnitaireHt: 61.7, tauxTva: 20, totalHt: 77.13, totalTtc: 92.56 }],
@@ -531,6 +534,7 @@ if (!TEST_DATABASE_URL) {
       await api('TECH', 'POST', `/api/interventions/${intervention.id}/rapports`, { contenu: 'TEST Compte rendu au temps passé de la matrice des factures', cleEnvoi: randomUUID() }, 201);
       await api(SA, 'PATCH', `/api/interventions/${intervention.id}/statut`, { statut: 'TERMINEE', motifSansSignature: 'CLIENT_ABSENT' });
       await api(SA, 'PUT', `/api/catalogue/prestations/${d.mainOeuvre}`, corpsMainOeuvre(MONTANTS.tempsPasse.prixApresSignature));
+      await api(SA, 'PUT', '/api/parametres', { pasTempsPasseMinutes: MONTANTS.tempsPasse.pasApresSignature, tempsMinimumMinutes: MONTANTS.tempsPasse.minimumApresSignature });
       d.interventionTempsPasse = intervention.id;
       d.devisTempsPasse = devis.id;
       d.apercu = await api(SA, 'GET', `/api/interventions/${intervention.id}/facture-temps-passe`);
@@ -549,14 +553,17 @@ if (!TEST_DATABASE_URL) {
       const ligneDevis = await appli.prisma.devisLigne.findFirstOrThrow({ where: { devisId: devis.id, tempsPasse: true } });
       const devisFige = await appli.prisma.devis.findUniqueOrThrow({ where: { id: devis.id }, select: { tempsMinimumMinutes: true, pasTempsPasseMinutes: true } });
       const heures = await appli.prisma.coutInterventionHeure.findMany({ where: { interventionId: intervention.id } });
+      const reglages = await appli.prisma.parametres.findUniqueOrThrow({ where: { id: 'singleton' }, select: { pasTempsPasseMinutes: true, tempsMinimumMinutes: true } });
       d.temoin = {
         jeu: Object.fromEntries(await Promise.all(['facture-brouillon', 'facture-emise', 'avoir-emis', 'facture-avoir'].map(async (nom) => [nom, await facture(idDe(nom))]))),
         reglementJeu: Number((await appli.prisma.reglement.findUniqueOrThrow({ where: { id: id('reglement', 'reglement') } })).montant),
+        reglementSolde: Number((await appli.prisma.reglement.findUniqueOrThrow({ where: { id: idDe('reglement-solde') } })).montant),
         cibles: Object.fromEntries(await Promise.all(['facture-emise-non-reglee', 'facture-reglee', 'facture-annulee', 'avoir-total', 'facture-avoir-partiel', 'avoir-de-facture-avoir-partiel', 'facture-soldee-par-avoir', 'avoir-de-facture-soldee-par-avoir', 'facture-autre-client', 'facture-client-desactive', 'facture-brouillon-deux-taux'].map(async (nom) => [nom, await facture(idDe(nom))]))),
         clients: [(await appli.prisma.client.findUniqueOrThrow({ where: { id: d.clientDesactive } })).actif, (await appli.prisma.client.findUniqueOrThrow({ where: { id: d.clientSecond } })).actif],
         tempsPasse: {
           heures: heures.map((h) => Number(h.nbrHeures)), prixDevis: Number(ligneDevis.prixUnitaireHt), minimum: devisFige.tempsMinimumMinutes, pas: devisFige.pasTempsPasseMinutes,
           prixCatalogue: Number((await appli.prisma.cataloguePrestation.findUniqueOrThrow({ where: { id: d.mainOeuvre } })).prixVenteHt), apercu: d.apercu.totalHt,
+          reglagesDuJour: [reglages.pasTempsPasseMinutes, reglages.tempsMinimumMinutes],
         },
       };
 
@@ -624,10 +631,12 @@ if (!TEST_DATABASE_URL) {
         ajouter(compte, avoirs, 'facture-emise', 'défaut, corps taux absent de la facture', piece(avoirs, 'facture-emise'), corpsAvoir({ ...MONTANTS.ligneAvoir, tauxTva: 5.5 }), { code: 400 });
         for (const nom of ['facture-brouillon', 'avoir-emis', 'facture-annulee']) ajouter(compte, avoirs, nom, uneLigne, piece(avoirs, nom), corpsAvoir(), { code: 409 });
 
-        // Envoi d'une facture par la messagerie (jamais Microsoft 365, avenant §2). La facture annulée garde son document
-        // (STATUTS_DOCUMENT_FACTURE, factures/metier.ts:27) : sa réponse est enregistrée telle quelle, sans attendu écrit.
+        // Envoi d'une facture par la messagerie (jamais Microsoft 365, avenant §2). La facture annulée garde son document, et
+        // son envoi est admis (201) : passation, section 4, bloc « Envoi des documents par la messagerie et journal des
+        // envois » (lot 6a-3), « toute facture ou tout avoir émis (émis, réglé ou annulé) » ; STATUTS_DOCUMENT_FACTURE,
+        // factures/metier.ts:27 (N4 de l'audit des droits et N1 de l'audit des montants de #460).
         const envois = 'POST /api/factures/:id/envois';
-        for (const [nom, code] of [['facture-emise', 201], ['avoir-emis', 201], ['facture-brouillon', 409], ['facture-annulee', null]]) {
+        for (const [nom, code] of [['facture-emise', 201], ['avoir-emis', 201], ['facture-brouillon', 409], ['facture-annulee', 201]]) {
           ajouter(compte, envois, nom, 'défaut, corps destinataire, messagerie', piece(envois, nom), () => ({ destinataire: DESTINATAIRE }), { code });
         }
 
@@ -734,7 +743,6 @@ if (!TEST_DATABASE_URL) {
       assert.deepEqual([MONTANTS.avoirApresAvoir.totalHt, MONTANTS.avoirApresAvoir.totalTva, MONTANTS.avoirApresAvoir.totalTtc, MONTANTS.avoirApresAvoir.lignes[0].totalTtc], [exact.euros(htAvoir), exact.euros(tvaApres), exact.euros(htAvoir + tvaApres), exact.euros(exact.ttcLigne(htAvoir, 20))], 'avoir après un premier avoir');
       assert.deepEqual([MONTANTS.avoirSeul.totalTva, MONTANTS.avoirSeul.totalTtc], [exact.euros(exact.tva(htAvoir, 20)), exact.euros(htAvoir + exact.tva(htAvoir, 20))], 'avoir sans avoir précédent');
       assert.notEqual(MONTANTS.avoirSeul.totalTva, MONTANTS.avoirApresAvoir.totalTva, 'TVA de l’avoir seul');
-      assert.deepEqual(MONTANTS.avoirTotal.ecritures.map(([, , debit, credit]) => [debit, credit]), [[0, 240], [40, 0], [200, 0]], 'avoir total : écritures inversées de la facture de 200 HT');
       // Facture au temps passé.
       const tp = MONTANTS.tempsPasse;
       const minutesSaisies = Math.round(tp.heures * 60);
@@ -748,6 +756,8 @@ if (!TEST_DATABASE_URL) {
         [exact.euros(exact.ligneHt(tp.heures, tp.prixDevis)), 'sans le pas'],
         [exact.euros(exact.ligneHt(Math.round(minutesSaisies / tp.pasMinutes) * tp.pasMinutes / 60, tp.prixDevis)), 'au pas le plus proche'],
         [exact.euros(exact.ligneHt(minutes / 60, tp.prixApresSignature)), 'prix du catalogue après la signature'],
+        [exact.euros(exact.ligneHt((tp.minimumMinutes + Math.ceil(Math.max(0, minutesSaisies - tp.minimumMinutes) / tp.pasApresSignature) * tp.pasApresSignature) / 60, tp.prixDevis)), 'pas du jour après la signature'],
+        [exact.euros(exact.ligneHt((tp.minimumApresSignature + Math.ceil(Math.max(0, minutesSaisies - tp.minimumApresSignature) / tp.pasMinutes) * tp.pasMinutes) / 60, tp.prixDevis)), 'minimum du jour après la signature'],
       ]) assert.notEqual(ecartee, ft.totalHt, `facture au temps passé, lecture écartée : ${quoi}`);
       // Règlements : un arrondi à l'euro ou au dixième changerait le statut ou le reste dû.
       for (const m of [MONTANTS.reglementPartiel, MONTANTS.reglementSurplus, MONTANTS.reglementDeuxFactures[1], MONTANTS.reglementClientDesactive]) {
@@ -766,7 +776,44 @@ if (!TEST_DATABASE_URL) {
       const htJeu = [10, 100, 80];
       for (const [nom, ht] of Object.entries(MONTANTS.cibles)) assert.ok(!htJeu.includes(ht), `cible ${nom} : montant distinct du jeu de données`);
       assert.equal(new Set(Object.values(MONTANTS.cibles)).size, Object.values(MONTANTS.cibles).length, 'montants des cibles distincts entre eux');
-      assert.deepEqual(t.tempsPasse, { heures: [tp.heures], prixDevis: tp.prixDevis, minimum: tp.minimumMinutes, pas: tp.pasMinutes, prixCatalogue: tp.prixApresSignature, apercu: ft.totalHt }, 'facture au temps passé : heures, prix figé du devis, minimum et pas figés, prix du catalogue changé, aperçu');
+      assert.deepEqual(t.tempsPasse, { heures: [tp.heures], prixDevis: tp.prixDevis, minimum: tp.minimumMinutes, pas: tp.pasMinutes, prixCatalogue: tp.prixApresSignature, apercu: ft.totalHt, reglagesDuJour: [tp.pasApresSignature, tp.minimumApresSignature] }, 'facture au temps passé : heures, prix figé du devis, minimum et pas figés, prix du catalogue et réglages changés après la signature, aperçu');
+      // Avoir total de facture-emise-non-reglee : totaux, ligne, ventilation et écritures recalculés en décimal exact depuis
+      // le HT relu en base ; les écritures sont celles de l'émission, débit et crédit inversés. Lecture écartée : écritures
+      // recopiées sans inversion.
+      const htAnnulee = enUnites(t.cibles['facture-emise-non-reglee'][0], 2);
+      const tvaAnnulee = exact.tva(htAnnulee, 20);
+      const at = MONTANTS.avoirTotal;
+      assert.deepEqual([at.totalHt, at.totalTva, at.totalTtc, at.lignes[0].totalHt, at.lignes[0].totalTtc, at.ventilation], [exact.euros(htAnnulee), exact.euros(tvaAnnulee), exact.euros(htAnnulee + tvaAnnulee), exact.euros(htAnnulee), exact.euros(exact.ttcLigne(htAnnulee, 20)), [[20, exact.euros(htAnnulee), exact.euros(tvaAnnulee), exact.euros(htAnnulee + tvaAnnulee)]]], 'avoir total : totaux, ligne et ventilation');
+      const ecrituresAnnulee = [['CLIENT', '411000', exact.euros(htAnnulee + tvaAnnulee), 0], ['TVA:20', '445710', 0, exact.euros(tvaAnnulee)], ['VENTE_PRESTATION', '706000', 0, exact.euros(htAnnulee)]];
+      assert.deepEqual(at.ecritures, ecrituresAnnulee.map(([cle, compte, debit, credit]) => [cle, compte, credit, debit]), 'avoir total : écritures de la facture inversées');
+      assert.notDeepEqual(at.ecritures, ecrituresAnnulee, 'avoir total, lecture écartée : écritures sans inversion');
+      // Règlements et contre-passations (cas de SA, que reprennent AD et AD-COM) : montant égal à la somme des parts ;
+      // chaque reste dû attendu recalculé en centimes exacts (TTC relu en base, moins ce que réglaient déjà le règlement du
+      // jeu de données et celui de facture-reglee, plus ou moins la part du cas) ; chaque statut attendu en découle
+      // (réglée si le reste est nul ou négatif et qu'un règlement reste affecté, reglements/metier.ts:51-60). Lectures
+      // écartées : part arrondie à l'euro ; part non retirée à la contre-passation.
+      const centimesDe = (euros) => (euros < 0 ? -enUnites(-euros, 2) : enUnites(euros, 2));
+      const ttcDe = (nom) => centimesDe((t.cibles[nom] ?? t.jeu[nom])[1]);
+      const regleAvant = new Map([['facture-emise', centimesDe(t.reglementJeu)], ['facture-reglee', centimesDe(t.reglementSolde)]]);
+      const reglementsDeSa = cas.filter((c) => c.compte === SA && ['reglement', 'contrepassation'].includes(c.montant?.genre));
+      assert.equal(reglementsDeSa.length, 7, 'cinq règlements et deux contre-passations relus');
+      for (const { cible, contexte, montant: m } of reglementsDeSa) {
+        const quoi = `${cible} (${contexte})`;
+        const partDe = (nom) => centimesDe(m.parts.find(([n]) => n === nom)?.[1] ?? 0);
+        assert.equal(m.montant, exact.euros(m.parts.reduce((s, [, p]) => s + centimesDe(p), 0n)), `${quoi} : montant égal à la somme des parts`);
+        assert.deepEqual(m.statuts.map(([nom]) => nom), m.restes.map(([nom]) => nom), `${quoi} : un statut attendu par reste dû attendu`);
+        for (const [nom, reste] of m.restes) {
+          const avant = regleAvant.get(nom) ?? 0n;
+          const regle = avant + (m.genre === 'reglement' ? partDe(nom) : -partDe(nom));
+          const calcule = ttcDe(nom) - regle;
+          assert.equal(reste, exact.euros(calcule), `${quoi} : reste dû de ${nom}`);
+          assert.equal(m.statuts.find(([n]) => n === nom)[1], calcule <= 0n && regle > 0n ? 'REGLEE' : 'EMISE', `${quoi} : statut de ${nom}`);
+          if (m.genre === 'reglement' && partDe(nom) % 100n !== 0n) {
+            assert.notEqual(exact.euros(ttcDe(nom) - avant - ((partDe(nom) + 50n) / 100n) * 100n), reste, `${quoi}, lecture écartée : part de ${nom} arrondie à l’euro`);
+          }
+          if (m.genre === 'contrepassation') assert.notEqual(exact.euros(ttcDe(nom) - avant), reste, `${quoi}, lecture écartée : part non retirée de ${nom}`);
+        }
+      }
     });
 
     // Outils propres à 5d (cadrage §3, §4.2 et §4.6) : normalisation des trois messages qui citent un montant, garde
@@ -791,6 +838,10 @@ if (!TEST_DATABASE_URL) {
       assert.equal(garde(ecritureCtN1), true, 'sans l’option, comportement de 5c inchangé : le nom de CT-N1 est refusé');
       assert.equal(garde(`${ecritureCtN1.replace(' ; montants inchangés en base', '')} ; montant 12,50 €`, { comptesAChiffre: true }), true, 'montant en euros refusé');
       assert.equal(garde('SA | POST /api/reglements | factureId=facture-emise | défaut | 201 écrit (Reglement) ; aucune entrée ; montant 69.99', { comptesAChiffre: true }), true, 'montant en chiffres refusé');
+      // Seul le nom d'un compte joué est masqué : un montant sans « € » dans une ligne qui nomme CT-N1 reste refusé, dans
+      // la réponse d'une écriture comme dans la cible d'une lecture (audit des droits de #460, T1).
+      assert.equal(garde(ecritureCtN1.replace(' ; montants inchangés en base', ' ; montant 69,99'), { comptesAChiffre: true }), true, 'écriture par CT-N1 qui porte un montant sans « € » : refusée');
+      assert.equal(garde(lectureCtN1.replace('REGLEMENT_AFFECTE par CT-N1', 'REGLEMENT_AFFECTE de 69,99 par CT-N1'), { comptesAChiffre: true }), true, 'lecture d’une entrée de CT-N1 dont la cible porte un montant : refusée');
       // Messages de refus fixes à chiffre sans montant : admis à leur texte exact, une variante reste refusée.
       for (const message of MESSAGES_SANS_MONTANT) {
         const ligne = `SA | POST /api/factures | clientId=client-actif | défaut | 400 « ${message} » inchangé ; aucune entrée ; pièces émises figées ; montants inchangés en base`;
