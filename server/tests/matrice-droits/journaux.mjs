@@ -1,5 +1,7 @@
 // Outils de lecture des journaux des matrices de droits (lot D1a-5c ; cadrage de D1a-5c, version 3, §3), repris par
-// D1a-5d sans changer d'interface : 5d ajoute ses tables à TABLES_DE_JOURNAL.
+// D1a-5d sans changer d'interface : 5d ajoute ses tables à TABLES_DE_JOURNAL, et D1a-5d-1 (factures, avoirs et
+// règlements ; cadrage de D1a-5d, version 3, §4.6) une option de nommerEntree, `pieces`, sans effet sur le comportement
+// par défaut, que la référence de 5c rejouée prouve.
 //
 // Ce fichier n'est pas un fichier de tests (pas de suffixe « .test.mjs »). Il sert aux matrices des écritures réelles,
 // une fois l'instantané de la base pris par l'outil de remise en état (remise-en-etat.mjs, dont il ne reprend que le
@@ -10,7 +12,8 @@
 //  - ouvrirConnexionLecture et entreesNouvelles : les lignes de ces tables absentes de l'instantané, ou changées depuis
 //    lui, relues par une connexion pg en lecture seule, distincte de celle de la remise et de celles de l'application ;
 //  - nommerEntree : « Table nature action par COMPTE », suivi des marques « concerne un SA » et « réservée au SA »
-//    quand elles sont posées, sans identifiant, date ni chiffre (cadrage §2.1) ;
+//    quand elles sont posées, sans identifiant, date ni chiffre (cadrage §2.1) ; avec l'option `pieces` (D1a-5d-1), la
+//    nature d'une entrée JournalFacture nomme sa pièce ;
 //  - lecturesDe, lecteursDe et lireVisibilite : qui lit une entrée, par quelle route, et le verdict de chaque lecteur
 //    (« 200 visible », « 200 absente », ou le refus, code et message) ;
 //  - finDeLigneCsv, lireExports et compterFinDeLigne : l'export CSV du journal d'administration ne porte aucun
@@ -132,9 +135,13 @@ export const TABLES_DE_JOURNAL = {
       return [{ route: `GET /api/${segment}/:id/envois`, chemin: `/api/${segment}/${l[colonne]}/envois`, refuse, famille: segment, present: presentParId(l.id) }];
     },
   },
+  // Journal d'une pièce. Sans option, l'entrée ne nomme pas sa pièce (D1a-5c : une émission par cas). Option `pieces`
+  // de nommerEntree (D1a-5d-1, cadrage de D1a-5d §4.6) : identifiant de pièce → nom de la cible ; la nature nomme alors
+  // la pièce (« autre pièce » hors de la table), si bien qu'un règlement réparti sur deux factures, qui écrit une entrée
+  // REGLEMENT_AFFECTE par facture, donne deux entrées de noms distincts.
   JournalFacture: {
     auteur: 'acteurId', ajoutSeul: true,
-    nature: () => null, action: (l) => l.action,
+    nature: (l, _avant, options = {}) => (options.pieces ? options.pieces.get(l.factureId) ?? 'autre pièce' : null), action: (l) => l.action,
     lectures: (l) => [{ route: 'GET /api/factures/:id/journal', chemin: `/api/factures/${l.factureId}/journal`, refuse: 'DIR', present: presentParId(l.id) }],
   },
   JournalCompteComptable: {
@@ -215,16 +222,17 @@ export const memeEntree = (a, b) => a.table === b.table && a.ligne.id === b.lign
 
 // --- Nom d'une entrée ---
 // `noms` : identifiant de compte → nom du compte joué (SA, AD, CT…). Le compte système se nomme SYSTEME ; un compte
-// créé par une écriture, « autre compte ».
+// créé par une écriture, « autre compte ». `options` (D1a-5d-1) : `pieces`, identifiant de pièce → nom, lu par la nature
+// d'une entrée JournalFacture ; sans option, le nom est celui de D1a-5c.
 export function nomDuCompte(id, noms) {
   if (id === COMPTE_SYSTEME_ID) return AUTEUR_SYSTEME;
   return noms.get(id) ?? 'autre compte';
 }
-export function nommerEntree(entree, noms) {
+export function nommerEntree(entree, noms, options = {}) {
   const definition = TABLES_DE_JOURNAL[entree.table];
   assert.ok(definition, `table de journal inconnue : ${entree.table}`);
   const { ligne, avant } = entree;
-  let nom = [entree.table, definition.nature(ligne, avant), definition.action(ligne, avant)].filter(Boolean).join(' ');
+  let nom = [entree.table, definition.nature(ligne, avant, options), definition.action(ligne, avant)].filter(Boolean).join(' ');
   if (!definition.auteur) nom += ', sans auteur';
   else {
     const auteurId = ligne[definition.auteur];
