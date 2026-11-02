@@ -76,6 +76,44 @@ export const REFUS_TECHNICIEN_MODIFICATION = 'Un compte technicien n’est pas a
 export const REFUS_TECHNICIEN_COMMERCIAL = 'Un compte technicien n’est pas autorisé à réattribuer le commercial d’une affaire. Adressez-vous à votre responsable.';
 export const REFUS_TECHNICIEN_CLOTURE = 'Un compte technicien n’est pas autorisé à clôturer une affaire : la clôture revient à un compte Responsable de sa branche, à la direction ou à l’administration.';
 
+// Une affaire annulée est close : sa fin est écrite, avec son motif, et rien ne la fait revivre. Elle ne
+// s'encaisse pas (décision de Nelson du 02-11-2026, #285 : « une affaire annulé ne peut etre encaissé ») :
+// la case « Encaissé » ouvre le CA et la marge validés du commercial (commissions/metier.ts).
+export const REFUS_AFFAIRE_ANNULEE_FICHE = 'Cette affaire est annulée : elle n’est plus modifiable.';
+export const REFUS_AFFAIRE_ANNULEE_COMMERCIAL = 'Cette affaire est annulée : son commercial ne change plus.';
+export const REFUS_AFFAIRE_ANNULEE_STATUT = 'Cette affaire est annulée : son statut ne change plus.';
+export const REFUS_AFFAIRE_ANNULEE_ENCAISSEMENT = 'Cette affaire est annulée : elle ne peut pas être encaissée.';
+// Un chantier clôturé ne se modifie plus que par l'administration, qui seule le rouvre (décision de
+// Nelson du 02-11-2026 : « A. Non, admin seule ») : sa fiche (nom, budgets, heures vendues, dates,
+// barème réduit, titulaire) et son commercial portent le CA et la marge validés une fois encaissé.
+// Même règle que les saisies après clôture (cf. assertChantierWritable).
+export const REFUS_CHANTIER_CLOTURE_FICHE = 'Ce chantier est clôturé : seul un administrateur peut encore le modifier.';
+export const REFUS_CHANTIER_CLOTURE_COMMERCIAL = 'Ce chantier est clôturé : seul un administrateur peut encore en changer le commercial.';
+
+// Refus d'une écriture sur un chantier, avec son statut HTTP, levé dans une transaction et rendu tel quel.
+export class RefusChantier extends Error {
+  constructor(readonly statut: number, message: string) { super(message); }
+}
+
+// Modification de la fiche ou du commercial d'un chantier, dans cet ordre : 404 pour qui n'en est pas
+// titulaire (hors administration), 403 pour un technicien, 409 pour une affaire annulée, puis 403 hors
+// administration pour un chantier clôturé. Appliquée sur la ligne verrouillée, dans la transaction de
+// l'enregistrement : un changement de titulaire ou de statut validé pendant l'attente fait foi.
+export function refusEcritureChantier(
+  user: { id: string; role: string },
+  chantier: { statut: string; responsableId: string | null },
+  refus: { technicien: string; annulee: string; cloture: string },
+): RefusChantier | null {
+  const admin = isAdminRole(user.role);
+  if (!admin && chantier.responsableId !== user.id) return new RefusChantier(404, 'Chantier introuvable');
+  if (user.role === ROLE_TECHNICIEN) return new RefusChantier(403, refus.technicien);
+  if (chantier.statut === 'ANNULE') return new RefusChantier(409, refus.annulee);
+  if (!admin && chantier.statut !== 'EN_COURS') return new RefusChantier(403, refus.cloture);
+  return null;
+}
+export const REFUS_FICHE = { technicien: REFUS_TECHNICIEN_MODIFICATION, annulee: REFUS_AFFAIRE_ANNULEE_FICHE, cloture: REFUS_CHANTIER_CLOTURE_FICHE };
+export const REFUS_COMMERCIAL = { technicien: REFUS_TECHNICIEN_COMMERCIAL, annulee: REFUS_AFFAIRE_ANNULEE_COMMERCIAL, cloture: REFUS_CHANTIER_CLOTURE_COMMERCIAL };
+
 // Clôture d'une affaire en cours : l'administration et les directeurs, sur tout chantier
 // (décision de Nelson du 14-10-2026) ; son responsable s'il n'est pas technicien (un conducteur
 // clôture l'affaire dont il est chargé) ; et, pour l'affaire d'un technicien, les comptes

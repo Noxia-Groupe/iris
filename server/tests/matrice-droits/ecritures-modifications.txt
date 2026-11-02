@@ -295,7 +295,7 @@ AD | PATCH /api/chantiers/:id/commercial | chantier-ac | défaut, corps commerci
 AD | PATCH /api/chantiers/:id/commercial | chantier-ad | défaut, corps commercialId vide | 400 « Un chantier doit toujours avoir un commercial rattaché. » inchangé
 AD | PATCH /api/chantiers/:id/commercial | chantier-ad | défaut, corps commercialId=COM | 200 écrit (Chantier,JournalSaisieChantier)
 AD | PATCH /api/chantiers/:id/commercial | chantier-annule | défaut, corps commercialId vide | 400 « Un chantier doit toujours avoir un commercial rattaché. » inchangé
-AD | PATCH /api/chantiers/:id/commercial | chantier-annule | défaut, corps commercialId=COM | 200 écrit (Chantier,JournalSaisieChantier)
+AD | PATCH /api/chantiers/:id/commercial | chantier-annule | défaut, corps commercialId=COM | 409 « Cette affaire est annulée : son commercial ne change plus. » inchangé
 AD | PATCH /api/chantiers/:id/commercial | chantier-autre | défaut, corps commercialId vide | 400 « Un chantier doit toujours avoir un commercial rattaché. » inchangé
 AD | PATCH /api/chantiers/:id/commercial | chantier-autre | défaut, corps commercialId=COM | 200 écrit (Chantier,JournalSaisieChantier)
 AD | PATCH /api/chantiers/:id/commercial | chantier-com | défaut, corps commercialId vide | 400 « Un chantier doit toujours avoir un commercial rattaché. » inchangé
@@ -322,7 +322,7 @@ AD | PATCH /api/chantiers/:id/commercial | chantier-termine-encaisse | défaut, 
 AD | PATCH /api/chantiers/:id/commercial | chantier-termine-encaisse | défaut, corps commercialId=COM | 200 écrit (Chantier,JournalSaisieChantier)
 AD | PATCH /api/chantiers/:id/encaisse | chantier-ac | défaut, corps encaisse=oui | 200 écrit (Chantier,JournalSaisieChantier)
 AD | PATCH /api/chantiers/:id/encaisse | chantier-ad | défaut, corps encaisse=oui | 200 écrit (Chantier,JournalSaisieChantier)
-AD | PATCH /api/chantiers/:id/encaisse | chantier-annule | défaut, corps encaisse=oui | 200 écrit (Chantier,JournalSaisieChantier)
+AD | PATCH /api/chantiers/:id/encaisse | chantier-annule | défaut, corps encaisse=oui | 409 « Cette affaire est annulée : elle ne peut pas être encaissée. » inchangé
 AD | PATCH /api/chantiers/:id/encaisse | chantier-autre | défaut, corps encaisse=oui | 200 écrit (Chantier,JournalSaisieChantier)
 AD | PATCH /api/chantiers/:id/encaisse | chantier-com | défaut, corps encaisse=oui | 200 écrit (Chantier,JournalSaisieChantier)
 AD | PATCH /api/chantiers/:id/encaisse | chantier-com-titulaire | défaut, corps encaisse=oui | 200 écrit (Chantier,JournalSaisieChantier)
@@ -598,7 +598,7 @@ AD-COM | PATCH /api/chantiers/:id/commercial | chantier-ac | défaut, corps comm
 AD-COM | PATCH /api/chantiers/:id/commercial | chantier-ad | défaut, corps commercialId vide | 400 « Un chantier doit toujours avoir un commercial rattaché. » inchangé
 AD-COM | PATCH /api/chantiers/:id/commercial | chantier-ad | défaut, corps commercialId=COM | 200 écrit (Chantier,JournalSaisieChantier)
 AD-COM | PATCH /api/chantiers/:id/commercial | chantier-annule | défaut, corps commercialId vide | 400 « Un chantier doit toujours avoir un commercial rattaché. » inchangé
-AD-COM | PATCH /api/chantiers/:id/commercial | chantier-annule | défaut, corps commercialId=COM | 200 écrit (Chantier,JournalSaisieChantier)
+AD-COM | PATCH /api/chantiers/:id/commercial | chantier-annule | défaut, corps commercialId=COM | 409 « Cette affaire est annulée : son commercial ne change plus. » inchangé
 AD-COM | PATCH /api/chantiers/:id/commercial | chantier-autre | défaut, corps commercialId vide | 400 « Un chantier doit toujours avoir un commercial rattaché. » inchangé
 AD-COM | PATCH /api/chantiers/:id/commercial | chantier-autre | défaut, corps commercialId=COM | 200 écrit (Chantier,JournalSaisieChantier)
 AD-COM | PATCH /api/chantiers/:id/commercial | chantier-com | défaut, corps commercialId vide | 400 « Un chantier doit toujours avoir un commercial rattaché. » inchangé
@@ -625,7 +625,7 @@ AD-COM | PATCH /api/chantiers/:id/commercial | chantier-termine-encaisse | défa
 AD-COM | PATCH /api/chantiers/:id/commercial | chantier-termine-encaisse | défaut, corps commercialId=COM | 200 écrit (Chantier,JournalSaisieChantier)
 AD-COM | PATCH /api/chantiers/:id/encaisse | chantier-ac | défaut, corps encaisse=oui | 200 écrit (Chantier,JournalSaisieChantier)
 AD-COM | PATCH /api/chantiers/:id/encaisse | chantier-ad | défaut, corps encaisse=oui | 200 écrit (Chantier,JournalSaisieChantier)
-AD-COM | PATCH /api/chantiers/:id/encaisse | chantier-annule | défaut, corps encaisse=oui | 200 écrit (Chantier,JournalSaisieChantier)
+AD-COM | PATCH /api/chantiers/:id/encaisse | chantier-annule | défaut, corps encaisse=oui | 409 « Cette affaire est annulée : elle ne peut pas être encaissée. » inchangé
 AD-COM | PATCH /api/chantiers/:id/encaisse | chantier-autre | défaut, corps encaisse=oui | 200 écrit (Chantier,JournalSaisieChantier)
 AD-COM | PATCH /api/chantiers/:id/encaisse | chantier-com | défaut, corps encaisse=oui | 200 écrit (Chantier,JournalSaisieChantier)
 AD-COM | PATCH /api/chantiers/:id/encaisse | chantier-com-titulaire | défaut, corps encaisse=oui | 200 écrit (Chantier,JournalSaisieChantier)
@@ -1337,16 +1337,16 @@ CT | PATCH /api/chantiers/:id | chantier-tech-branche-resp | défaut, corps clie
 CT | PATCH /api/chantiers/:id | chantier-tech-branche-resp | défaut, corps nom, budgets par poste et heures vendues | 404 « Chantier introuvable » inchangé
 CT | PATCH /api/chantiers/:id | chantier-tech-branche-resp | défaut, corps responsableId=autre conducteur | 404 « Chantier introuvable » inchangé
 CT | PATCH /api/chantiers/:id | chantier-tech-branche-resp | défaut, corps statut=TERMINE seul | 404 « Chantier introuvable » inchangé
-CT | PATCH /api/chantiers/:id | chantier-termine | défaut, corps clientId=client-second seul | 200 inchangé
-CT | PATCH /api/chantiers/:id | chantier-termine | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
-CT | PATCH /api/chantiers/:id | chantier-termine | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
-CT | PATCH /api/chantiers/:id | chantier-termine | défaut, corps statut=TERMINE seul | 200 inchangé
+CT | PATCH /api/chantiers/:id | chantier-termine | défaut, corps clientId=client-second seul | 403 « Ce chantier est clôturé : seul un administrateur peut encore le modifier. » inchangé
+CT | PATCH /api/chantiers/:id | chantier-termine | défaut, corps nom, budgets par poste et heures vendues | 403 « Ce chantier est clôturé : seul un administrateur peut encore le modifier. » inchangé
+CT | PATCH /api/chantiers/:id | chantier-termine | défaut, corps responsableId=autre conducteur | 403 « Ce chantier est clôturé : seul un administrateur peut encore le modifier. » inchangé
+CT | PATCH /api/chantiers/:id | chantier-termine | défaut, corps statut=TERMINE seul | 403 « Ce chantier est clôturé : seul un administrateur peut encore le modifier. » inchangé
 CT | PATCH /api/chantiers/:id/commercial | chantier-ac | défaut, corps commercialId vide | 404 « Chantier introuvable » inchangé
 CT | PATCH /api/chantiers/:id/commercial | chantier-ac | défaut, corps commercialId=COM | 404 « Chantier introuvable » inchangé
 CT | PATCH /api/chantiers/:id/commercial | chantier-ad | défaut, corps commercialId vide | 404 « Chantier introuvable » inchangé
 CT | PATCH /api/chantiers/:id/commercial | chantier-ad | défaut, corps commercialId=COM | 404 « Chantier introuvable » inchangé
 CT | PATCH /api/chantiers/:id/commercial | chantier-annule | défaut, corps commercialId vide | 400 « Un chantier doit toujours avoir un commercial rattaché. » inchangé
-CT | PATCH /api/chantiers/:id/commercial | chantier-annule | défaut, corps commercialId=COM | 200 écrit (Chantier,JournalSaisieChantier)
+CT | PATCH /api/chantiers/:id/commercial | chantier-annule | défaut, corps commercialId=COM | 409 « Cette affaire est annulée : son commercial ne change plus. » inchangé
 CT | PATCH /api/chantiers/:id/commercial | chantier-autre | défaut, corps commercialId vide | 404 « Chantier introuvable » inchangé
 CT | PATCH /api/chantiers/:id/commercial | chantier-autre | défaut, corps commercialId=COM | 404 « Chantier introuvable » inchangé
 CT | PATCH /api/chantiers/:id/commercial | chantier-com | défaut, corps commercialId vide | 404 « Chantier introuvable » inchangé
@@ -1368,9 +1368,9 @@ CT | PATCH /api/chantiers/:id/commercial | chantier-resp | défaut, corps commer
 CT | PATCH /api/chantiers/:id/commercial | chantier-tech-branche-resp | défaut, corps commercialId vide | 404 « Chantier introuvable » inchangé
 CT | PATCH /api/chantiers/:id/commercial | chantier-tech-branche-resp | défaut, corps commercialId=COM | 404 « Chantier introuvable » inchangé
 CT | PATCH /api/chantiers/:id/commercial | chantier-termine | défaut, corps commercialId vide | 400 « Un chantier doit toujours avoir un commercial rattaché. » inchangé
-CT | PATCH /api/chantiers/:id/commercial | chantier-termine | défaut, corps commercialId=COM | 200 écrit (Chantier,JournalSaisieChantier)
+CT | PATCH /api/chantiers/:id/commercial | chantier-termine | défaut, corps commercialId=COM | 403 « Ce chantier est clôturé : seul un administrateur peut encore en changer le commercial. » inchangé
 CT | PATCH /api/chantiers/:id/commercial | chantier-termine-encaisse | défaut, corps commercialId vide | 400 « Un chantier doit toujours avoir un commercial rattaché. » inchangé
-CT | PATCH /api/chantiers/:id/commercial | chantier-termine-encaisse | défaut, corps commercialId=COM | 200 écrit (Chantier,JournalSaisieChantier)
+CT | PATCH /api/chantiers/:id/commercial | chantier-termine-encaisse | défaut, corps commercialId=COM | 403 « Ce chantier est clôturé : seul un administrateur peut encore en changer le commercial. » inchangé
 CT | PATCH /api/devis/:id | devis-brouillon | droit devis, corps client, objet et ligne | 200 écrit (Devis,DevisLigne)
 CT | PATCH /api/devis/:id | devis-brouillon | droit devis:write, corps client, objet et ligne | 200 écrit (Devis,DevisLigne)
 CT | PATCH /api/devis/:id | devis-converti | droit devis, corps client, objet et ligne | 409 « Ce devis est signé : créez une nouvelle révision brouillon pour le modifier. » inchangé
@@ -2561,7 +2561,7 @@ SA | PATCH /api/chantiers/:id/commercial | chantier-ac | défaut, corps commerci
 SA | PATCH /api/chantiers/:id/commercial | chantier-ad | défaut, corps commercialId vide | 400 « Un chantier doit toujours avoir un commercial rattaché. » inchangé
 SA | PATCH /api/chantiers/:id/commercial | chantier-ad | défaut, corps commercialId=COM | 200 écrit (Chantier,JournalSaisieChantier)
 SA | PATCH /api/chantiers/:id/commercial | chantier-annule | défaut, corps commercialId vide | 400 « Un chantier doit toujours avoir un commercial rattaché. » inchangé
-SA | PATCH /api/chantiers/:id/commercial | chantier-annule | défaut, corps commercialId=COM | 200 écrit (Chantier,JournalSaisieChantier)
+SA | PATCH /api/chantiers/:id/commercial | chantier-annule | défaut, corps commercialId=COM | 409 « Cette affaire est annulée : son commercial ne change plus. » inchangé
 SA | PATCH /api/chantiers/:id/commercial | chantier-autre | défaut, corps commercialId vide | 400 « Un chantier doit toujours avoir un commercial rattaché. » inchangé
 SA | PATCH /api/chantiers/:id/commercial | chantier-autre | défaut, corps commercialId=COM | 200 écrit (Chantier,JournalSaisieChantier)
 SA | PATCH /api/chantiers/:id/commercial | chantier-com | défaut, corps commercialId vide | 400 « Un chantier doit toujours avoir un commercial rattaché. » inchangé
@@ -2588,7 +2588,7 @@ SA | PATCH /api/chantiers/:id/commercial | chantier-termine-encaisse | défaut, 
 SA | PATCH /api/chantiers/:id/commercial | chantier-termine-encaisse | défaut, corps commercialId=COM | 200 écrit (Chantier,JournalSaisieChantier)
 SA | PATCH /api/chantiers/:id/encaisse | chantier-ac | défaut, corps encaisse=oui | 200 écrit (Chantier,JournalSaisieChantier)
 SA | PATCH /api/chantiers/:id/encaisse | chantier-ad | défaut, corps encaisse=oui | 200 écrit (Chantier,JournalSaisieChantier)
-SA | PATCH /api/chantiers/:id/encaisse | chantier-annule | défaut, corps encaisse=oui | 200 écrit (Chantier,JournalSaisieChantier)
+SA | PATCH /api/chantiers/:id/encaisse | chantier-annule | défaut, corps encaisse=oui | 409 « Cette affaire est annulée : elle ne peut pas être encaissée. » inchangé
 SA | PATCH /api/chantiers/:id/encaisse | chantier-autre | défaut, corps encaisse=oui | 200 écrit (Chantier,JournalSaisieChantier)
 SA | PATCH /api/chantiers/:id/encaisse | chantier-com | défaut, corps encaisse=oui | 200 écrit (Chantier,JournalSaisieChantier)
 SA | PATCH /api/chantiers/:id/encaisse | chantier-com-titulaire | défaut, corps encaisse=oui | 200 écrit (Chantier,JournalSaisieChantier)

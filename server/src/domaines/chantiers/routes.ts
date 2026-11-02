@@ -17,8 +17,8 @@ import { getCompanySettings } from '../administration/metier';
 import { normaliserNumeroDevis, erreurNumeroDevis, numeroDevisDejaPris } from '../devis/metier';
 import { sanitizeTypes, refusTitulaire, refusCommercial, journaliserChangementChantier, compteAuJournal } from './metier';
 import {
-  voitRentabilite, REFUS_TECHNICIEN_MODIFICATION, REFUS_TECHNICIEN_COMMERCIAL, REFUS_TECHNICIEN_CLOTURE, peutCloturerChantier,
-  chantierSelonRentabilite,
+  voitRentabilite, REFUS_TECHNICIEN_COMMERCIAL, REFUS_TECHNICIEN_CLOTURE, peutCloturerChantier,
+  chantierSelonRentabilite, RefusChantier, refusEcritureChantier, REFUS_FICHE, REFUS_COMMERCIAL, REFUS_AFFAIRE_ANNULEE_STATUT,
 } from './droits';
 import { contexteSuivi, serializeChantier } from './suivi';
 import { avecCoutsSuites } from './coutsSuites';
@@ -227,18 +227,18 @@ export function enregistrerRoutesChantiers(app: Express): void {
         where: { id: paramId(req) },
         select: { id: true, clientId: true, numeroDevis: true, responsableId: true, statut: true },
       });
-      if (!existant || (!isAdminRole(authUser.role) && existant.responsableId !== authUser.id)) {
-        return res.status(404).json({ error: 'Chantier introuvable' });
-      }
-      // Un technicien consulte l'affaire dont il est chargé, sans pouvoir la modifier
-      // (décision de Nelson du 13-10-2026) : le refus le lui dit en clair.
-      if (authUser.role === ROLE_TECHNICIEN) {
-        return res.status(403).json({ error: REFUS_TECHNICIEN_MODIFICATION });
-      }
-      // Une affaire annulée est close : la corriger reviendrait à la faire revivre sans que
-      // le devis annulé, lui, ait bougé.
-      if (existant.statut === 'ANNULE') {
-        return res.status(409).json({ error: 'Cette affaire est annulée : elle n’est plus modifiable.' });
+      if (!existant) return res.status(404).json({ error: 'Chantier introuvable' });
+      // Hors titulaire, 404. Un technicien consulte l'affaire dont il est chargé, sans pouvoir la
+      // modifier (décision de Nelson du 13-10-2026) : le refus le lui dit en clair. Une affaire annulée
+      // est close : la corriger reviendrait à la faire revivre sans que le devis annulé, lui, ait bougé.
+      // Un chantier clôturé ne se modifie plus que par l'administration. Contrôles repris sur la ligne
+      // verrouillée, dans la transaction de l'enregistrement (cf. refusEcritureChantier).
+      const refus = refusEcritureChantier(authUser, existant, REFUS_FICHE);
+      if (refus) return res.status(refus.statut).json({ error: refus.message });
+      // Un chantier ne s'annule que par son devis, qui en vérifie les conditions (POST
+      // /api/devis/:id/annulation) : comme à la clôture, seuls EN_COURS et TERMINE sont admis (#285).
+      if (isAdminRole(authUser.role) && 'statut' in req.body && req.body.statut !== 'EN_COURS' && req.body.statut !== 'TERMINE') {
+        return res.status(400).json({ error: 'Statut invalide.' });
       }
 
       // 'statut' n'est modifiable ici que par un admin : la clôture et surtout la RÉOUVERTURE
@@ -325,13 +325,15 @@ export function enregistrerRoutesChantiers(app: Express): void {
       if ('baremeReduit' in req.body) data.baremeReduit = !!req.body.baremeReduit;
 
       const chantier = await transactionVerifiee(async (tx) => {
+        // Verrou de la ligne, pour toute modification (#285) : une annulation du devis, une clôture ou
+        // un changement de titulaire validés pendant l'attente font foi, quels que soient les champs
+        // envoyés. Pour un changement de client, une intervention créée en même temps sur cette affaire
+        // attend la fin du changement, ou le fait refuser si elle s'enregistre d'abord (cf. POST
+        // /api/interventions) ; deux changements simultanés se suivent au lieu de se croiser.
+        const [verrouille] = await tx.$queryRaw<Array<{ statut: string; responsableId: string | null; clientId: string | null; client: string }>>(Prisma.sql`SELECT "statut", "responsableId", "clientId", "client" FROM "Chantier" WHERE "id" = ${existant.id} FOR UPDATE`);
+        const refusSousVerrou = refusEcritureChantier(authUser, verrouille, REFUS_FICHE);
+        if (refusSousVerrou) throw refusSousVerrou;
         if (cibleClient) {
-          // Verrou de la ligne : une intervention créée en même temps sur cette affaire attend la
-          // fin du changement, ou le fait refuser si elle s'enregistre d'abord (cf. POST
-          // /api/interventions) ; deux changements simultanés se suivent au lieu de se croiser.
-          const [verrouille] = await tx.$queryRaw<Array<{ clientId: string | null; client: string; statut: string }>>(Prisma.sql`SELECT "clientId", "client", "statut" FROM "Chantier" WHERE "id" = ${existant.id} FOR UPDATE`);
-          // Relu sous verrou : une annulation du devis enregistrée entre-temps clôt l'affaire.
-          if (verrouille.statut === 'ANNULE') throw new ChangementClientRefuse('Cette affaire est annulée : elle n’est plus modifiable.');
           if (verrouille.clientId !== cibleClient.id) {
             if (await tx.facture.count({ where: { OR: [
               { chantierId: existant.id },
@@ -370,9 +372,8 @@ export function enregistrerRoutesChantiers(app: Express): void {
         }
         // Réattribution du titulaire (#181) : relue sur la ligne verrouillée, journalisée si elle change.
         if (typeof data.responsableId === 'string') {
-          const [ligne] = await tx.$queryRaw<Array<{ responsableId: string | null }>>(Prisma.sql`SELECT "responsableId" FROM "Chantier" WHERE "id" = ${existant.id} FOR UPDATE`);
-          if (ligne.responsableId !== data.responsableId) {
-            const avant = await compteAuJournal(tx, ligne.responsableId);
+          if (verrouille.responsableId !== data.responsableId) {
+            const avant = await compteAuJournal(tx, verrouille.responsableId);
             const apres = await compteAuJournal(tx, data.responsableId);
             await journaliserChangementChantier(tx, existant.id, authUser, 'CHANGEMENT_TITULAIRE',
               { responsableId: avant.id, nom: avant.nom }, { responsableId: apres.id, nom: apres.nom });
@@ -383,6 +384,7 @@ export function enregistrerRoutesChantiers(app: Express): void {
       res.json(await chantierSelonRentabilite(req, chantier));
     } catch (error) {
       if (error instanceof ChangementClientRefuse) return res.status(409).json({ error: error.message });
+      if (error instanceof RefusChantier) return res.status(error.statut).json({ error: error.message });
       res.status(500).json({ error: 'Error updating chantier' });
     }
   });
@@ -428,28 +430,35 @@ export function enregistrerRoutesChantiers(app: Express): void {
       }
       // On ne rouvre pas, ni ne clôture, une affaire annulée : sa fin est déjà écrite, avec
       // son motif. La sortir de cet état supposerait d'annuler l'annulation, ce qui n'existe pas.
-      if (chantier.statut === 'ANNULE') {
-        return res.status(409).json({ error: 'Cette affaire est annulée : son statut ne change plus.' });
-      }
+      // Contrôles repris sur la ligne verrouillée : une annulation du devis validée pendant
+      // l'attente ne finit pas en chantier terminé portant une date d'annulation (#285).
+      const refusStatut = (statut: string) => statut === 'ANNULE'
+        ? new RefusChantier(409, REFUS_AFFAIRE_ANNULEE_STATUT)
+        : !isAdmin && (nextStatut !== 'TERMINE' || statut !== 'EN_COURS')
+          ? new RefusChantier(403, 'Seul un administrateur peut réouvrir un chantier clôturé.')
+          : null;
+      const refus = refusStatut(chantier.statut);
+      if (refus) return res.status(refus.statut).json({ error: refus.message });
 
-      if (!isAdmin && (nextStatut !== 'TERMINE' || chantier.statut !== 'EN_COURS')) {
-        return res.status(403).json({ error: 'Seul un administrateur peut réouvrir un chantier clôturé.' });
-      }
-
-      // La date de clôture sert de mois de rattachement au résultat commercial (CA et marge
-      // validés, cf. /api/stats/commerciaux) : on la renseigne automatiquement à la clôture
-      // si elle n'a pas déjà été saisie à la main.
-      const data: Record<string, unknown> = { statut: nextStatut };
-      if (nextStatut === 'TERMINE' && !chantier.dateFin) {
-        // `dateFin` est une date-seule : elle doit retenir le jour civil de l'entreprise
-        // et rester à minuit UTC, comme toute date métier stockée en base.
-        const societe = await getCompanySettings();
-        data.dateFin = new Date(`${aujourdHuiEntreprise(societe.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT)}T00:00:00.000Z`);
-      }
-
-      const updated = await prisma.chantier.update({ where: { id: chantier.id }, data });
+      // `dateFin` est une date-seule : elle doit retenir le jour civil de l'entreprise
+      // et rester à minuit UTC, comme toute date métier stockée en base.
+      const societe = nextStatut === 'TERMINE' ? await getCompanySettings() : null;
+      const updated = await transactionVerifiee(async (tx) => {
+        const [ligne] = await tx.$queryRaw<Array<{ statut: string; dateFin: Date | null }>>(Prisma.sql`SELECT "statut", "dateFin" FROM "Chantier" WHERE "id" = ${chantier.id} FOR UPDATE`);
+        const refusSousVerrou = refusStatut(ligne.statut);
+        if (refusSousVerrou) throw refusSousVerrou;
+        // La date de clôture sert de mois de rattachement au résultat commercial (CA et marge
+        // validés, cf. /api/stats/commerciaux) : on la renseigne automatiquement à la clôture
+        // si elle n'a pas déjà été saisie à la main.
+        const data: Record<string, unknown> = { statut: nextStatut };
+        if (societe && !ligne.dateFin) {
+          data.dateFin = new Date(`${aujourdHuiEntreprise(societe.fuseauHoraire || FUSEAU_HORAIRE_PAR_DEFAUT)}T00:00:00.000Z`);
+        }
+        return tx.chantier.update({ where: { id: chantier.id }, data });
+      });
       res.json(await chantierSelonRentabilite(req, updated));
     } catch (error) {
+      if (error instanceof RefusChantier) return res.status(error.statut).json({ error: error.message });
       res.status(500).json({ error: 'Error updating chantier status' });
     }
   });
@@ -479,9 +488,14 @@ export function enregistrerRoutesChantiers(app: Express): void {
       const refus = await refusCommercial(commercialId ?? '', chantier.commercialId);
       if (refus) return res.status(400).json({ error: refus });
 
-      // Réattribution journalisée (#181), comparée sur la ligne verrouillée.
+      // Réattribution journalisée (#181), comparée sur la ligne verrouillée. Le titulaire et le statut y
+      // sont relus (#285), après la validation du corps : le commercial d'une affaire annulée ne change
+      // plus, et celui d'un chantier clôturé ne se change que par l'administration, car il porte le CA
+      // et la marge validés une fois le chantier encaissé (cf. refusEcritureChantier).
       const updated = await transactionVerifiee(async (tx) => {
-        const [ligne] = await tx.$queryRaw<Array<{ commercialId: string | null }>>(Prisma.sql`SELECT "commercialId" FROM "Chantier" WHERE "id" = ${chantier.id} FOR UPDATE`);
+        const [ligne] = await tx.$queryRaw<Array<{ commercialId: string | null; statut: string; responsableId: string | null }>>(Prisma.sql`SELECT "commercialId", "statut", "responsableId" FROM "Chantier" WHERE "id" = ${chantier.id} FOR UPDATE`);
+        const refusSousVerrou = refusEcritureChantier(authUser, ligne, REFUS_COMMERCIAL);
+        if (refusSousVerrou) throw refusSousVerrou;
         if (ligne.commercialId !== commercialId) {
           const avant = await compteAuJournal(tx, ligne.commercialId);
           const apres = await compteAuJournal(tx, commercialId);
@@ -496,6 +510,7 @@ export function enregistrerRoutesChantiers(app: Express): void {
       });
       res.json(await chantierSelonRentabilite(req, updated));
     } catch (error) {
+      if (error instanceof RefusChantier) return res.status(error.statut).json({ error: error.message });
       res.status(500).json({ error: 'Error updating commercial' });
     }
   });

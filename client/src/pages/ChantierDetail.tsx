@@ -44,10 +44,7 @@ type FactureLiee = {
   totalTtc: number;
 };
 
-const STATUT_LABELS: Record<string, string> = {
-  EN_COURS: 'En cours',
-  TERMINE: 'Terminé',
-};
+const STATUT_LABELS: Record<string, string> = { EN_COURS: 'En cours', TERMINE: 'Terminé', ANNULE: 'Annulé' };
 
 const ChantierDetail = () => {
   const companyTimezone = useCompanyTimezone();
@@ -643,10 +640,10 @@ const ChantierDetail = () => {
   const isTermine = chantier.statut !== 'EN_COURS';
   const joursEcoules = Math.max(0, joursCivilsEntre(debutCivil, finCivile && isTermine ? finCivile : jourCivilEntrepriseIso(companyTimezone)));
 
-  // La fiche (nom, client, dates, budgets, devis, responsable) et le commercial rattaché
-  // sont modifiables par l'admin ou par le conducteur responsable du chantier, qui corrige
-  // ainsi lui-même ses saisies — jamais par le commercial, ni par un autre conducteur.
-  const canEditChantier = isAdminRole(userRole) || (userRole === 'CONDUCTEUR_TRAVAUX' && chantier.responsable?.id === currentUser?.id);
+  // La fiche (nom, client, dates, budgets, devis, responsable) et le commercial rattaché sont modifiables par l'admin, ou par
+  // le conducteur responsable tant que le chantier est en cours (clôturé : admin seule, décision du 02-11-2026) ; jamais par
+  // le commercial, ni par un autre conducteur, et par personne sur une affaire annulée (le serveur refuse ces écritures).
+  const canEditChantier = chantier.statut !== 'ANNULE' && (isAdminRole(userRole) || (userRole === 'CONDUCTEUR_TRAVAUX' && chantier.responsable?.id === currentUser?.id && chantier.statut === 'EN_COURS'));
   // Un technicien consulte sans modifier, et ne voit aucun montant (budgets par poste, coûts,
   // taux) : le serveur ne les lui envoie pas, la fiche n'en affiche pas les sections.
   const estTechnicien = userRole === ROLE_TECHNICIEN;
@@ -713,7 +710,7 @@ const ChantierDetail = () => {
               {chantier.baremeReduit && (
                 <span className="text-[11px] font-semibold px-2.5 py-1 bg-amber-50 text-amber-700 rounded-full">{libelleBaremeReduit}</span>
               )}
-              {isTermine && (isAdminRole(userRole) ? (
+              {chantier.statut === 'TERMINE' && (isAdminRole(userRole) ? (
                 <button
                   type="button"
                   onClick={handleToggleEncaisse}
@@ -787,7 +784,7 @@ const ChantierDetail = () => {
               le résultat commercial du mois (CA et marge validés).
               Le badge ci-dessus permet déjà de basculer ce statut, mais reste discret parmi
               les autres badges — cette bannière rend l'action impossible à manquer. */}
-          {isTermine && !chantier.encaisse && isAdminRole(userRole) && (
+          {chantier.statut === 'TERMINE' && !chantier.encaisse && isAdminRole(userRole) && (
             <div className="mb-6 p-4 rounded-xl border-l-8 border-amber-500 bg-amber-50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <div className="font-bold text-amber-800">Chantier terminé, en attente d'encaissement</div>

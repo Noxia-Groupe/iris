@@ -83,8 +83,11 @@ export async function annulerDevisEnCascade(tx: Prisma.TransactionClient, devisI
     await verrouillerContratMaintenance(tx, contratId);
     contrat = await tx.contratMaintenance.findUnique({ where: { id: contratId } });
   }
+  // Relu sous le verrou du chantier, que prend aussi l'encaissement (PATCH /api/chantiers/:id/encaisse).
+  let chantierEncaisse = false;
   if (chantierId) {
-    await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "Chantier" WHERE "id" = ${chantierId} FOR NO KEY UPDATE`);
+    const [chantier] = await tx.$queryRaw<Array<{ encaisse: boolean }>>(Prisma.sql`SELECT "encaisse" FROM "Chantier" WHERE "id" = ${chantierId} FOR NO KEY UPDATE`);
+    chantierEncaisse = !!chantier?.encaisse;
     // Le verrou porte sur les écritures VIVANTES : une ligne déjà archivée n'engage rien. Les
     // saisies ne verrouillent pas le chantier : course connue, non corrigée (constat « Saisie sur un
     // chantier pendant l'annulation de son devis » de docs/ROADMAP-PASSATION.md).
@@ -129,6 +132,12 @@ export async function annulerDevisEnCascade(tx: Prisma.TransactionClient, devisI
   const visiteEnCours = visites.find(v => v.statut === 'EN_COURS');
   if (visiteEnCours) {
     throw new DevisConflitError(`Annulation impossible : la visite ${visiteEnCours.reference} du contrat issu de ce devis est en cours. Terminez-la ou annulez-la d’abord depuis sa fiche.`);
+  }
+  // Une affaire annulée ne peut pas être encaissée (décision de Nelson du 02-11-2026, #285) : un chantier
+  // encaissé ne s'annule donc pas, ce qui lui retirerait le CA et la marge validés de son commercial. Ce
+  // refus vient après tous les autres, dont les messages ne changent pas.
+  if (chantierEncaisse) {
+    throw new DevisConflitError('Annulation impossible : ce chantier est déjà encaissé. Une affaire encaissée ne s’annule pas.');
   }
 
   // Écritures, une fois tous les contrôles passés.

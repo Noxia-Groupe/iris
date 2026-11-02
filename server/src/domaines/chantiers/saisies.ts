@@ -14,7 +14,7 @@ import { decimalToNumber } from '../../commun/montants';
 import { nombreDecimalNonNegatif, motifCorrectionValide, motifRestaurationValide } from '../../commun/validation';
 import { valeurJournal } from '../../commun/journal-administration';
 import { CHANTIER_LITE_SELECT, journaliserChangementChantier } from './metier';
-import { requireTravauxWrite, requireTravauxArchive } from './droits';
+import { requireTravauxWrite, requireTravauxArchive, RefusChantier, REFUS_AFFAIRE_ANNULEE_ENCAISSEMENT } from './droits';
 
 // Un chantier clôturé (TERMINE) devient en lecture seule pour les conducteurs : ils ne
 // peuvent plus y ajouter d'heures ou de dépenses ; un admin garde un accès total (c'est
@@ -401,13 +401,17 @@ export function enregistrerRoutesSaisiesTravaux(app: Express): void {
   // n'en découle (décision du 17-10-2026). Réservé aux admins ; togglable indépendamment
   // du statut Terminé/En cours. Chaque changement est journalisé (#181) ; un enregistrement à
   // l'identique ne change rien, pas même la date d'encaissement, et n'écrit aucune entrée.
+  // Une affaire annulée ne peut pas être encaissée (décision de Nelson du 02-11-2026, #285) : refus
+  // quel que soit le corps, l'enregistrement à l'identique compris, sur la ligne verrouillée, que
+  // prend aussi l'annulation du devis (devis/annulation.ts).
   app.patch('/api/chantiers/:id/encaisse', requireAuth, requireAdmin, async (req, res) => {
     try {
       const encaisse = !!req.body.encaisse;
       const id = paramId(req);
       const chantier = await transactionVerifiee(async (tx) => {
-        const [ligne] = await tx.$queryRaw<Array<{ encaisse: boolean; dateEncaissement: Date | null }>>(Prisma.sql`SELECT "encaisse", "dateEncaissement" FROM "Chantier" WHERE "id" = ${id} FOR UPDATE`);
+        const [ligne] = await tx.$queryRaw<Array<{ statut: string; encaisse: boolean; dateEncaissement: Date | null }>>(Prisma.sql`SELECT "statut", "encaisse", "dateEncaissement" FROM "Chantier" WHERE "id" = ${id} FOR UPDATE`);
         if (!ligne) return null;
+        if (ligne.statut === 'ANNULE') throw new RefusChantier(409, REFUS_AFFAIRE_ANNULEE_ENCAISSEMENT);
         if (ligne.encaisse === encaisse) return tx.chantier.findUniqueOrThrow({ where: { id } });
         const dateEncaissement = encaisse ? new Date() : null;
         await journaliserChangementChantier(tx, id, (req as AuthRequest).user!, 'CHANGEMENT_ENCAISSEMENT',
@@ -418,6 +422,7 @@ export function enregistrerRoutesSaisiesTravaux(app: Express): void {
       if (!chantier) return res.status(404).json({ error: 'Chantier introuvable' });
       res.json(decimalToNumber(chantier));
     } catch (error) {
+      if (error instanceof RefusChantier) return res.status(error.statut).json({ error: error.message });
       res.status(500).json({ error: 'Error updating encaissement' });
     }
   });
