@@ -114,7 +114,7 @@ POST /api/chantiers/:id/envois requireAuth#07b983da0ce5 > requireAdmin#72440b319
 POST /api/chantiers requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#5a2a6ae542c5
 PATCH /api/chantiers/:id requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#7562b7339ffa
 DELETE /api/chantiers/:id requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#c4bcd35fe13f
-PATCH /api/chantiers/:id/statut requireAuth#07b983da0ce5 > blockCommercialSeulement#f36b50e5b6cd > <anonymous>#4ab844b07f34
+PATCH /api/chantiers/:id/statut requireAuth#07b983da0ce5 > blockCommercialSeulement#f36b50e5b6cd > <anonymous>#7e280a3c7ca9
 PATCH /api/chantiers/:id/commercial requireAuth#07b983da0ce5 > blockCommercial#e6317a73d660 > <anonymous>#0c5a1625d12f
 GET /api/users requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#25aa992576b7
 POST /api/users requireAuth#07b983da0ce5 > requireAdmin#72440b3191ab > <anonymous>#d2a05dc6e5a0
