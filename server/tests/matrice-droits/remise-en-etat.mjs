@@ -198,7 +198,12 @@ export async function creerRemiseEnEtat({ url, nomBase, tables, connexionApplica
       changees: (apres) => tablesChangees(reference, apres),
       // Remet les tables nommées (et toutes les séquences), puis vérifie : empreinte de toute la base égale à la
       // référence, séquences comprises, et sonde d'immutabilité. `contexte` nomme le cas (compte, route, cible).
-      async remettre(changees, contexte) {
+      // `attendu` (D1a-5b) : l'empreinte que la base doit retrouver, quand ce n'est pas la référence. Un droit
+      // individuel donné par la route d'administration change le compte et le journal d'administration le temps
+      // d'un groupe de cas : les tables d'un cas sont recopiées depuis l'instantané, et la base doit retrouver l'état
+      // « avec le droit » relevé par l'appelant ; si le cas avait changé une table de cet état, elle reviendrait à la
+      // référence, et cette vérification le dirait. Sans `attendu`, la référence (D1a-5a).
+      async remettre(changees, contexte, attendu = reference) {
         const inconnues = changees.filter((nom) => !tables.includes(nom) && !nom.startsWith(PREFIXE_SEQUENCE));
         assert.deepEqual(inconnues, [], `${contexte} : écriture hors des tables de l’empreinte`);
         const remisesTables = changees.filter((nom) => tables.includes(nom));
@@ -206,8 +211,8 @@ export async function creerRemiseEnEtat({ url, nomBase, tables, connexionApplica
         remises += 1;
         await nettoyer(remisesTables);
         const apres = await empreinte();
-        const ecarts = tablesChangees(reference, apres);
-        assert.deepEqual(ecarts, [], `Remise en état incomplète après ${contexte} : tables changées par le cas ${changees.join(', ')} ; toujours différentes de la référence après la remise : ${ecarts.join(', ')}`);
+        const ecarts = tablesChangees(attendu, apres);
+        assert.deepEqual(ecarts, [], `Remise en état incomplète après ${contexte} : tables changées par le cas ${changees.join(', ')} ; toujours différentes de ${attendu === reference ? 'la référence' : 'l’état attendu'} après la remise : ${ecarts.join(', ')}`);
         await sondeImmutabilite(`après la remise de ${contexte}`);
       },
       sondeImmutabilite,

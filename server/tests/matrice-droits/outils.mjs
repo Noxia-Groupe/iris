@@ -241,6 +241,26 @@ function reponseSansEcriture(res, validationAvantDroit, messageDu400) {
 // Une ligne de matrice : compte, méthode et chemin, cible nommée, contexte (réglage), réponse. Champs séparés par
 // « | », sans espace en fin de ligne.
 export const SEPARATEUR = ' | ';
+
+// Garde « aucun montant » des matrices d'écritures réelles (D1a-5 ; cadrage v3, §3, ligne D1a-5 : « Les montants
+// restent hors de la référence »). Renforcée par #437 (C1 de son audit des montants), puis factorisée ici par D1a-5b
+// (note N6 du contrôle de #437). Rend les lignes qui portent un montant, quelle que soit sa forme (12.5, 150,
+// 12,50 €), ou un nombre hors du code de la réponse et des comptes d'objets d'un refus :
+//  - aucune ligne ne porte « € » ; le compte est l'un des comptes joués ; ni la cible ni le contexte n'ont de chiffre,
+//    sauf une cible nommée par la valeur fixe d'un paramètre qui ne désigne aucun dossier, admise expressément
+//    (`ciblesAdmises`, D1a-5b : « taux=20 », la valeur fixe du taux de TVA d'entrees.txt, donnees.mjs) ;
+//  - un 2xx s'écrit par son code seul, suivi de « inchangé » ou des tables écrites, et, avec `constat` (D1a-5b, champs
+//    ignorés en silence), d'un constat sans chiffre (« ; accesFinance=non ») ;
+//  - hors de son code, un refus ne porte de nombre que pour compter des objets (« 7 écriture(s) »).
+export function lignesAvecMontant(lignes, { comptes, constat = false, ciblesAdmises = [] }) {
+  const deuxCents = constat ? /^2\d\d (inchangé|écrit \([^()\d]+\))( ; [^\d;|]+)?$/ : /^2\d\d (inchangé|écrit \([^()\d]+\))$/;
+  return lignes.filter((l) => {
+    const [compte, , cible, contexte, reponse] = l.split(SEPARATEUR);
+    if (l.includes('€') || !comptes.includes(compte) || (/\d/.test(cible) && !ciblesAdmises.includes(cible)) || /\d/.test(contexte)) return true;
+    if (/^2\d\d /.test(reponse)) return !deuxCents.test(reponse);
+    return /\d/.test(reponse.replace(/^\d{3} /, '').replace(/\b\d+ [^\s()]+\(s\)/g, ''));
+  });
+}
 export function ligneMatrice({ compte, methode, chemin, cible, contexte = CONTEXTE_DEFAUT, reponse }) {
   const champs = [compte, `${methode} ${chemin}`, cible, contexte, reponse];
   for (const champ of champs) assert.ok(!String(champ).includes('|') && String(champ) === String(champ).trim() && !/\n/.test(champ), `champ de ligne invalide : ${champ}`);
