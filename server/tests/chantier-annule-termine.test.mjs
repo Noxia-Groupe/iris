@@ -866,6 +866,103 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await ligne(temoin.id)).statut, 'TERMINE');
     });
 
+    // #451 : quand le titulaire change pendant l'attente, le droit de clôturer, donc de poser la date de fin (mois du CA
+    // validé, commissions/metier.ts), est refait « avec le rôle du nouveau titulaire » (corps de la PR #453). Le
+    // responsable de la branche d'un technicien clôture l'affaire confiée pendant l'attente à un autre technicien de sa
+    // branche (200, date de fin posée), mais plus celle confiée à un conducteur de sa branche, que seul ce conducteur
+    // clôture (404, sans écriture ni journal). Écarte un droit refait sans les tiers hors directeur (mutant B3 de l'audit
+    // des montants de #453) et un droit refait avec le rôle de l'ancien titulaire, lu avant le verrou (mutant B4).
+    test('course : responsable de branche, titulaire changé pendant l’attente : le droit de clôturer est refait avec le rôle du nouveau titulaire', async () => {
+      const technicien = await creerCompte('TECHNICIEN', 'TECH-BRANCHE-A', { responsableHierarchiqueId: comptes.RESP.id });
+      const autreTechnicien = await creerCompte('TECHNICIEN', 'TECH-BRANCHE-B', { responsableHierarchiqueId: comptes.RESP.id });
+      const conducteur = await creerCompte('CONDUCTEUR_TRAVAUX', 'CT-BRANCHE', { responsableHierarchiqueId: comptes.RESP.id });
+      const confie = await creerChantier({ responsableId: technicien.id });
+      const { res } = await sousVerrou(confie.id, () => changerStatut(confie.id, { statut: 'TERMINE' }, comptes.RESP.auth), (tx) => tx.chantier.update({ where: { id: confie.id }, data: { responsableId: autreTechnicien.id } }));
+      assert.equal(res.status, 200, `confiée à un autre technicien de la branche : ${JSON.stringify(res.body)}`);
+      const close = await ligne(confie.id);
+      assert.deepEqual([close.statut, close.responsableId, !!close.dateFin], ['TERMINE', autreTechnicien.id, true], 'confiée à un autre technicien de la branche');
+      const chantier = await creerChantier({ responsableId: technicien.id });
+      const course = await sousVerrou(chantier.id, () => changerStatut(chantier.id, { statut: 'TERMINE' }, comptes.RESP.auth), (tx) => tx.chantier.update({ where: { id: chantier.id }, data: { responsableId: conducteur.id } }));
+      await courseRefusee(course, 404, REFUS.introuvable, 'clôture par le responsable de branche, affaire confiée pendant l’attente à un conducteur de sa branche');
+      const relu = await ligne(chantier.id);
+      assert.deepEqual([relu.statut, relu.dateFin, relu.responsableId], ['EN_COURS', null, conducteur.id]);
+      assert.equal((await journal(chantier.id)).length, 0);
+    });
+
+    // Audit des droits de #453 : cas limites du droit de clôturer relu sous le verrou. Refus (404, sans écriture ni date
+    // de fin) : chantier laissé sans titulaire ; technicien de la branche du responsable remplacé par un conducteur de
+    // cette branche (le responsable ne clôture, en tiers, que l'affaire d'un technicien) ; affaire d'un conducteur confiée
+    // à un technicien dont il est le N+1 (lecture retenue : un conducteur ne clôture que l'affaire dont il est chargé). Un
+    // titulaire et un statut changés ensemble rendent 404 avant 409 ou 403, sans rien révéler du statut. Écarte un
+    // contrôle sauté quand le chantier n'a plus de titulaire, le rôle de l'ancien titulaire relu à la place de celui du
+    // nouveau, et un contrôle du titulaire placé après celui du statut.
+    test('course : clôture, titulaire changé pendant l’attente, cas limites refusés : 404 avant le statut, sans écriture ni date de fin', async () => {
+      const techBranche = await creerCompte('TECHNICIEN', 'TECH-BRANCHE-A', { responsableHierarchiqueId: comptes.RESP.id });
+      const ctBranche = await creerCompte('CONDUCTEUR_TRAVAUX', 'CT-BRANCHE', { responsableHierarchiqueId: comptes.RESP.id });
+      const techDuCt = await creerCompte('TECHNICIEN', 'TECH-CT', { responsableHierarchiqueId: comptes.CT.id });
+      for (const [quoi, depart, auth, changement] of [
+        ['ancien titulaire, chantier laissé sans titulaire', {}, () => comptes.CT.auth, () => ({ responsableId: null })],
+        ['responsable, technicien de sa branche remplacé par aucun titulaire', { responsableId: techBranche.id }, () => comptes.RESP.auth, () => ({ responsableId: null })],
+        ['responsable, technicien de sa branche remplacé par un conducteur de sa branche', { responsableId: techBranche.id }, () => comptes.RESP.auth, () => ({ responsableId: ctBranche.id })],
+        ['conducteur, son affaire confiée à un technicien dont il est le N+1', {}, () => comptes.CT.auth, () => ({ responsableId: techDuCt.id })],
+        ['ancien titulaire, affaire aussi annulée', {}, () => comptes.CT.auth, () => ({ responsableId: comptes.CT2.id, ...ANNULATION() })],
+        ['ancien titulaire, chantier aussi clôturé', {}, () => comptes.CT.auth, () => ({ responsableId: comptes.CT2.id, statut: 'TERMINE' })],
+      ]) {
+        const chantier = await creerChantier(depart);
+        const course = await sousVerrou(chantier.id, () => changerStatut(chantier.id, { statut: 'TERMINE' }, auth()), (tx) => tx.chantier.update({ where: { id: chantier.id }, data: changement() }));
+        await courseRefusee(course, 404, REFUS.introuvable, `clôture par le ${quoi}`);
+        const relu = await ligne(chantier.id);
+        assert.deepEqual([relu.responsableId, relu.dateFin], [changement().responsableId, null], quoi);
+        assert.equal((await journal(chantier.id)).length, 0, quoi);
+      }
+    });
+
+    // Cas limites admis : relu sous le verrou, le droit de clôturer suit le nouveau titulaire sans rien retirer à qui le
+    // garde. Le responsable clôture l'affaire de son technicien qui lui est confiée pendant l'attente, celle qui passe à
+    // un autre technicien de sa branche, et la sienne confiée à un technicien de sa branche ; le directeur clôture un
+    // chantier laissé sans titulaire. Écarte un contrôle qui ne lit pas le rôle du nouveau titulaire, ou qui refuse tout
+    // changement de titulaire hors direction. La date de fin posée n'est pas comparée au jour : le test n'en dépend pas.
+    test('course : clôture, titulaire changé pendant l’attente, droit gardé : 200, chantier terminé et daté', async () => {
+      const tech1 = await creerCompte('TECHNICIEN', 'TECH-BRANCHE-B1', { responsableHierarchiqueId: comptes.RESP.id });
+      const tech2 = await creerCompte('TECHNICIEN', 'TECH-BRANCHE-B2', { responsableHierarchiqueId: comptes.RESP.id });
+      for (const [quoi, depart, auth, nouveau] of [
+        ['responsable, l’affaire de son technicien lui est confiée', { responsableId: tech1.id }, () => comptes.RESP.auth, () => comptes.RESP.id],
+        ['responsable, l’affaire de son technicien passe à un autre technicien de sa branche', { responsableId: tech1.id }, () => comptes.RESP.auth, () => tech2.id],
+        ['responsable, son affaire passe à un technicien de sa branche', { responsableId: comptes.RESP.id }, () => comptes.RESP.auth, () => tech1.id],
+        ['directeur, chantier laissé sans titulaire', {}, () => comptes.DIR.auth, () => null],
+      ]) {
+        const chantier = await creerChantier(depart);
+        const { res } = await sousVerrou(chantier.id, () => changerStatut(chantier.id, { statut: 'TERMINE' }, auth()), (tx) => tx.chantier.update({ where: { id: chantier.id }, data: { responsableId: nouveau() } }));
+        assert.equal(res.status, 200, `${quoi} : ${JSON.stringify(res.body)}`);
+        const relu = await ligne(chantier.id);
+        assert.deepEqual([relu.statut, relu.responsableId, relu.dateFin instanceof Date], ['TERMINE', nouveau(), true], quoi);
+      }
+    });
+
+    // Verrous : le rôle du nouveau titulaire est relu par une lecture simple, qui n'attend aucun verrou de son compte. Un
+    // compte tenu par une écriture en cours (FOR NO KEY UPDATE, comme le changement de son type) ne retient pas la
+    // clôture, qui garde la ligne du chantier : aucune attente croisée avec une route qui tiendrait le compte puis
+    // attendrait le chantier. Écarte une lecture verrouillante (FOR SHARE ou FOR UPDATE) du compte sous le verrou.
+    test('course : clôture, titulaire changé pendant l’attente, compte du nouveau titulaire tenu par une écriture : la clôture ne l’attend pas', async () => {
+      const chantier = await creerChantier();
+      let liberer; const fin = new Promise((r) => { liberer = r; });
+      let tenu; const pose = new Promise((r) => { tenu = r; });
+      const ecriture = prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT 1 FROM "User" WHERE "id" = ${comptes.CT2.id} FOR NO KEY UPDATE`;
+        tenu();
+        await fin;
+      }, { timeout: 30_000, maxWait: 10_000 });
+      await pose;
+      try {
+        const { res } = await sousVerrou(chantier.id, () => changerStatut(chantier.id, { statut: 'TERMINE' }, comptes.DIR.auth), (tx) => tx.chantier.update({ where: { id: chantier.id }, data: { responsableId: comptes.CT2.id } }));
+        assert.equal(res.status, 200, JSON.stringify(res.body));
+      } finally {
+        liberer();
+        await ecriture;
+      }
+      assert.equal((await ligne(chantier.id)).statut, 'TERMINE');
+    });
+
     // Point 2 bis, par le chemin réel : l'annulation du devis d'un chantier clôturé non encaissé passe ; la clôture
     // ou la réouverture de cette affaire annulée sont ensuite refusées (409), sans écriture.
     test('affaire annulée par son devis : ni clôture, ni réouverture, ni fiche, ni commercial, ni encaissement ; chacun 409 sans écriture', async () => {
