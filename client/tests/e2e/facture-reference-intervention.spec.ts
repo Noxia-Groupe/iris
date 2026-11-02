@@ -9,8 +9,10 @@ type Visite = { id: string; reference: string; titre: string; statut: string; co
 // facture d'intervention, le sélecteur « Intervention facturée » désignait chaque intervention par son seul
 // titre. Or toutes les visites d'un même contrat portent le même titre (« Maintenance préventive — <titre du
 // contrat> »), et le rattachement choisi est figé à l'émission (règle 2 de la méthode : factures et documents
-// figés). Une intervention se désigne désormais par « <référence> — <titre> », comme dans sa liste, sa fiche,
-// son compte rendu et la file du planning ; les chantiers et les contrats, sans référence, gardent leur libellé.
+// figés). Une intervention se désigne désormais par « <référence> — <titre> », comme dans « Origine de la
+// facture » du même écran ; sa liste, sa fiche, son compte rendu et la file du planning l'identifient aussi par
+// sa référence. Les affaires et les contrats, sans référence, se désignent depuis #448 par « <nom> — <numéro de
+// devis> » et par « <titre> — <site> — début le <JJ-MM-AAAA> » (homonymes : facture-designation-homonymes.spec.ts).
 // Scénario de R1, préparé par l'API : un contrat trimestriel, sa première visite terminée avec un compte rendu,
 // l'échéance avancée, puis la seconde visite générée. Aucun montant n'est en jeu : la ligne saisie n'est que
 // celle qu'exige un brouillon. Le début du contrat est fixe et les références sont relues par l'API : rien ne
@@ -40,7 +42,7 @@ test('facture d’intervention : deux visites d’un même contrat, de même tit
   // de création d'un chantier).
   const devis = await envoyer('post', '/devis', { clientId: client.id, objet: `Affaire R1 ${suffixe}`, lignes: [{ designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }] }) as { id: string };
   await envoyer('post', `/devis/${devis.id}/signature`, { signataire: 'Client E2E', confirme: true });
-  const chantier = await envoyer('post', `/devis/${devis.id}/convertir`, { cible: 'CHANTIER' }) as { id: string; nom: string };
+  const chantier = await envoyer('post', `/devis/${devis.id}/convertir`, { cible: 'CHANTIER' }) as { id: string; nom: string; numeroDevis: string };
   expect(chantier.nom).toBe(`Affaire R1 ${suffixe}`);
 
   // Préalable du constat R1, relu par l'API : deux visites du contrat, même titre, deux références distinctes.
@@ -56,11 +58,11 @@ test('facture d’intervention : deux visites d’un même contrat, de même tit
   await choisirClient(page, client);
   const origine = page.locator('select[name="origine"]');
 
-  // Les chantiers et les contrats gardent leur libellé, sans référence ajoutée.
+  // Une affaire se désigne par son nom et son numéro de devis ; un contrat sans site, par son titre et sa date de début.
   await origine.selectOption('CHANTIER');
-  await expect(page.locator(`select[name="chantierId"] option[value="${chantier.id}"]`), 'le chantier se désigne par son seul nom').toHaveText(chantier.nom);
+  await expect(page.locator(`select[name="chantierId"] option[value="${chantier.id}"]`), 'l’affaire se désigne par son nom, puis son numéro de devis').toHaveText(`${chantier.nom} — ${chantier.numeroDevis}`);
   await origine.selectOption('CONTRAT');
-  await expect(page.locator(`select[name="contratMaintenanceId"] option[value="${contrat.id}"]`), 'le contrat se désigne par son seul titre').toHaveText(titreContrat);
+  await expect(page.locator(`select[name="contratMaintenanceId"] option[value="${contrat.id}"]`), 'le contrat se désigne par son titre, puis sa date de début').toHaveText(`${titreContrat} — début le 01-01-2026`);
 
   // Les deux visites sont proposées, chacune sous sa référence suivie de son titre, et leurs libellés diffèrent.
   await origine.selectOption('INTERVENTION');
