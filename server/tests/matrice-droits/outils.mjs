@@ -252,13 +252,45 @@ export const SEPARATEUR = ' | ';
 //  - un 2xx s'écrit par son code seul, suivi de « inchangé » ou des tables écrites, et, avec `constat` (D1a-5b, champs
 //    ignorés en silence), d'un constat sans chiffre (« ; accesFinance=non ») ;
 //  - hors de son code, un refus ne porte de nombre que pour compter des objets (« 7 écriture(s) »).
-export function lignesAvecMontant(lignes, { comptes, constat = false, ciblesAdmises = [] }) {
+// Option `journaux` (D1a-5c, matrice des journaux ; cadrage de D1a-5c, version 3, §2.4 et §3), sans effet sur le
+// comportement par défaut, qui reste celui de D1a-5a et D1a-5b. Tout chiffre s'y lit par \p{Nd}, quelle que soit son
+// écriture (N1 de l'audit des montants de #440), et la garde s'étend aux lignes de cette matrice :
+//  - une écriture en 2xx peut porter plusieurs constats sans chiffre (« ; entrées : … ; montant écrit relu en base ») ;
+//  - une ligne de lecture (sa cible cite l'écriture lue : « entrée ← compte route sur cible ») répond « 200 visible »,
+//    « 200 absente », un 2xx suivi de constats sans chiffre (filtres du journal), ou un refus ; une cible admise ne l'est
+//    qu'en fin de la cible citée (« … sur taux=20 ») ;
+//  - le passage automatique de la génération des visites (route « passage automatique », au nom du compte système,
+//    SYSTEME, que l'appelant ajoute à `comptes`) s'écrit « passage » ou « aucun passage », puis « inchangé » ou les
+//    tables écrites, puis des constats sans chiffre.
+export function lignesAvecMontant(lignes, { comptes, constat = false, ciblesAdmises = [], journaux = false }) {
+  if (journaux) return lignesAvecMontantJournaux(lignes, { comptes, ciblesAdmises });
   const deuxCents = constat ? /^2\d\d (inchangé|écrit \([^()\d]+\))( ; [^\d;|]+)?$/ : /^2\d\d (inchangé|écrit \([^()\d]+\))$/;
   return lignes.filter((l) => {
     const [compte, , cible, contexte, reponse] = l.split(SEPARATEUR);
     if (l.includes('€') || !comptes.includes(compte) || (/\d/.test(cible) && !ciblesAdmises.includes(cible)) || /\d/.test(contexte)) return true;
     if (/^2\d\d /.test(reponse)) return !deuxCents.test(reponse);
     return /\d/.test(reponse.replace(/^\d{3} /, '').replace(/\b\d+ [^\s()]+\(s\)/g, ''));
+  });
+}
+function lignesAvecMontantJournaux(lignes, { comptes, ciblesAdmises }) {
+  const chiffre = /\p{Nd}/u;
+  const tables = String.raw`écrit \([^()\p{Nd}]+\)`;
+  const constats = String.raw`( ; [^\p{Nd};|]+)*`;
+  const ecriture = new RegExp(`^2\\p{Nd}{2} (inchangé|${tables})${constats}$`, 'u');
+  const lecture = /^2\p{Nd}{2} (visible|absente)$/u;
+  const filtre = /^2\p{Nd}{2}( ; [^\p{Nd};|]+)+$/u;
+  const passage = new RegExp(`^(passage|aucun passage) (inchangé|${tables})${constats}$`, 'u');
+  return lignes.filter((l) => {
+    const [compte, route, cible, contexte, reponse] = l.split(SEPARATEUR);
+    let cibleControlee = ciblesAdmises.includes(cible) ? '' : cible;
+    if (cibleControlee && cible.includes(' ← ')) {
+      const admise = ciblesAdmises.find((a) => cible.endsWith(` sur ${a}`));
+      if (admise) cibleControlee = cible.slice(0, -admise.length);
+    }
+    if (l.includes('€') || !comptes.includes(compte) || chiffre.test(cibleControlee) || chiffre.test(contexte)) return true;
+    if (route === 'passage automatique') return !passage.test(reponse);
+    if (/^2\p{Nd}{2} /u.test(reponse)) return !(ecriture.test(reponse) || lecture.test(reponse) || filtre.test(reponse));
+    return chiffre.test(reponse.replace(/^\p{Nd}{3} /u, '').replace(/(?<![\p{L}\p{N}_])\p{Nd}+ [^\s()]+\(s\)/gu, ''));
   });
 }
 export function ligneMatrice({ compte, methode, chemin, cible, contexte = CONTEXTE_DEFAUT, reponse }) {
