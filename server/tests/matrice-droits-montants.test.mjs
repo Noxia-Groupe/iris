@@ -165,6 +165,11 @@ const MONTANTS = {
   conversion: { budgetGlobalVendu: 987.09, budgetMaterielVendu: 70.1, budgetMainOeuvreVendu: 916.99, heuresVendues: 16.5, coutMaterielPrevu: 1.06 },
   // Acompte constaté sur devis-acompte-prix-achat : 98,76, distinct du taux d'acompte par défaut (30 %) appliqué au TTC.
   acompte: 98.76,
+  // Acompte reçu sur devis-acompte-recu, constaté avant l'instantané : 3 × 17,29 = 51,87 HT, TVA 10,374 arrondie à 10,37,
+  // TTC 62,24 ; acompte 21,37, distinct du taux d'acompte (30 %) appliqué au TTC (18,67) et de l'acompte du jeu (98,76).
+  // Une révision le reprend (devis/routes.ts:131-132) ; une duplication, devis neuf en brouillon, ne le reprend pas
+  // (devis/routes.ts:632-644). Lecture écartée : la duplication qui reprend l'acompte reçu, comme une révision.
+  acompteRecu: 21.37,
   // Taux d'acompte par défaut changé à 37,5 % après la création de devis-acompte-prix-achat (copié à 30 %) : une révision
   // garde 30 (copie), une duplication relit 37,5 (réglage du jour). Lectures écartées : l'une pour l'autre.
   tauxAcompteDuJour: 37.5,
@@ -478,6 +483,11 @@ if (!TEST_DATABASE_URL) {
       // Devis signé dont l'acompte est attendu, une ligne au prix d'achat prévu.
       P['devis-acompte-prix-achat'] = (await api(SA, 'POST', '/api/devis', { clientId: d.clientActif, objet: 'TEST Devis à acompte de la matrice des montants', acompteExige: true, lignes: [ligneLibre('TEST Ligne du devis à acompte', 'FOURNITURE', 3, 41.11, { prixAchatUnitaireHt: MONTANTS.prixAchatLigne })] }, 201)).id;
       await signer(P['devis-acompte-prix-achat']);
+      // Devis signé dont l'acompte est reçu avant l'instantané : la copie de l'acompte par une révision, et non par une
+      // duplication.
+      P['devis-acompte-recu'] = (await api(SA, 'POST', '/api/devis', { clientId: d.clientActif, objet: 'TEST Devis à acompte reçu de la matrice des montants', acompteExige: true, lignes: [ligneLibre('TEST Ligne du devis à acompte reçu', 'FOURNITURE', 3, 17.29, { prixAchatUnitaireHt: MONTANTS.prixAchatLigne })] }, 201)).id;
+      await signer(P['devis-acompte-recu']);
+      await api(SA, 'POST', `/api/devis/${P['devis-acompte-recu']}/acompte`, { recuLe: d.hier, montant: MONTANTS.acompteRecu, reference: 'TEST-ACOMPTE-RECU-MONTANTS' });
       // Sources changées après coup (copie figée) : taux d'acompte par défaut, fiche, article et main d'œuvre du devis.
       d.tauxAcompteInitial = Number((await appli.prisma.parametres.findUniqueOrThrow({ where: { id: 'singleton' }, select: { tauxAcompteDefaut: true } })).tauxAcompteDefaut);
       await api(SA, 'PUT', '/api/parametres', { tauxAcompteDefaut: MONTANTS.tauxAcompteDuJour });
@@ -535,6 +545,7 @@ if (!TEST_DATABASE_URL) {
         devisPa: { ...(await devisDe(P['devis-prix-achat'])), lignes: await lignesDe(P['devis-prix-achat']) },
         devisSigne: { ...(await devisDe(P['devis-signe-prix-achat'])), lignes: await lignesDe(P['devis-signe-prix-achat']) },
         devisAcompte: await devisDe(P['devis-acompte-prix-achat']),
+        devisAcompteRecu: await devisDe(P['devis-acompte-recu']),
         tauxAcompteDuJour: Number((await appli.prisma.parametres.findUniqueOrThrow({ where: { id: 'singleton' }, select: { tauxAcompteDefaut: true } })).tauxAcompteDefaut),
       };
 
@@ -649,13 +660,17 @@ if (!TEST_DATABASE_URL) {
       // Copie figée du taux d'acompte (cadrage §3) : une révision copie le taux du devis qu'elle révise
       // (devis/routes.ts:127) ; une duplication relit le taux d'acompte par défaut du jour (devis/routes.ts:600-601
       // et :638), changé après la création de devis-acompte-prix-achat.
-      const sourceAcompte = (tauxDuJour) => async () => {
-        const totaux = await ligneDe('instantane', 'Devis', P['devis-acompte-prix-achat'], ['totalHt', 'totalTva', 'totalTtc', 'tauxAcompte', 'acompteMontant']);
-        return { totaux: tauxDuJour ? { ...totaux, tauxAcompte: MONTANTS.tauxAcompteDuJour } : totaux, lignes: await lignesDuDevis('instantane', P['devis-acompte-prix-achat']) };
+      // Acompte reçu (devis-acompte-recu, constaté avant l'instantané) : une révision le reprend (devis/routes.ts:131-132) ;
+      // une duplication, devis neuf en brouillon, ne le reprend pas (devis/routes.ts:632-644), enregistré tel quel.
+      const sourceAcompte = (cible, duplication) => async () => {
+        const totaux = await ligneDe('instantane', 'Devis', P[cible], ['totalHt', 'totalTva', 'totalTtc', 'tauxAcompte', 'acompteMontant']);
+        return { totaux: duplication ? { ...totaux, tauxAcompte: MONTANTS.tauxAcompteDuJour, acompteMontant: null } : totaux, lignes: await lignesDuDevis('instantane', P[cible]) };
       };
-      for (const compte of [SA, 'AD']) {
-        ajouterGroupe(3, compte, 'POST /api/devis/:id/revisions', 'devis-acompte-prix-achat', 'défaut, corps sans corps', `/api/devis/${P['devis-acompte-prix-achat']}/revisions`, corpsVide, { code: 201, montant: { genre: 'copie', source: sourceAcompte(false) } });
-        ajouterGroupe(3, compte, 'POST /api/devis/:id/duplication', 'devis-acompte-prix-achat', 'défaut, corps sans corps', `/api/devis/${P['devis-acompte-prix-achat']}/duplication`, corpsVide, { code: 201, montant: { genre: 'copie', source: sourceAcompte(true) } });
+      for (const cible of ['devis-acompte-prix-achat', 'devis-acompte-recu']) {
+        for (const compte of [SA, 'AD']) {
+          ajouterGroupe(3, compte, 'POST /api/devis/:id/revisions', cible, 'défaut, corps sans corps', `/api/devis/${P[cible]}/revisions`, corpsVide, { code: 201, montant: { genre: 'copie', source: sourceAcompte(cible, false) } });
+          ajouterGroupe(3, compte, 'POST /api/devis/:id/duplication', cible, 'défaut, corps sans corps', `/api/devis/${P[cible]}/duplication`, corpsVide, { code: 201, montant: { genre: 'copie', source: sourceAcompte(cible, true) } });
+        }
       }
       // Triplets « droit … » de 5b (R-B non appliquée) : CT, DIR et RESP avec le droit devis ou le scope devis:write.
       for (const compte of ['CT', 'DIR', 'RESP']) {
@@ -819,6 +834,14 @@ if (!TEST_DATABASE_URL) {
       assert.ok(MONTANTS.acompte !== Math.round(MONTANTS.acompte), 'acompte : pas un nombre d’euros entier');
       assert.equal(t.devisAcompte.acompteMontant, null, 'devis-acompte-prix-achat : acompte non encore constaté');
       assert.notEqual(exact.euros(auCentime(enUnites(t.devisAcompte.totalTtc, 2) * enUnites(t.devisAcompte.tauxAcompte, 2), 10000n)), MONTANTS.acompte, 'acompte, lecture écartée : taux d’acompte appliqué au TTC');
+      // Acompte reçu (devis-acompte-recu) : relu en base, ni un nombre d'euros entier, ni le taux d'acompte appliqué au TTC ;
+      // non nul, donc distinct de l'acompte absent d'un duplicata (lecture écartée : la duplication qui le reprend).
+      const r = t.devisAcompteRecu;
+      assert.deepEqual([r.totalHt, r.totalTva, r.totalTtc], [exact.euros(exact.ligneHt(3, 17.29)), exact.euros(exact.tva(exact.ligneHt(3, 17.29), 20)), exact.euros(exact.ligneHt(3, 17.29) + exact.tva(exact.ligneHt(3, 17.29), 20))], 'devis-acompte-recu : totaux relus en base, recalculés');
+      assert.equal(r.acompteMontant, MONTANTS.acompteRecu, 'devis-acompte-recu : acompte reçu relu en base');
+      assert.ok(MONTANTS.acompteRecu !== Math.round(MONTANTS.acompteRecu) && MONTANTS.acompteRecu !== MONTANTS.acompte, 'acompte reçu : ni un nombre d’euros entier, ni l’acompte du jeu');
+      assert.notEqual(exact.euros(auCentime(enUnites(r.totalTtc, 2) * enUnites(r.tauxAcompte, 2), 10000n)), MONTANTS.acompteRecu, 'acompte reçu, lecture écartée : taux d’acompte appliqué au TTC');
+      assert.equal(r.tauxAcompte, d.tauxAcompteInitial, 'devis-acompte-recu : taux d’acompte copié du réglage à sa création');
       // Taux d'acompte : copié à la création (taux d'avant), relu du jour par une duplication ; distincts.
       assert.equal(t.devisAcompte.tauxAcompte, d.tauxAcompteInitial, 'devis-acompte-prix-achat : taux d’acompte copié du réglage à sa création');
       assert.equal(t.tauxAcompteDuJour, MONTANTS.tauxAcompteDuJour, 'taux d’acompte par défaut du jour relu en base');
@@ -922,7 +945,7 @@ if (!TEST_DATABASE_URL) {
       assert.equal(triplets.size, 31, 'triplets « droit … » de 5b sur les routes des 8 groupes');
       const parGroupe = [...couples.values()].reduce((a, g) => ({ ...a, [g]: (a[g] ?? 0) + 1 }), {});
       diagnostics.push(`couples (route, compte) des 8 groupes : ${couples.size} (${Object.entries(parGroupe).map(([g, n]) => `G${g} ${n}`).join(', ')}) ; triplets « droit … » : ${triplets.size}`);
-      diagnostics.push(`cas : ${cas.length} (groupes ${cas.filter((c) => c.groupe).length}, planning ${cas.filter((c) => c.planning).length}, relectures de montant ${cas.filter((c) => c.montant).length})`);
+      diagnostics.push(`cas : ${cas.length} (groupes ${cas.filter((c) => c.groupe).length}, planning ${cas.filter((c) => c.planning).length}, relecture propre d’un montant ${cas.filter((c) => c.montant).length}, refus du montant vendu compris)`);
       t.diagnostic(diagnostics.slice(-2).join(' ; '));
     });
 
@@ -937,20 +960,39 @@ if (!TEST_DATABASE_URL) {
       const LECTEURS = { COM: ['chantier-com', 'chantier-com-titulaire'], AC: ['chantier-ac'], DC: ['chantier-dc'], CPT: ['chantier-cpt'], 'CPT-FINANCE': ['chantier-cpt'] };
       const etats = (liste, chemin) => [...new Set(liste.map((x) => etatMontant(x, chemin)))].sort().join('/') || 'aucun objet';
       const elements = (corps) => (Array.isArray(corps) ? corps : corps?.items ?? []);
-      for (const [compte, chantiers] of Object.entries(LECTEURS)) {
+      const lire = async (compte, chantiers) => {
+        const lues = [];
         const achats = await appeler(appli.adresse, 'GET', '/api/achats', { jeton: jetons[compte] });
         const heures = await appeler(appli.adresse, 'GET', '/api/heures', { jeton: jetons[compte] });
-        lignes.push(ligneMatrice({ compte, methode: 'GET', chemin: '/api/achats', cible: SANS_CIBLE, contexte: 'défaut', reponse: achats.status === 200 ? `200 ; montantHT ${etats(elements(achats.body), 'montantHT')}` : formaterReponse(achats) }));
-        lignes.push(ligneMatrice({ compte, methode: 'GET', chemin: '/api/heures', cible: SANS_CIBLE, contexte: 'défaut', reponse: heures.status === 200 ? `200 ; tauxHoraireApplique ${etats(elements(heures.body), 'tauxHoraireApplique')}, intervenant.tauxHoraireCharge ${etats(elements(heures.body), 'intervenant.tauxHoraireCharge')}` : formaterReponse(heures) }));
+        lues.push(ligneMatrice({ compte, methode: 'GET', chemin: '/api/achats', cible: SANS_CIBLE, contexte: 'défaut', reponse: achats.status === 200 ? `200 ; montantHT ${etats(elements(achats.body), 'montantHT')}` : formaterReponse(achats) }));
+        lues.push(ligneMatrice({ compte, methode: 'GET', chemin: '/api/heures', cible: SANS_CIBLE, contexte: 'défaut', reponse: heures.status === 200 ? `200 ; tauxHoraireApplique ${etats(elements(heures.body), 'tauxHoraireApplique')}, intervenant.tauxHoraireCharge ${etats(elements(heures.body), 'intervenant.tauxHoraireCharge')}` : formaterReponse(heures) }));
         for (const nom of chantiers) {
           const fiche = await appeler(appli.adresse, 'GET', `/api/chantiers/${id('chantier', nom)}`, { jeton: jetons[compte] });
           const journal = await appeler(appli.adresse, 'GET', `/api/chantiers/${id('chantier', nom)}/journal-saisies`, { jeton: jetons[compte] });
-          lignes.push(ligneMatrice({ compte, methode: 'GET', chemin: '/api/chantiers/:id', cible: nom, contexte: 'défaut', reponse: fiche.status === 200 ? `200 ; achats[].montantHT ${etatMontant(fiche.body, 'achats[].montantHT')}, pointages[].tauxHoraireApplique ${etatMontant(fiche.body, 'pointages[].tauxHoraireApplique')}` : formaterReponse(fiche) }));
+          lues.push(ligneMatrice({ compte, methode: 'GET', chemin: '/api/chantiers/:id', cible: nom, contexte: 'défaut', reponse: fiche.status === 200 ? `200 ; achats[].montantHT ${etatMontant(fiche.body, 'achats[].montantHT')}, pointages[].tauxHoraireApplique ${etatMontant(fiche.body, 'pointages[].tauxHoraireApplique')}` : formaterReponse(fiche) }));
           const entrees = Array.isArray(journal.body) ? journal.body : [];
-          lignes.push(ligneMatrice({ compte, methode: 'GET', chemin: '/api/chantiers/:id/journal-saisies', cible: nom, contexte: 'défaut', reponse: journal.status === 200 ? `200 ; ACHAT apres.montantHT ${etats(entrees.filter((e) => e.cible === 'ACHAT'), 'apres.montantHT')}, HEURE apres.tauxHoraireApplique ${etats(entrees.filter((e) => e.cible === 'HEURE'), 'apres.tauxHoraireApplique')}` : formaterReponse(journal) }));
+          lues.push(ligneMatrice({ compte, methode: 'GET', chemin: '/api/chantiers/:id/journal-saisies', cible: nom, contexte: 'défaut', reponse: journal.status === 200 ? `200 ; ACHAT apres.montantHT ${etats(entrees.filter((e) => e.cible === 'ACHAT'), 'apres.montantHT')}, HEURE apres.tauxHoraireApplique ${etats(entrees.filter((e) => e.cible === 'HEURE'), 'apres.tauxHoraireApplique')}` : formaterReponse(journal) }));
         }
-      }
+        return lues;
+      };
+      for (const [compte, chantiers] of Object.entries(LECTEURS)) lignes.push(...await lire(compte, chantiers));
       assert.deepEqual(remise.changees(await remise.empreinte()), [], 'les lectures de N1 n’écrivent rien');
+      // CPT-FINANCE n'est titulaire d'aucun chantier : ses lectures n'observent ni achat ni heure (« aucun objet »), et ne
+      // prouvent donc pas que l'accès financier n'ouvre ni montant ni taux (cadrage §5.4). Comme D1a-3 (« accès financier
+      // sans effet en session »), le comptable CPT, titulaire de chantier-cpt, reçoit l'accès financier le temps de
+      // rejouer ses lectures de N1 (super administrateur, PATCH /api/users/:id/acces-finance) ; la base est remise en état
+      // ensuite, même en cas d'échec. Ses lectures doivent être identiques ; elles n'entrent pas dans la référence.
+      const attendues = await lire('CPT', LECTEURS.CPT);
+      assert.ok(attendues.some((l) => l.endsWith('200 ; montantHT présent')) && attendues.some((l) => l.includes('tauxHoraireApplique absent')), 'N1, CPT : un montant présent et un taux absent à comparer');
+      let obtenues = [];
+      await api(SA, 'PATCH', `/api/users/${comptes.CPT.id}/acces-finance`, { accesFinance: true });
+      try {
+        obtenues = await lire('CPT', LECTEURS.CPT);
+      } finally {
+        const aRemettre = remise.changees(await remise.empreinte());
+        if (aRemettre.length) await remise.remettre(aRemettre, 'accès financier de CPT, N1 de #435');
+      }
+      assert.deepEqual(obtenues, attendues, 'N1 de #435 : le comptable titulaire qui reçoit l’accès financier lit les mêmes achats et heures, montants et taux compris');
     });
 
     // Cadrage §5.1, §5.3 et §5.4 : la réponse de chaque cas dont le code est écrit (attendus du cadrage et du code), et
@@ -978,7 +1020,10 @@ if (!TEST_DATABASE_URL) {
         if (!r.endsWith(` ; ${attendu}`)) ecarts.push(`${c.compte} ${c.route} sur ${c.cible} (${c.contexte}) : constat des montants « ${r} »`);
       }
       assert.deepEqual(ecarts, [], 'montants différents de l’attendu');
-      diagnostics.push(`montants relus : ${chiffres.montants} constats, dont ${cas.filter((c) => c.montant).length} écritures de montant`);
+      // Écritures admises relues à leur attendu ; les autres constats (refus, dont ceux du montant vendu, et écritures sans
+      // montant) relisent les montants inchangés.
+      const relues = cas.filter((c) => c.montant && /^2\d\d /.test(c.reponse ?? '')).length;
+      diagnostics.push(`montants relus : ${chiffres.montants} constats, dont ${relues} écritures de montant admises relues à leur attendu et ${chiffres.montants - relues} montants relus inchangés`);
     });
 
     // Cadrage §5.2 et §3 (classement C) : pour chaque couple (groupe, champ) de MONTANTS_MASQUES_ECRITURES, un compte qui le
