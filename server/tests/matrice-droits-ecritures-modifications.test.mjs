@@ -770,13 +770,18 @@ if (!TEST_DATABASE_URL) {
     //  - N6 : « Création d'une intervention par un conducteur hors de son périmètre (…) non corrigé ; tranché par un
     //    choix par défaut, à appliquer (section 4) » (passation, section 1, « Défauts connus », et section 4, « Droits et
     //    comptes ») : défaut connu, enregistré tel quel ;
-    //  - chantier terminé : « PATCH /api/chantiers/:id admet le conducteur titulaire sur un chantier terminé (200 à corps
-    //    vide) ; MODELE-DROITS-CIBLE.md ne dit rien de l'écriture d'un chantier clos, qu'une écriture réelle montrera en
-    //    D1a-5 » (historique, liste « À documenter » de D1a-1) ;
-    //  - #285 : « commercial et encaissement modifiables sur une affaire annulée » (issue suivi-audit, déjà connue) ;
+    //  - chantier terminé : réponse de Nelson du 02-11-2026 à la question fermée « une fois un chantier terminé, son
+    //    titulaire (…) doit-il encore pouvoir modifier sa fiche (nom, budgets, heures vendues, dates, titulaire) et changer
+    //    son commercial ? » : « A. Non, admin seule » (#440, commentaire 6570976812), appliquée par le correctif de #285 :
+    //    403 hors administration, sans écriture. Avant lui, le conducteur titulaire y écrivait (historique, liste « À
+    //    documenter » de D1a-1 : « PATCH /api/chantiers/:id admet le conducteur titulaire sur un chantier terminé ») ;
+    //  - #285 : décisions de Nelson du 02-11-2026, « #285 bien sur que non, une affaire annulé ne peut etre encaissé »
+    //    (commentaire 6566197980 de #285), puis « Corriger maintenant » (commentaire 6570975085) : l'encaissement d'une
+    //    affaire annulée est refusé (409), sans écriture ; son commercial ne change plus (409), choix par défaut du
+    //    correctif, le plus restrictif, à confirmer. Avant le correctif, l'un et l'autre s'écrivaient ;
     //  - coûts SAV : règle du 27-10-2026 (affaireSuite.ts) : « une affaire annulée n'accepte plus rien de personne, une
     //    affaire clôturée plus rien hors administration ».
-    testPrepare('points connus : création d’intervention hors du périmètre (N6), chantier terminé modifié par son titulaire, encaissement d’une affaire annulée (#285), coûts SAV d’une affaire close (403 hors administration) ou annulée (409 pour tous)', () => {
+    testPrepare('points connus : création d’intervention hors du périmètre (N6), chantier terminé refusé à son titulaire hors administration (403), encaissement et commercial d’une affaire annulée refusés (409, #285), coûts SAV d’une affaire close (403 hors administration) ou annulée (409 pour tous)', () => {
       const reponse = (compte, route, cible, contexte) => {
         const debut = [compte, route, cible, contexte].join(SEPARATEUR) + SEPARATEUR;
         const trouvees = lignes.filter((l) => l.startsWith(debut));
@@ -787,18 +792,28 @@ if (!TEST_DATABASE_URL) {
       // N6 : le conducteur crée une intervention sur un chantier hors de son périmètre (défaut connu, à appliquer).
       for (const chantier of ['chantier-autre', 'chantier-com', 'chantier-resp']) assert.match(reponse('CT', 'POST /api/interventions', `chantierId=${chantier}`, corps('client, titre et chantier')), /^201 écrit \(.*Intervention/);
       assert.match(reponse('CT', 'POST /api/interventions', 'chantierId=chantier-ct', corps('client, titre et chantier')), /^201 écrit \(/);
-      // Chantier terminé : son titulaire le modifie (nom, budgets, heures vendues, relus en base) ; un autre conducteur
-      // reçoit 404. Terminé et encaissé : son titulaire réattribue le commercial, donc le CA et la marge validés, et
-      // l'administration retire l'encaissement (C2 de l'audit des montants de #440). Nelson a décidé le 02-11-2026 de fermer
-      // ce cas hors administration : le correctif qui suit cette PR mettra ces lignes à jour.
-      assert.equal(reponse('CT', 'PATCH /api/chantiers/:id', 'chantier-termine', corps('nom, budgets par poste et heures vendues')), '200 écrit (Chantier) ; budgets par poste et heures vendues écrits');
-      assert.equal(reponse('CT', 'PATCH /api/chantiers/:id/commercial', 'chantier-termine-encaisse', corps('commercialId=COM')), '200 écrit (Chantier,JournalSaisieChantier)');
-      for (const compte of ADMINISTRATION) assert.equal(reponse(compte, 'PATCH /api/chantiers/:id/encaisse', 'chantier-termine-encaisse', corps('encaisse=non')), '200 écrit (Chantier,JournalSaisieChantier)');
+      // Chantier terminé (décision de Nelson du 02-11-2026, « A. Non, admin seule ») : son titulaire ne le modifie plus
+      // (nom, budgets, heures vendues, titulaire) ni n'en réattribue le commercial, terminé ou terminé et encaissé (CA et
+      // marge validés) : 403, sans écriture ; un autre conducteur reçoit toujours 404. L'administration modifie toujours la
+      // fiche (budgets relus en base) et le commercial, et retire toujours l'encaissement (C2 de l'audit des montants de
+      // #440).
+      const CLOTURE_FICHE = '403 « Ce chantier est clôturé : seul un administrateur peut encore le modifier. » inchangé';
+      const CLOTURE_COMMERCIAL = '403 « Ce chantier est clôturé : seul un administrateur peut encore en changer le commercial. » inchangé';
+      for (const nom of ['nom, budgets par poste et heures vendues', 'responsableId=autre conducteur']) assert.equal(reponse('CT', 'PATCH /api/chantiers/:id', 'chantier-termine', corps(nom)), CLOTURE_FICHE, nom);
+      for (const cible of ['chantier-termine', 'chantier-termine-encaisse']) assert.equal(reponse('CT', 'PATCH /api/chantiers/:id/commercial', cible, corps('commercialId=COM')), CLOTURE_COMMERCIAL, cible);
+      for (const compte of ADMINISTRATION) {
+        assert.equal(reponse(compte, 'PATCH /api/chantiers/:id', 'chantier-termine', corps('nom, budgets par poste et heures vendues')), '200 écrit (Chantier) ; budgets par poste et heures vendues écrits');
+        assert.equal(reponse(compte, 'PATCH /api/chantiers/:id/commercial', 'chantier-termine-encaisse', corps('commercialId=COM')), '200 écrit (Chantier,JournalSaisieChantier)');
+        assert.equal(reponse(compte, 'PATCH /api/chantiers/:id/encaisse', 'chantier-termine-encaisse', corps('encaisse=non')), '200 écrit (Chantier,JournalSaisieChantier)');
+      }
       // Taux horaire d'une fiche, relu en base : l'administration l'écrit (C5 de l'audit des montants de #440).
       for (const compte of ADMINISTRATION) for (const fiche of ['fiche-tech', 'fiche-libre']) assert.equal(reponse(compte, 'PUT /api/intervenants/:id', fiche, corps('nom et taux horaire')), '200 écrit (Intervenant) ; taux horaire écrit');
       assert.equal(reponse('CT-N1', 'PATCH /api/chantiers/:id', 'chantier-termine', corps('nom, budgets par poste et heures vendues')), '404 « Chantier introuvable » inchangé');
-      // #285 : l'administration encaisse une affaire annulée.
-      for (const compte of ADMINISTRATION) assert.match(reponse(compte, 'PATCH /api/chantiers/:id/encaisse', 'chantier-annule', corps('encaisse=oui')), /^200 écrit \(/);
+      // #285 (décisions de Nelson du 02-11-2026) : l'administration n'encaisse plus une affaire annulée (409, sans écriture) ;
+      // le commercial d'une affaire annulée ne change plus, ni par l'administration ni par son titulaire (409, choix par
+      // défaut, à confirmer).
+      for (const compte of ADMINISTRATION) assert.equal(reponse(compte, 'PATCH /api/chantiers/:id/encaisse', 'chantier-annule', corps('encaisse=oui')), '409 « Cette affaire est annulée : elle ne peut pas être encaissée. » inchangé', compte);
+      for (const compte of [...ADMINISTRATION, 'CT']) assert.equal(reponse(compte, 'PATCH /api/chantiers/:id/commercial', 'chantier-annule', corps('commercialId=COM')), '409 « Cette affaire est annulée : son commercial ne change plus. » inchangé', compte);
       // Coûts SAV d'une suite d'une affaire clôturée : refus hors administration (403), l'administration écrit.
       const CLOTURE = '403 « Le chantier de cette suite est clôturé : ses coûts ne peuvent plus être saisis ni modifiés. » inchangé';
       const ANNULEE = '409 « L’affaire de cette suite est annulée : plus aucun coût ne peut y être saisi. » inchangé';
@@ -822,7 +837,9 @@ if (!TEST_DATABASE_URL) {
     // Avenant, ligne D1a-5b : « champs ignorés en silence (état de la base inchangé) » ; étude préalable, §1.7, bloc S :
     // « statut et client d'un non-administrateur ». Code : PATCH /api/chantiers/:id n'accepte le statut et le client que
     // de l'administration (chantiers/routes.ts, `allowed`) ; une saisie Travaux ne change pas de chantier
-    // (chantiers/saisies.ts) ; seul un super administrateur pose l'accès financier (utilisateurs/comptes.ts).
+    // (chantiers/saisies.ts) ; seul un super administrateur pose l'accès financier (utilisateurs/comptes.ts). Sur un
+    // chantier terminé, le corps de son titulaire n'est plus lu : il est refusé avant (403, sans écriture ; décision de
+    // Nelson du 02-11-2026, « A. Non, admin seule »), là où ces deux champs y étaient ignorés avant le correctif de #285.
     testPrepare('champs ignorés en silence : statut et client d’un chantier hors administration, chantier d’une saisie Travaux, accès financier d’un compte créé par un administrateur ; l’empreinte ou le constat relu en base prouve que le champ n’a pas changé', () => {
       const reponse = (compte, route, cible, nom) => {
         const debut = [compte, route, cible, `${CONTEXTE_DEFAUT}, corps ${nom}`].join(SEPARATEUR) + SEPARATEUR;
@@ -831,9 +848,12 @@ if (!TEST_DATABASE_URL) {
         return trouvees[0].slice(debut.length);
       };
       const CHANTIER = 'PATCH /api/chantiers/:id';
-      for (const [compte, cible] of [['CT', 'chantier-ct'], ['CT', 'chantier-termine'], ['RESP', 'chantier-resp'], ['DC', 'chantier-dc'], ['AC', 'chantier-ac'], ['CPT', 'chantier-cpt']]) {
+      for (const [compte, cible] of [['CT', 'chantier-ct'], ['RESP', 'chantier-resp'], ['DC', 'chantier-dc'], ['AC', 'chantier-ac'], ['CPT', 'chantier-cpt']]) {
         assert.equal(reponse(compte, CHANTIER, cible, 'statut=TERMINE seul'), '200 inchangé', `${compte} : statut ignoré`);
         assert.equal(reponse(compte, CHANTIER, cible, 'clientId=client-second seul'), '200 inchangé', `${compte} : client ignoré`);
+      }
+      for (const nom of ['statut=TERMINE seul', 'clientId=client-second seul']) {
+        assert.equal(reponse('CT', CHANTIER, 'chantier-termine', nom), '403 « Ce chantier est clôturé : seul un administrateur peut encore le modifier. » inchangé', `CT, chantier terminé : ${nom}`);
       }
       for (const compte of ADMINISTRATION) {
         assert.match(reponse(compte, CHANTIER, 'chantier-ct', 'statut=TERMINE seul'), /^200 écrit \(Chantier\)$/);

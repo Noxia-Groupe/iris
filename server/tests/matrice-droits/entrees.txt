@@ -959,7 +959,7 @@ AD | PATCH /api/chantiers/:id/commercial | chantier-termine | défaut | 400
 AD | PATCH /api/chantiers/:id/commercial | inexistant | défaut | 404 « Chantier introuvable »
 AD | PATCH /api/chantiers/:id/encaisse | chantier-ac | défaut | 200
 AD | PATCH /api/chantiers/:id/encaisse | chantier-ad | défaut | 200
-AD | PATCH /api/chantiers/:id/encaisse | chantier-annule | défaut | 200
+AD | PATCH /api/chantiers/:id/encaisse | chantier-annule | défaut | 409 « Cette affaire est annulée : elle ne peut pas être encaissée. »
 AD | PATCH /api/chantiers/:id/encaisse | chantier-autre | défaut | 200
 AD | PATCH /api/chantiers/:id/encaisse | chantier-com | défaut | 200
 AD | PATCH /api/chantiers/:id/encaisse | chantier-com-titulaire | défaut | 200
@@ -1624,7 +1624,7 @@ AD-COM | PATCH /api/chantiers/:id/commercial | chantier-termine | défaut | 400
 AD-COM | PATCH /api/chantiers/:id/commercial | inexistant | défaut | 404 « Chantier introuvable »
 AD-COM | PATCH /api/chantiers/:id/encaisse | chantier-ac | défaut | 200
 AD-COM | PATCH /api/chantiers/:id/encaisse | chantier-ad | défaut | 200
-AD-COM | PATCH /api/chantiers/:id/encaisse | chantier-annule | défaut | 200
+AD-COM | PATCH /api/chantiers/:id/encaisse | chantier-annule | défaut | 409 « Cette affaire est annulée : elle ne peut pas être encaissée. »
 AD-COM | PATCH /api/chantiers/:id/encaisse | chantier-autre | défaut | 200
 AD-COM | PATCH /api/chantiers/:id/encaisse | chantier-com | défaut | 200
 AD-COM | PATCH /api/chantiers/:id/encaisse | chantier-com-titulaire | défaut | 200
@@ -4456,7 +4456,7 @@ CT | PATCH /api/chantiers/:id | chantier-dc | défaut | 404 « Chantier introuva
 CT | PATCH /api/chantiers/:id | chantier-dir | défaut | 404 « Chantier introuvable »
 CT | PATCH /api/chantiers/:id | chantier-resp | défaut | 404 « Chantier introuvable »
 CT | PATCH /api/chantiers/:id | chantier-tech-branche-resp | défaut | 404 « Chantier introuvable »
-CT | PATCH /api/chantiers/:id | chantier-termine | défaut | 200
+CT | PATCH /api/chantiers/:id | chantier-termine | défaut | 403 « Ce chantier est clôturé : seul un administrateur peut encore le modifier. »
 CT | PATCH /api/chantiers/:id | inexistant | défaut | 404 « Chantier introuvable »
 CT | PATCH /api/chantiers/:id/commercial | chantier-ac | défaut | 404 « Chantier introuvable »
 CT | PATCH /api/chantiers/:id/commercial | chantier-ad | défaut | 404 « Chantier introuvable »
@@ -8851,7 +8851,7 @@ SA | PATCH /api/chantiers/:id/commercial | chantier-termine | défaut | 400
 SA | PATCH /api/chantiers/:id/commercial | inexistant | défaut | 404 « Chantier introuvable »
 SA | PATCH /api/chantiers/:id/encaisse | chantier-ac | défaut | 200
 SA | PATCH /api/chantiers/:id/encaisse | chantier-ad | défaut | 200
-SA | PATCH /api/chantiers/:id/encaisse | chantier-annule | défaut | 200
+SA | PATCH /api/chantiers/:id/encaisse | chantier-annule | défaut | 409 « Cette affaire est annulée : elle ne peut pas être encaissée. »
 SA | PATCH /api/chantiers/:id/encaisse | chantier-autre | défaut | 200
 SA | PATCH /api/chantiers/:id/encaisse | chantier-com | défaut | 200
 SA | PATCH /api/chantiers/:id/encaisse | chantier-com-titulaire | défaut | 200
