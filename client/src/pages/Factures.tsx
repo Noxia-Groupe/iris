@@ -440,7 +440,12 @@ export default function Factures() {
   const emissionImpossible = (facture: Facture) => !!derniereDateEmission && facture.dateEmission.slice(0, 10) < derniereDateEmission.slice(0, 10);
   // Ni affaire, ni contrat, ni intervention d'origine annulée : le serveur refuse leur facture.
   const sources = sourcesFacturables(origine === 'CHANTIER' ? chantiers : origine === 'INTERVENTION' ? interventions : contrats, contrats, clientSelection);
-  const sourceName = (source: Source) => source.nom || source.titre || source.reference || source.id;
+  // Une intervention se désigne par sa référence, comme dans sa liste, sa fiche, son compte rendu et la
+  // file du planning : les visites d'un même contrat portent toutes le même titre (« Maintenance
+  // préventive — … »), et le rattachement choisi ici est figé à l'émission.
+  const sourceName = (source: Source) => source.reference
+    ? `${source.reference} — ${source.titre ?? ''}`
+    : source.nom || source.titre || source.id;
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
