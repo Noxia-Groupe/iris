@@ -218,10 +218,11 @@ if (!TEST_DATABASE_URL) {
     const lireLigne = async (table, ligneId) => (await lecture.query(`SELECT row_to_json(t) AS l FROM public."${table}" t WHERE t.id = $1`, [ligneId])).rows[0]?.l ?? null;
     const lignesCreees = async (table) => (await lecture.query(`SELECT row_to_json(t) AS l FROM public."${table}" t LEFT JOIN "${SCHEMA_INSTANTANE}"."${table}" s ON s.id = t.id WHERE s.id IS NULL`)).rows.map((r) => r.l);
     // Relecture d'un montant : la ligne écrite (créée, ou la cible), comparée au montant attendu (envoyé, taux source au
-    // moment de la saisie, ou montant d'avant pour un déplacement, un archivage ou une restauration) ; l'entrée qui la
-    // journalise, comparée à la ligne relue (« après ») et à la ligne d'avant (« avant »). Journal d'administration :
-    // seuls les champs qui changent y sont gardés (commun/journal-administration.ts) ; un champ absent de l'entrée doit
-    // donc être inchangé en base.
+    // moment de la saisie, ou montant d'avant pour une correction sans montant, dont le changement de chantier que
+    // l'application ignore, un archivage ou une restauration) ; l'entrée qui la journalise, comparée à la ligne relue
+    // (« après ») et à la ligne d'avant (« avant »). Journal d'administration : seuls les champs qui changent y sont
+    // gardés (commun/journal-administration.ts) ; un champ absent de l'entrée doit donc être inchangé en base, et un
+    // montant inchangé en base doit en être absent.
     const constaterMontant = async (m, avant, attendu, entrees) => {
       chiffres.montants += 1;
       let ligne;
@@ -247,6 +248,7 @@ if (!TEST_DATABASE_URL) {
             if (!memeValeur(ligne[champ], avant?.[champ])) ecarts.push(`montant changé non journalisé : ${champ}`);
             continue;
           }
+          if (m.partiel && memeValeur(ligne[champ], avant?.[champ])) ecarts.push(`montant inchangé journalisé : ${champ}`);
           if (!memeValeur(apres[champ], ligne[champ])) ecarts.push(`montant journalisé différent du montant écrit : après ${champ}`);
           if (avant && !memeValeur(avantEntree[champ], avant[champ])) ecarts.push(`montant journalisé différent du montant d’avant : avant ${champ}`);
         }
@@ -924,7 +926,7 @@ if (!TEST_DATABASE_URL) {
     // Cadrage §2.4 : « Le montant relu en base est égal au montant envoyé, ou, pour un taux copié, à celui de sa source au
     // moment de la saisie. L'instantané de l'entrée porte le même montant […]. Le constat termine la ligne, sans
     // chiffre. » Un cas de ces couples sans relecture, ou une relecture fausse, est classé C par l'auditeur-montants.
-    testPrepare('montants relus en base : achats, pointages, coûts SAV (créés, corrigés, déplacés, archivés, restaurés) et barèmes de rémunération, chaque compte qui les écrit, montant écrit égal au montant envoyé ou au taux source et montant journalisé identique', () => {
+    testPrepare('montants relus en base : achats et pointages (créés, corrigés, dont la demande de changement de chantier, ignorée, archivés, restaurés), coûts SAV (créés, corrigés, archivés, restaurés) et barèmes de rémunération, chaque compte qui les écrit, montant écrit égal au montant envoyé ou au taux source et montant journalisé identique', () => {
       const avecMontant = cas.filter((c) => c.montant);
       // Chaque route d'un montant (§2.4) a sa relecture, pour chaque compte qui la joue.
       const routes = ['POST /api/achats', 'PATCH /api/achats/:id', 'DELETE /api/achats/:id', 'POST /api/achats/:id/restaurer', 'POST /api/heures', 'PATCH /api/heures/:id', 'DELETE /api/heures/:id', 'POST /api/heures/:id/restaurer',
