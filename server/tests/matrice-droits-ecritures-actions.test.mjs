@@ -48,7 +48,7 @@ import test, { after, before, describe } from 'node:test';
 import { join } from 'node:path';
 import {
   CONTEXTE_DEFAUT, DOSSIER_MATRICES, EMAIL_SECOURS, JETON_SECOURS, SEPARATEUR, appeler, baseJetable, chargerApplication,
-  comparerAvecReference, enParallele, formaterReponse, ligneMatrice, lireReference, tablesDeLaBase,
+  comparerAvecReference, enParallele, formaterReponse, ligneMatrice, lignesAvecMontant, lireReference, tablesDeLaBase,
 } from './matrice-droits/outils.mjs';
 import { COMPTES_JOUES, creerComptes } from './matrice-droits/comptes.mjs';
 import { FAMILLES, INEXISTANT, cheminPour, cibleDe, construireJeuDeDonnees, jourSociete } from './matrice-droits/donnees.mjs';
@@ -71,7 +71,8 @@ const DESTINATAIRE = 'contact-matrice@iris.test';
 // Routes jouées : les (b) et les (a) marquées validation-avant-droit de la table de D1a-1.
 const ROUTES_B = Object.keys(ROUTES_SESSION).filter((route) => ROUTES_SESSION[route].ecriture === 'b').sort();
 const ROUTES_MARQUEES = Object.keys(ROUTES_SESSION).filter((route) => ROUTES_SESSION[route].ecriture === 'a' && ROUTES_SESSION[route].validationAvantDroit).sort();
-// Routes marquées sans famille : la cible est portée par le corps (avenant, section 2 ; consigne de D1a-5a, point 4).
+// Routes marquées sans famille : la cible est portée par le corps (avenant, section 2, ligne D1a-5a ; corps de #437,
+// « Périmètre » : « sur chaque cible réelle de sa famille ou portée par le corps (`chantierId`, `clientId`) »).
 const CIBLE_DU_CORPS = {
   'POST /api/achats': { famille: 'chantier', champ: 'chantierId' },
   'POST /api/heures': { famille: 'chantier', champ: 'chantierId' },
@@ -186,7 +187,7 @@ if (!TEST_DATABASE_URL) {
     const lignes = [];
     // Cibles des routes sans famille de D1a-1 (mentions légales) : nom, chemin.
     const ciblesMentions = [];
-    // Chiffres du rapport (consigne de D1a-5a) : cas en parallèle, un à un, écrits, lots rejoués.
+    // Chiffres du corps de #437 (section « Chiffres ») : cas en parallèle, un à un, écrits, lots rejoués.
     const chiffres = { casParalleles: 0, casUnAUn: 0, casEcrits: 0, lotsRejoues: [], parRoute: {} };
     // Couples (compte, route) admis à l'entrée, et la relation de chaque cible jouée (minimum de l'avenant, section 3).
     const couples = new Map();
@@ -348,8 +349,9 @@ if (!TEST_DATABASE_URL) {
       if (refusRole) throw refusRole;
     });
 
-    // Consigne de D1a-5a, points 3 et 4 ; avenant, section 2 : « les 20 routes (b) » et « les 16 routes (a) marquées
-    // validation-avant-droit (13 avec une famille de cibles, POST /api/achats, /api/heures et /api/devis sans famille) ».
+    // Avenant, section 2, ligne D1a-5a : « les 20 routes (b) de session » et « les 16 routes (a) marquées
+    // `validation-avant-droit` ». Leur répartition (13 avec une famille de cibles ; POST /api/achats, /api/heures et
+    // /api/devis sans famille, la cible portée par le corps) vient de l'étude préalable (§1.1), et non de l'avenant.
     testPrepare('périmètre : les 20 routes (b) et les 16 routes marquées validation-avant-droit, chacune avec ses cibles réelles et, pour une route marquée, un corps valide pour chaque cible', () => {
       assert.equal(ROUTES_B.length, 20, `routes (b) : ${ROUTES_B.join(', ')}`);
       assert.equal(ROUTES_MARQUEES.length, 16, `routes marquées : ${ROUTES_MARQUEES.join(', ')}`);
@@ -364,14 +366,14 @@ if (!TEST_DATABASE_URL) {
       }
     });
 
-    // Consigne de D1a-5a, point 3 ; cadrage §2.4 (b) : « le refus sur un dossier réel, dans ou hors du périmètre,
+    // Avenant, section 2, ligne D1a-5a ; cadrage §2.4 (b) : « le refus sur un dossier réel, dans ou hors du périmètre,
     // relève de D1a-5 » ; avenant, ligne D1a-5a : « dont l'émission d'une facture (brouillon émis ; refus sur une facture
     // émise et sur un avoir) ».
     testPrepare('routes (b) : chaque compte sur chaque cible réelle de la famille, à corps vide ; comptes refusés à l’entrée en parallèle, comptes admis un à un, base remise en état après chaque écriture', async () => {
       for (const route of ROUTES_B) await jouerRoute(route);
     });
 
-    // Consigne de D1a-5a, point 4 ; avenant, section 3 : les comptes refusés avant la cible « sont rejoués sur chaque
+    // Avenant, section 2, ligne D1a-5a (« comptes refusés à l'entrée compris ») ; section 3 : ils « sont rejoués sur chaque
     // cible réelle, en parallèle » ; #428, N2 : « D1a-5 doit donc jouer, sur des cibles réelles dans et hors du
     // périmètre, […] les 16 routes marquées validation-avant-droit ».
     testPrepare('routes marquées validation-avant-droit : chaque compte, avec un corps valide, sur chaque cible réelle de la famille ou portée par le corps, base remise en état après chaque écriture', async () => {
@@ -428,8 +430,9 @@ if (!TEST_DATABASE_URL) {
       }
     });
 
-    // Cadrage §2.1 et consigne de D1a-5a : la matrice obtenue est la référence, au caractère près (diff imprimé, et
-    // résumé par compte et route au-delà de 60 lignes) ; jamais une valeur de montant.
+    // Cadrage §2.1 (N8) : la matrice obtenue est la référence, au caractère près (diff imprimé, et résumé par compte et
+    // route au-delà de 60 lignes) ; corps de #437 : « Aucune ligne de la référence ne porte de montant, ce qu'un test
+    // vérifie ».
     testPrepare('la matrice obtenue est la référence matrice-droits/ecritures-actions.txt, chaque cas y a une ligne, et aucune ligne ne porte de montant', (t) => {
       const routesVues = new Set(lignes.map((l) => l.split(SEPARATEUR)[1]));
       assert.deepEqual([...ROUTES_B, ...ROUTES_MARQUEES].filter((route) => !routesVues.has(route)), [], 'routes sans ligne');
@@ -440,12 +443,8 @@ if (!TEST_DATABASE_URL) {
       // forme (12.5, 150, 12,50 €) : un 2xx s'écrit par son code seul, suivi de « inchangé » ou des tables écrites ; hors
       // de son code, un refus ne porte de nombre que pour compter des objets (« 7 écriture(s) ») ; ni la cible ni le
       // contexte (nom du corps) n'en portent ; aucune ligne ne porte « € ».
-      const avecMontant = lignes.filter((l) => {
-        const [compte, , cible, contexte, reponse] = l.split(SEPARATEUR);
-        if (l.includes('€') || !COMPTES_JOUES.includes(compte) || /\d/.test(cible) || /\d/.test(contexte)) return true;
-        if (/^2\d\d /.test(reponse)) return !/^2\d\d (inchangé|écrit \([^()\d]+\))$/.test(reponse);
-        return /\d/.test(reponse.replace(/^\d{3} /, '').replace(/\b\d+ [^\s()]+\(s\)/g, ''));
-      });
+      // Garde factorisée dans outils.mjs (lignesAvecMontant) par D1a-5b, à l'identique (note N6 du contrôle de #437).
+      const avecMontant = lignesAvecMontant(lignes, { comptes: COMPTES_JOUES });
       assert.deepEqual(avecMontant, [], 'lignes qui portent un montant, ou un nombre hors du code de la réponse et des comptes d’objets d’un refus');
       t.diagnostic(`routes : ${ROUTES_B.length} (b) et ${ROUTES_MARQUEES.length} marquées ; comptes : ${COMPTES_JOUES.length}`);
       t.diagnostic(`cas : ${lignes.length} (en parallèle ${chiffres.casParalleles}, un à un ${chiffres.casUnAUn}) ; écrits : ${chiffres.casEcrits} ; remises : ${remise.remises} ; lots rejoués : ${chiffres.lotsRejoues.length ? chiffres.lotsRejoues.join(' ; ') : 'aucun'}`);
@@ -453,11 +452,10 @@ if (!TEST_DATABASE_URL) {
       comparerAvecReference(lignes, REFERENCE, 'ecritures-actions.txt');
     });
 
-    // Avenant, section 1, et consigne de D1a-5a, point 2 : « après N remises (au moins 50) de cas qui écrivent dans des
-    // tables variées (dont une facture émise, un réglage, une clé révoquée, un compte désactivé, une écriture en ajout
-    // seul de journal), l'état complet est identique à la référence : empreinte des tables, séquences, déclencheurs et
-    // leur état d'activation (pg_trigger.tgenabled), schéma public ; et une facture réémise après la remise reprend le
-    // même numéro. » Joué après la comparaison à la référence : il écrit.
+    // Avenant, section 1 (garde-fous de la remise, séquences) et section 2, ligne D1a-5a : « Outil de remise en état
+    // (avec sa preuve : empreinte identique après N remises) ». Corps de #437 : « 60 écritures variées sont remises une à
+    // une. L'état complet reste identique : tables, séquences, déclencheurs et leur état, schéma. Le numéro de facture
+    // est le même à chaque émission. » Joué après la comparaison à la référence : il écrit.
     testPrepare('outil de remise en état : 60 écritures variées remises une à une, état complet identique à celui d’avant la matrice, même numéro de facture à chaque émission, refus d’une autre base', async () => {
       const id = (famille, nom) => cibleDe(famille, nom).ids.id;
       const hier = jourSociete(-1); const aujourdhui = jourSociete(0);
