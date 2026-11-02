@@ -28,8 +28,9 @@
 //    droit est donné par la route d'administration, puis retiré, comme dans D1a-4.
 // Une ligne : compte, route, cible, contexte (« défaut, corps <nom> », ou « droit <nom>, corps <nom> » pour un droit
 // individuel), réponse (code, et message exact d'un refus ou d'un 400), puis « écrit (tables) » ou « inchangé » selon
-// l'empreinte de toute la base, et, pour un champ ignoré d'une route qui écrit, le constat relu en base. Jamais un
-// montant : un 2xx s'écrit par son code seul (garde lignesAvecMontant d'outils.mjs).
+// l'empreinte de toute la base, et, pour un champ ignoré d'une route qui écrit ou pour les budgets par poste et les
+// heures vendues d'un chantier, le constat relu en base. Jamais un montant : un 2xx s'écrit par son code seul, suivi
+// au plus d'un constat sans chiffre (garde lignesAvecMontant d'outils.mjs).
 //
 // Déroulement : les cas qu'entrees.txt (ou individuels-sans-gain.txt pour un droit) annonce comme un refus 403, 404, 409
 // ou 410 d'un compte hors administration sont joués en parallèle, avec une empreinte pour le lot ; si le lot a écrit, la
@@ -92,6 +93,9 @@ const ROUTES_E = ROUTES_A.filter((route) => !RESERVEES_5D.includes(route) && !SA
 const ROUTE_CORRECTION_COUT = 'PATCH /api/interventions/:id/couts/:type/:coutId';
 const ROUTES_N4 = ['POST /api/contrats-maintenance/:id/generer-intervention', 'PUT /api/interventions/:id/a-suivre', 'POST /api/mentions-legales/:version/publier'];
 const ROUTES_TOUS_COMPTES = [ROUTE_CORRECTION_COUT, ...ROUTES_N4];
+// Champs réservés à D1a-5d, qu'aucun corps de ce fichier ne porte (test « périmètre ») : montant vendu, prix d'achat
+// prévu d'une ligne de devis, prix d'achat d'une fiche du catalogue, planningActif, destinataires de la rentabilité.
+const RESERVE_5D = /budgetGlobalVendu|prixAchatUnitaireHt|prixAchatHt|planningActif|rentabilite/;
 
 // Cible portée par le corps (bloc E4 de l'étude) : la famille et le champ ; `sans` ajoute les cibles sans ce champ.
 const CIBLE_DU_CORPS = {
@@ -106,17 +110,25 @@ const CIBLE_DU_CORPS = {
 // --- Corps valides ---
 // Chaque variante a un nom, écrit dans le contexte de la ligne ; `s` marque un corps du bloc S (champ ignoré ou refus
 // selon le corps), que les droits individuels ne rejouent pas ; `constat` relit en base, après un cas qui a écrit, le
-// champ ignoré (texte sans chiffre). `d` : identifiants et dates (rempli avant la matrice).
+// champ ignoré, ou les budgets par poste et les heures vendues écrits (texte sans chiffre). `d` : identifiants et dates (rempli avant la matrice).
 const motif = (quoi) => `TEST ${quoi} par la matrice des modifications`;
 const LIGNE_DEVIS = (designation, quantite = 1) => ({ designation, nature: 'MAIN_OEUVRE', quantite, prixUnitaireHt: 150, tauxTva: 20 });
+// Budgets par poste et heures vendues du corps valide d'un chantier (#387). Le nom changeant aussi, « écrit (Chantier) »
+// ne prouverait pas que ces montants sont écrits : le constat les relit en base (C1 de l'audit des montants de #440),
+// et le jeu de données n'en porte aucun à ces valeurs (vérifié avant la matrice).
+const BUDGETS = { budgetMaterielVendu: 1200, budgetMainOeuvreVendu: 800, heuresVendues: 16 };
 const CORPS = {
   // --- Chantiers (titulaire, administration) ---
   // Le corps valide ordinaire modifie le nom, les budgets par poste et les heures vendues (#387), sans le montant vendu
   // (réservé à 5d). Corps S : statut seul et client seul, champs que la route n'accepte que de l'administration et
   // ignore pour les autres ; titulaire réattribué à un autre conducteur, CT-N1 (réattribution par le titulaire, #181 ;
   // le nom du corps ne porte pas le chiffre du compte, la garde « aucun montant » refusant tout chiffre du contexte).
-  'PATCH /api/chantiers/:id': (_cible, d) => [
-    { nom: 'nom, budgets par poste et heures vendues', corps: () => ({ nom: 'TEST Chantier modifié par la matrice', budgetMaterielVendu: 1200, budgetMainOeuvreVendu: 800, heuresVendues: 16 }) },
+  'PATCH /api/chantiers/:id': (cible, d) => [
+    { nom: 'nom, budgets par poste et heures vendues', corps: () => ({ nom: 'TEST Chantier modifié par la matrice', ...BUDGETS }), constat: async (p) => {
+      const chantier = await p.chantier.findUniqueOrThrow({ where: { id: cible.ids.id } });
+      const nonEcrits = Object.keys(BUDGETS).filter((champ) => Number(chantier[champ]) !== BUDGETS[champ]);
+      return nonEcrits.length ? `budgets non écrits : ${nonEcrits.join(', ')}` : 'budgets par poste et heures vendues écrits';
+    } },
     { nom: 'statut=TERMINE seul', s: true, corps: () => ({ statut: 'TERMINE' }) },
     { nom: 'clientId=client-second seul', s: true, corps: () => ({ clientId: d.clientSecond }) },
     { nom: 'responsableId=autre conducteur', s: true, corps: () => ({ responsableId: d.comptes['CT-N1'].id }) },
@@ -125,7 +137,9 @@ const CORPS = {
     { nom: 'commercialId=COM', corps: () => ({ commercialId: d.comptes.COM.id }) },
     { nom: 'commercialId vide', s: true, corps: () => ({ commercialId: null }) },
   ],
-  'PATCH /api/chantiers/:id/encaisse': () => [{ nom: 'encaisse=oui', corps: () => ({ encaisse: true }) }],
+  'PATCH /api/chantiers/:id/encaisse': (cible) => [cible.etat === 'ENCAISSE'
+    ? { nom: 'encaisse=non', corps: () => ({ encaisse: false }) }
+    : { nom: 'encaisse=oui', corps: () => ({ encaisse: true }) }],
   'POST /api/chantiers/:id/envois': () => [{ nom: 'destinataire, messagerie', corps: () => ({ destinataire: DESTINATAIRE }) }],
   // --- Saisies Travaux : correction (motif ; montant HT d'un achat, nombre d'heures d'un pointage), archivage,
   // restauration ; chantier d'une saisie ignoré (constat) ---
@@ -529,6 +543,20 @@ if (!TEST_DATABASE_URL) {
         cout('materiel-archive-suite-affaire-annulee', annulee.suite, annulee.materiel.id, 'achats'),
       ];
 
+      // Chantier terminé et encaissé (C2 de l'audit des montants de #440) : seul état où le CA et la marge validés d'un
+      // commercial existent (« un chantier ne compte dans le CA et la marge validés du commercial que s'il est Terminé ET
+      // Encaissé », chantiers/saisies.ts). Ouvert par la conversion d'un devis (titulaire CT, commercial AD-COM), clôturé
+      // puis encaissé par l'administration ; joué sur la réattribution du commercial et sur le retrait de l'encaissement.
+      const devisEncaisse = await api(SA, 'POST', '/api/devis', { clientId: d.clientActif, objet: 'TEST Devis du chantier encaissé', lignes: [LIGNE_DEVIS('TEST Ligne du chantier encaissé')] }, 201);
+      await api(SA, 'PUT', `/api/devis/${devisEncaisse.id}/statut`, { statut: 'ENVOYE' });
+      await api(SA, 'POST', `/api/devis/${devisEncaisse.id}/signature`, { signataire: 'TEST Signataire matrice', confirme: true }, 201);
+      const ouvertureEncaisse = await api(SA, 'POST', `/api/devis/${devisEncaisse.id}/convertir`, { cible: 'CHANTIER', responsableId: comptes.CT.id, commercialId: comptes['AD-COM'].id, dateDebut: jourSociete(-30) }, 201);
+      const chantierEncaisse = ouvertureEncaisse.chantier?.id ?? ouvertureEncaisse.chantierId ?? ouvertureEncaisse.id;
+      await api(SA, 'PATCH', `/api/chantiers/${chantierEncaisse}/statut`, { statut: 'TERMINE' });
+      await api(SA, 'PATCH', `/api/chantiers/${chantierEncaisse}/encaisse`, { encaisse: true });
+      const cibleEncaisse = { nom: 'chantier-termine-encaisse', ids: { id: chantierEncaisse }, etat: 'ENCAISSE', relations: { CT: 'titulaire (terminé et encaissé)' } };
+      for (const route of ['PATCH /api/chantiers/:id/commercial', 'PATCH /api/chantiers/:id/encaisse']) CIBLES_PROPRES[route] = [cibleEncaisse];
+
       // Note N4 de l'audit des droits de #437 : un contrat sans visite (sa génération écrit), une intervention terminée
       // marquée « à suivre » (le retrait de la marque écrit), une version des mentions publiée puis remplacée (sa
       // nouvelle publication écrit).
@@ -582,6 +610,11 @@ if (!TEST_DATABASE_URL) {
       for (const cible of FAMILLES.achat.cibles) if (cible.nom !== INEXISTANT) cible.chantierId = (await appli.prisma.achatReel.findUniqueOrThrow({ where: { id: cible.ids.id } })).chantierId;
       for (const cible of FAMILLES.heure.cibles) if (cible.nom !== INEXISTANT) cible.chantierId = (await appli.prisma.pointageHeure.findUniqueOrThrow({ where: { id: cible.ids.id } })).chantierId;
 
+      for (const cible of FAMILLES.chantier.cibles) if (cible.nom !== INEXISTANT) {
+        const chantier = await appli.prisma.chantier.findUniqueOrThrow({ where: { id: cible.ids.id } });
+        assert.ok(Object.keys(BUDGETS).every((champ) => Number(chantier[champ]) !== BUDGETS[champ]), `${cible.nom} : un budget vaut déjà celui du corps valide`);
+      }
+
       // Instantané et outil de remise en état, une fois tout construit.
       const tables = await tablesDeLaBase(appli.prisma);
       remise = await creerRemiseEnEtat({
@@ -619,8 +652,16 @@ if (!TEST_DATABASE_URL) {
         for (const cible of cibles) assert.ok(cible.chemin && !cible.chemin.includes(':'), `${route} : cible ${cible.nom} sans chemin`);
         // Aucun corps ne porte un champ réservé à 5d (montant vendu, prix d'achat prévu, prix d'achat d'une fiche).
         for (const cible of cibles) for (const variante of CORPS[route](cible, d)) {
-          const texte = JSON.stringify(variante.corps());
-          assert.ok(!/budgetGlobalVendu|prixAchatUnitaireHt|prixAchatHt|planningActif|rentabilite/.test(texte), `${route} : corps ${variante.nom} réservé à 5d`);
+          assert.ok(!RESERVE_5D.test(JSON.stringify(variante.corps())), `${route} : corps ${variante.nom} réservé à 5d`);
+        }
+      }
+      // Corps que seuls les droits individuels rejouent, dont les lignes de devis, où vit le prix d'achat prévu : même
+      // contrôle, sur chaque cible réelle de leur famille ou portée par le corps (C3 de l'audit des montants de #440).
+      for (const [route, corpsDroits] of Object.entries(CORPS_DROITS)) {
+        const famille = CIBLE_DU_CORPS[route]?.famille ?? ROUTES_SESSION[route].famille;
+        assert.ok(FAMILLES[famille], `${route} : famille de cibles inconnue`);
+        for (const cible of FAMILLES[famille].cibles.filter((c) => c.nom !== INEXISTANT)) for (const variante of corpsDroits(cible, d)) {
+          assert.ok(!RESERVE_5D.test(JSON.stringify(variante.corps())), `${route} : corps ${variante.nom} réservé à 5d (droits individuels)`);
         }
       }
     });
@@ -689,6 +730,14 @@ if (!TEST_DATABASE_URL) {
         chiffres.groupesDroits += 1;
         casDroits.push(...cas);
       }
+      // Après le dernier groupe : chaque droit est retiré et la base est revenue à la référence (empreinte de toute la
+      // base, table des comptes comprise). Un retrait ou une remise oubliés, qui laisseraient un droit posé, échouent ici
+      // (T1 de l'audit des droits de #440).
+      assert.deepEqual(remise.changees(await remise.empreinte()), [], 'droits individuels : la base n’est pas revenue à la référence après le dernier groupe');
+      for (const type of new Set(ecritures.map((l) => l.type))) {
+        const { permissions } = await appli.prisma.user.findUniqueOrThrow({ where: { id: comptes[type].id }, select: { permissions: true } });
+        assert.deepEqual(permissions, [], `${type} : droit individuel laissé posé après les droits individuels`);
+      }
       // Chaque ligne d'écriture de individuels-sans-gain.txt est tranchée : sur sa cible réelle, par le cas du même compte,
       // droit, route et cible ; sur « inexistant » ou une cible portée par le corps (« — »), par les cas du même compte,
       // droit et route sur chaque cible réelle.
@@ -725,8 +774,12 @@ if (!TEST_DATABASE_URL) {
       // N6 : le conducteur crée une intervention sur un chantier hors de son périmètre (défaut connu, à appliquer).
       for (const chantier of ['chantier-autre', 'chantier-com', 'chantier-resp']) assert.match(reponse('CT', 'POST /api/interventions', `chantierId=${chantier}`, corps('client, titre et chantier')), /^201 écrit \(.*Intervention/);
       assert.match(reponse('CT', 'POST /api/interventions', 'chantierId=chantier-ct', corps('client, titre et chantier')), /^201 écrit \(/);
-      // Chantier terminé : son titulaire le modifie (nom, budgets, heures vendues) ; un autre conducteur reçoit 404.
-      assert.match(reponse('CT', 'PATCH /api/chantiers/:id', 'chantier-termine', corps('nom, budgets par poste et heures vendues')), /^200 écrit \(Chantier\)$/);
+      // Chantier terminé : son titulaire le modifie (nom, budgets, heures vendues, relus en base) ; un autre conducteur
+      // reçoit 404. Terminé et encaissé : son titulaire réattribue le commercial, donc le CA et la marge validés, et
+      // l'administration retire l'encaissement (C2 de l'audit des montants de #440 ; question posée à Nelson).
+      assert.equal(reponse('CT', 'PATCH /api/chantiers/:id', 'chantier-termine', corps('nom, budgets par poste et heures vendues')), '200 écrit (Chantier) ; budgets par poste et heures vendues écrits');
+      assert.equal(reponse('CT', 'PATCH /api/chantiers/:id/commercial', 'chantier-termine-encaisse', corps('commercialId=COM')), '200 écrit (Chantier,JournalSaisieChantier)');
+      for (const compte of ADMINISTRATION) assert.equal(reponse(compte, 'PATCH /api/chantiers/:id/encaisse', 'chantier-termine-encaisse', corps('encaisse=non')), '200 écrit (Chantier,JournalSaisieChantier)');
       assert.equal(reponse('CT-N1', 'PATCH /api/chantiers/:id', 'chantier-termine', corps('nom, budgets par poste et heures vendues')), '404 « Chantier introuvable » inchangé');
       // #285 : l'administration encaisse une affaire annulée.
       for (const compte of ADMINISTRATION) assert.match(reponse(compte, 'PATCH /api/chantiers/:id/encaisse', 'chantier-annule', corps('encaisse=oui')), /^200 écrit \(/);

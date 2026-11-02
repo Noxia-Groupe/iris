@@ -20,7 +20,7 @@ AC | PATCH /api/achats/:id | achat-chantier-ct | droit chantiers:write, corps de
 AC | PATCH /api/achats/:id | achat-chantier-ct-branche-resp | droit chantiers:write, corps description, montantHT et motif | 404 « Chantier introuvable » inchangé
 AC | PATCH /api/achats/:id | achat-chantier-termine | droit chantiers:write, corps description, montantHT et motif | 404 « Chantier introuvable » inchangé
 AC | PATCH /api/chantiers/:id | chantier-ac | défaut, corps clientId=client-second seul | 200 inchangé
-AC | PATCH /api/chantiers/:id | chantier-ac | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier)
+AC | PATCH /api/chantiers/:id | chantier-ac | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
 AC | PATCH /api/chantiers/:id | chantier-ac | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
 AC | PATCH /api/chantiers/:id | chantier-ac | défaut, corps statut=TERMINE seul | 200 inchangé
 AC | PATCH /api/chantiers/:id | chantier-ad | défaut, corps clientId=client-second seul | 404 « Chantier introuvable » inchangé
@@ -103,6 +103,8 @@ AC | PATCH /api/chantiers/:id/commercial | chantier-tech-branche-resp | défaut,
 AC | PATCH /api/chantiers/:id/commercial | chantier-tech-branche-resp | défaut, corps commercialId=COM | 404 « Chantier introuvable » inchangé
 AC | PATCH /api/chantiers/:id/commercial | chantier-termine | défaut, corps commercialId vide | 404 « Chantier introuvable » inchangé
 AC | PATCH /api/chantiers/:id/commercial | chantier-termine | défaut, corps commercialId=COM | 404 « Chantier introuvable » inchangé
+AC | PATCH /api/chantiers/:id/commercial | chantier-termine-encaisse | défaut, corps commercialId vide | 404 « Chantier introuvable » inchangé
+AC | PATCH /api/chantiers/:id/commercial | chantier-termine-encaisse | défaut, corps commercialId=COM | 404 « Chantier introuvable » inchangé
 AC | PATCH /api/heures/:id | heure-archivee-chantier-ac | droit chantiers:write, corps commentaire, heures et motif | 404 « Chantier introuvable » inchangé
 AC | PATCH /api/heures/:id | heure-archivee-chantier-ct | droit chantiers:write, corps commentaire, heures et motif | 404 « Chantier introuvable » inchangé
 AC | PATCH /api/heures/:id | heure-chantier-ac | droit chantiers:write, corps commentaire, heures et motif | 404 « Chantier introuvable » inchangé
@@ -233,11 +235,11 @@ AD | PATCH /api/achats/:id | achat-chantier-ct-branche-resp | défaut, corps des
 AD | PATCH /api/achats/:id | achat-chantier-termine | défaut, corps chantierId=chantier-autre et motif | 200 écrit (AchatReel,JournalSaisieChantier) ; chantier de l’achat inchangé
 AD | PATCH /api/achats/:id | achat-chantier-termine | défaut, corps description, montantHT et motif | 200 écrit (AchatReel,JournalSaisieChantier)
 AD | PATCH /api/chantiers/:id | chantier-ac | défaut, corps clientId=client-second seul | 200 écrit (Chantier,JournalSaisieChantier)
-AD | PATCH /api/chantiers/:id | chantier-ac | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier)
+AD | PATCH /api/chantiers/:id | chantier-ac | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
 AD | PATCH /api/chantiers/:id | chantier-ac | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
 AD | PATCH /api/chantiers/:id | chantier-ac | défaut, corps statut=TERMINE seul | 200 écrit (Chantier)
 AD | PATCH /api/chantiers/:id | chantier-ad | défaut, corps clientId=client-second seul | 200 écrit (Chantier,JournalSaisieChantier)
-AD | PATCH /api/chantiers/:id | chantier-ad | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier)
+AD | PATCH /api/chantiers/:id | chantier-ad | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
 AD | PATCH /api/chantiers/:id | chantier-ad | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
 AD | PATCH /api/chantiers/:id | chantier-ad | défaut, corps statut=TERMINE seul | 200 écrit (Chantier)
 AD | PATCH /api/chantiers/:id | chantier-annule | défaut, corps clientId=client-second seul | 409 « Cette affaire est annulée : elle n’est plus modifiable. » inchangé
@@ -245,47 +247,47 @@ AD | PATCH /api/chantiers/:id | chantier-annule | défaut, corps nom, budgets pa
 AD | PATCH /api/chantiers/:id | chantier-annule | défaut, corps responsableId=autre conducteur | 409 « Cette affaire est annulée : elle n’est plus modifiable. » inchangé
 AD | PATCH /api/chantiers/:id | chantier-annule | défaut, corps statut=TERMINE seul | 409 « Cette affaire est annulée : elle n’est plus modifiable. » inchangé
 AD | PATCH /api/chantiers/:id | chantier-autre | défaut, corps clientId=client-second seul | 200 écrit (Chantier,JournalSaisieChantier)
-AD | PATCH /api/chantiers/:id | chantier-autre | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier)
+AD | PATCH /api/chantiers/:id | chantier-autre | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
 AD | PATCH /api/chantiers/:id | chantier-autre | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
 AD | PATCH /api/chantiers/:id | chantier-autre | défaut, corps statut=TERMINE seul | 200 écrit (Chantier)
 AD | PATCH /api/chantiers/:id | chantier-com | défaut, corps clientId=client-second seul | 200 écrit (Chantier,JournalSaisieChantier)
-AD | PATCH /api/chantiers/:id | chantier-com | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier)
+AD | PATCH /api/chantiers/:id | chantier-com | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
 AD | PATCH /api/chantiers/:id | chantier-com | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
 AD | PATCH /api/chantiers/:id | chantier-com | défaut, corps statut=TERMINE seul | 200 écrit (Chantier)
 AD | PATCH /api/chantiers/:id | chantier-com-titulaire | défaut, corps clientId=client-second seul | 200 écrit (Chantier,JournalSaisieChantier)
-AD | PATCH /api/chantiers/:id | chantier-com-titulaire | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier)
+AD | PATCH /api/chantiers/:id | chantier-com-titulaire | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
 AD | PATCH /api/chantiers/:id | chantier-com-titulaire | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
 AD | PATCH /api/chantiers/:id | chantier-com-titulaire | défaut, corps statut=TERMINE seul | 200 écrit (Chantier)
 AD | PATCH /api/chantiers/:id | chantier-cpt | défaut, corps clientId=client-second seul | 200 écrit (Chantier,JournalSaisieChantier)
-AD | PATCH /api/chantiers/:id | chantier-cpt | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier)
+AD | PATCH /api/chantiers/:id | chantier-cpt | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
 AD | PATCH /api/chantiers/:id | chantier-cpt | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
 AD | PATCH /api/chantiers/:id | chantier-cpt | défaut, corps statut=TERMINE seul | 200 écrit (Chantier)
 AD | PATCH /api/chantiers/:id | chantier-ct | défaut, corps clientId=client-second seul | 409 « Des interventions SAV sont rattachées à cette affaire : elle ne change pas de client. » inchangé
-AD | PATCH /api/chantiers/:id | chantier-ct | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier)
+AD | PATCH /api/chantiers/:id | chantier-ct | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
 AD | PATCH /api/chantiers/:id | chantier-ct | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
 AD | PATCH /api/chantiers/:id | chantier-ct | défaut, corps statut=TERMINE seul | 200 écrit (Chantier)
 AD | PATCH /api/chantiers/:id | chantier-ct-branche-resp | défaut, corps clientId=client-second seul | 200 écrit (Chantier,JournalSaisieChantier)
-AD | PATCH /api/chantiers/:id | chantier-ct-branche-resp | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier)
+AD | PATCH /api/chantiers/:id | chantier-ct-branche-resp | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
 AD | PATCH /api/chantiers/:id | chantier-ct-branche-resp | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
 AD | PATCH /api/chantiers/:id | chantier-ct-branche-resp | défaut, corps statut=TERMINE seul | 200 écrit (Chantier)
 AD | PATCH /api/chantiers/:id | chantier-dc | défaut, corps clientId=client-second seul | 200 écrit (Chantier,JournalSaisieChantier)
-AD | PATCH /api/chantiers/:id | chantier-dc | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier)
+AD | PATCH /api/chantiers/:id | chantier-dc | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
 AD | PATCH /api/chantiers/:id | chantier-dc | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
 AD | PATCH /api/chantiers/:id | chantier-dc | défaut, corps statut=TERMINE seul | 200 écrit (Chantier)
 AD | PATCH /api/chantiers/:id | chantier-dir | défaut, corps clientId=client-second seul | 200 écrit (Chantier,JournalSaisieChantier)
-AD | PATCH /api/chantiers/:id | chantier-dir | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier)
+AD | PATCH /api/chantiers/:id | chantier-dir | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
 AD | PATCH /api/chantiers/:id | chantier-dir | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
 AD | PATCH /api/chantiers/:id | chantier-dir | défaut, corps statut=TERMINE seul | 200 écrit (Chantier)
 AD | PATCH /api/chantiers/:id | chantier-resp | défaut, corps clientId=client-second seul | 200 écrit (Chantier,JournalSaisieChantier)
-AD | PATCH /api/chantiers/:id | chantier-resp | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier)
+AD | PATCH /api/chantiers/:id | chantier-resp | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
 AD | PATCH /api/chantiers/:id | chantier-resp | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
 AD | PATCH /api/chantiers/:id | chantier-resp | défaut, corps statut=TERMINE seul | 200 écrit (Chantier)
 AD | PATCH /api/chantiers/:id | chantier-tech-branche-resp | défaut, corps clientId=client-second seul | 409 « Des interventions SAV sont rattachées à cette affaire : elle ne change pas de client. » inchangé
-AD | PATCH /api/chantiers/:id | chantier-tech-branche-resp | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier)
+AD | PATCH /api/chantiers/:id | chantier-tech-branche-resp | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
 AD | PATCH /api/chantiers/:id | chantier-tech-branche-resp | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
 AD | PATCH /api/chantiers/:id | chantier-tech-branche-resp | défaut, corps statut=TERMINE seul | 200 écrit (Chantier)
 AD | PATCH /api/chantiers/:id | chantier-termine | défaut, corps clientId=client-second seul | 200 écrit (Chantier,JournalSaisieChantier)
-AD | PATCH /api/chantiers/:id | chantier-termine | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier)
+AD | PATCH /api/chantiers/:id | chantier-termine | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
 AD | PATCH /api/chantiers/:id | chantier-termine | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
 AD | PATCH /api/chantiers/:id | chantier-termine | défaut, corps statut=TERMINE seul | 200 écrit (Chantier)
 AD | PATCH /api/chantiers/:id/commercial | chantier-ac | défaut, corps commercialId vide | 400 « Un chantier doit toujours avoir un commercial rattaché. » inchangé
@@ -316,6 +318,8 @@ AD | PATCH /api/chantiers/:id/commercial | chantier-tech-branche-resp | défaut,
 AD | PATCH /api/chantiers/:id/commercial | chantier-tech-branche-resp | défaut, corps commercialId=COM | 200 écrit (Chantier,JournalSaisieChantier)
 AD | PATCH /api/chantiers/:id/commercial | chantier-termine | défaut, corps commercialId vide | 400 « Un chantier doit toujours avoir un commercial rattaché. » inchangé
 AD | PATCH /api/chantiers/:id/commercial | chantier-termine | défaut, corps commercialId=COM | 200 écrit (Chantier,JournalSaisieChantier)
+AD | PATCH /api/chantiers/:id/commercial | chantier-termine-encaisse | défaut, corps commercialId vide | 400 « Un chantier doit toujours avoir un commercial rattaché. » inchangé
+AD | PATCH /api/chantiers/:id/commercial | chantier-termine-encaisse | défaut, corps commercialId=COM | 200 écrit (Chantier,JournalSaisieChantier)
 AD | PATCH /api/chantiers/:id/encaisse | chantier-ac | défaut, corps encaisse=oui | 200 écrit (Chantier,JournalSaisieChantier)
 AD | PATCH /api/chantiers/:id/encaisse | chantier-ad | défaut, corps encaisse=oui | 200 écrit (Chantier,JournalSaisieChantier)
 AD | PATCH /api/chantiers/:id/encaisse | chantier-annule | défaut, corps encaisse=oui | 200 écrit (Chantier,JournalSaisieChantier)
@@ -330,6 +334,7 @@ AD | PATCH /api/chantiers/:id/encaisse | chantier-dir | défaut, corps encaisse=
 AD | PATCH /api/chantiers/:id/encaisse | chantier-resp | défaut, corps encaisse=oui | 200 écrit (Chantier,JournalSaisieChantier)
 AD | PATCH /api/chantiers/:id/encaisse | chantier-tech-branche-resp | défaut, corps encaisse=oui | 200 écrit (Chantier,JournalSaisieChantier)
 AD | PATCH /api/chantiers/:id/encaisse | chantier-termine | défaut, corps encaisse=oui | 200 écrit (Chantier,JournalSaisieChantier)
+AD | PATCH /api/chantiers/:id/encaisse | chantier-termine-encaisse | défaut, corps encaisse=non | 200 écrit (Chantier,JournalSaisieChantier)
 AD | PATCH /api/comptabilite/comptes/:id | compte-comptable-clients | défaut, corps libellé, motif et version | 200 écrit (CompteComptable,JournalCompteComptable)
 AD | PATCH /api/comptabilite/comptes/:id/activation | compte-comptable-clients | défaut, corps actif=non et motif | 409 « Compte utilisé par une règle comptable ou TVA : remappez la règle avant de désactiver. » inchangé
 AD | PATCH /api/contrats-maintenance/:id | contrat-actif | défaut, corps note de couverture et motif | 200 écrit (ContratMaintenance,JournalSaisieChantier)
@@ -533,11 +538,11 @@ AD-COM | PATCH /api/achats/:id | achat-chantier-ct-branche-resp | défaut, corps
 AD-COM | PATCH /api/achats/:id | achat-chantier-termine | défaut, corps chantierId=chantier-autre et motif | 200 écrit (AchatReel,JournalSaisieChantier) ; chantier de l’achat inchangé
 AD-COM | PATCH /api/achats/:id | achat-chantier-termine | défaut, corps description, montantHT et motif | 200 écrit (AchatReel,JournalSaisieChantier)
 AD-COM | PATCH /api/chantiers/:id | chantier-ac | défaut, corps clientId=client-second seul | 200 écrit (Chantier,JournalSaisieChantier)
-AD-COM | PATCH /api/chantiers/:id | chantier-ac | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier)
+AD-COM | PATCH /api/chantiers/:id | chantier-ac | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
 AD-COM | PATCH /api/chantiers/:id | chantier-ac | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
 AD-COM | PATCH /api/chantiers/:id | chantier-ac | défaut, corps statut=TERMINE seul | 200 écrit (Chantier)
 AD-COM | PATCH /api/chantiers/:id | chantier-ad | défaut, corps clientId=client-second seul | 200 écrit (Chantier,JournalSaisieChantier)
-AD-COM | PATCH /api/chantiers/:id | chantier-ad | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier)
+AD-COM | PATCH /api/chantiers/:id | chantier-ad | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
 AD-COM | PATCH /api/chantiers/:id | chantier-ad | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
 AD-COM | PATCH /api/chantiers/:id | chantier-ad | défaut, corps statut=TERMINE seul | 200 écrit (Chantier)
 AD-COM | PATCH /api/chantiers/:id | chantier-annule | défaut, corps clientId=client-second seul | 409 « Cette affaire est annulée : elle n’est plus modifiable. » inchangé
@@ -545,47 +550,47 @@ AD-COM | PATCH /api/chantiers/:id | chantier-annule | défaut, corps nom, budget
 AD-COM | PATCH /api/chantiers/:id | chantier-annule | défaut, corps responsableId=autre conducteur | 409 « Cette affaire est annulée : elle n’est plus modifiable. » inchangé
 AD-COM | PATCH /api/chantiers/:id | chantier-annule | défaut, corps statut=TERMINE seul | 409 « Cette affaire est annulée : elle n’est plus modifiable. » inchangé
 AD-COM | PATCH /api/chantiers/:id | chantier-autre | défaut, corps clientId=client-second seul | 200 écrit (Chantier,JournalSaisieChantier)
-AD-COM | PATCH /api/chantiers/:id | chantier-autre | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier)
+AD-COM | PATCH /api/chantiers/:id | chantier-autre | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
 AD-COM | PATCH /api/chantiers/:id | chantier-autre | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
 AD-COM | PATCH /api/chantiers/:id | chantier-autre | défaut, corps statut=TERMINE seul | 200 écrit (Chantier)
 AD-COM | PATCH /api/chantiers/:id | chantier-com | défaut, corps clientId=client-second seul | 200 écrit (Chantier,JournalSaisieChantier)
-AD-COM | PATCH /api/chantiers/:id | chantier-com | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier)
+AD-COM | PATCH /api/chantiers/:id | chantier-com | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
 AD-COM | PATCH /api/chantiers/:id | chantier-com | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
 AD-COM | PATCH /api/chantiers/:id | chantier-com | défaut, corps statut=TERMINE seul | 200 écrit (Chantier)
 AD-COM | PATCH /api/chantiers/:id | chantier-com-titulaire | défaut, corps clientId=client-second seul | 200 écrit (Chantier,JournalSaisieChantier)
-AD-COM | PATCH /api/chantiers/:id | chantier-com-titulaire | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier)
+AD-COM | PATCH /api/chantiers/:id | chantier-com-titulaire | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
 AD-COM | PATCH /api/chantiers/:id | chantier-com-titulaire | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
 AD-COM | PATCH /api/chantiers/:id | chantier-com-titulaire | défaut, corps statut=TERMINE seul | 200 écrit (Chantier)
 AD-COM | PATCH /api/chantiers/:id | chantier-cpt | défaut, corps clientId=client-second seul | 200 écrit (Chantier,JournalSaisieChantier)
-AD-COM | PATCH /api/chantiers/:id | chantier-cpt | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier)
+AD-COM | PATCH /api/chantiers/:id | chantier-cpt | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
 AD-COM | PATCH /api/chantiers/:id | chantier-cpt | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
 AD-COM | PATCH /api/chantiers/:id | chantier-cpt | défaut, corps statut=TERMINE seul | 200 écrit (Chantier)
 AD-COM | PATCH /api/chantiers/:id | chantier-ct | défaut, corps clientId=client-second seul | 409 « Des interventions SAV sont rattachées à cette affaire : elle ne change pas de client. » inchangé
-AD-COM | PATCH /api/chantiers/:id | chantier-ct | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier)
+AD-COM | PATCH /api/chantiers/:id | chantier-ct | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
 AD-COM | PATCH /api/chantiers/:id | chantier-ct | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
 AD-COM | PATCH /api/chantiers/:id | chantier-ct | défaut, corps statut=TERMINE seul | 200 écrit (Chantier)
 AD-COM | PATCH /api/chantiers/:id | chantier-ct-branche-resp | défaut, corps clientId=client-second seul | 200 écrit (Chantier,JournalSaisieChantier)
-AD-COM | PATCH /api/chantiers/:id | chantier-ct-branche-resp | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier)
+AD-COM | PATCH /api/chantiers/:id | chantier-ct-branche-resp | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
 AD-COM | PATCH /api/chantiers/:id | chantier-ct-branche-resp | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
 AD-COM | PATCH /api/chantiers/:id | chantier-ct-branche-resp | défaut, corps statut=TERMINE seul | 200 écrit (Chantier)
 AD-COM | PATCH /api/chantiers/:id | chantier-dc | défaut, corps clientId=client-second seul | 200 écrit (Chantier,JournalSaisieChantier)
-AD-COM | PATCH /api/chantiers/:id | chantier-dc | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier)
+AD-COM | PATCH /api/chantiers/:id | chantier-dc | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
 AD-COM | PATCH /api/chantiers/:id | chantier-dc | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
 AD-COM | PATCH /api/chantiers/:id | chantier-dc | défaut, corps statut=TERMINE seul | 200 écrit (Chantier)
 AD-COM | PATCH /api/chantiers/:id | chantier-dir | défaut, corps clientId=client-second seul | 200 écrit (Chantier,JournalSaisieChantier)
-AD-COM | PATCH /api/chantiers/:id | chantier-dir | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier)
+AD-COM | PATCH /api/chantiers/:id | chantier-dir | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
 AD-COM | PATCH /api/chantiers/:id | chantier-dir | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
 AD-COM | PATCH /api/chantiers/:id | chantier-dir | défaut, corps statut=TERMINE seul | 200 écrit (Chantier)
 AD-COM | PATCH /api/chantiers/:id | chantier-resp | défaut, corps clientId=client-second seul | 200 écrit (Chantier,JournalSaisieChantier)
-AD-COM | PATCH /api/chantiers/:id | chantier-resp | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier)
+AD-COM | PATCH /api/chantiers/:id | chantier-resp | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
 AD-COM | PATCH /api/chantiers/:id | chantier-resp | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
 AD-COM | PATCH /api/chantiers/:id | chantier-resp | défaut, corps statut=TERMINE seul | 200 écrit (Chantier)
 AD-COM | PATCH /api/chantiers/:id | chantier-tech-branche-resp | défaut, corps clientId=client-second seul | 409 « Des interventions SAV sont rattachées à cette affaire : elle ne change pas de client. » inchangé
-AD-COM | PATCH /api/chantiers/:id | chantier-tech-branche-resp | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier)
+AD-COM | PATCH /api/chantiers/:id | chantier-tech-branche-resp | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
 AD-COM | PATCH /api/chantiers/:id | chantier-tech-branche-resp | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
 AD-COM | PATCH /api/chantiers/:id | chantier-tech-branche-resp | défaut, corps statut=TERMINE seul | 200 écrit (Chantier)
 AD-COM | PATCH /api/chantiers/:id | chantier-termine | défaut, corps clientId=client-second seul | 200 écrit (Chantier,JournalSaisieChantier)
-AD-COM | PATCH /api/chantiers/:id | chantier-termine | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier)
+AD-COM | PATCH /api/chantiers/:id | chantier-termine | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
 AD-COM | PATCH /api/chantiers/:id | chantier-termine | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
 AD-COM | PATCH /api/chantiers/:id | chantier-termine | défaut, corps statut=TERMINE seul | 200 écrit (Chantier)
 AD-COM | PATCH /api/chantiers/:id/commercial | chantier-ac | défaut, corps commercialId vide | 400 « Un chantier doit toujours avoir un commercial rattaché. » inchangé
@@ -616,6 +621,8 @@ AD-COM | PATCH /api/chantiers/:id/commercial | chantier-tech-branche-resp | déf
 AD-COM | PATCH /api/chantiers/:id/commercial | chantier-tech-branche-resp | défaut, corps commercialId=COM | 200 écrit (Chantier,JournalSaisieChantier)
 AD-COM | PATCH /api/chantiers/:id/commercial | chantier-termine | défaut, corps commercialId vide | 400 « Un chantier doit toujours avoir un commercial rattaché. » inchangé
 AD-COM | PATCH /api/chantiers/:id/commercial | chantier-termine | défaut, corps commercialId=COM | 200 écrit (Chantier,JournalSaisieChantier)
+AD-COM | PATCH /api/chantiers/:id/commercial | chantier-termine-encaisse | défaut, corps commercialId vide | 400 « Un chantier doit toujours avoir un commercial rattaché. » inchangé
+AD-COM | PATCH /api/chantiers/:id/commercial | chantier-termine-encaisse | défaut, corps commercialId=COM | 200 écrit (Chantier,JournalSaisieChantier)
 AD-COM | PATCH /api/chantiers/:id/encaisse | chantier-ac | défaut, corps encaisse=oui | 200 écrit (Chantier,JournalSaisieChantier)
 AD-COM | PATCH /api/chantiers/:id/encaisse | chantier-ad | défaut, corps encaisse=oui | 200 écrit (Chantier,JournalSaisieChantier)
 AD-COM | PATCH /api/chantiers/:id/encaisse | chantier-annule | défaut, corps encaisse=oui | 200 écrit (Chantier,JournalSaisieChantier)
@@ -630,6 +637,7 @@ AD-COM | PATCH /api/chantiers/:id/encaisse | chantier-dir | défaut, corps encai
 AD-COM | PATCH /api/chantiers/:id/encaisse | chantier-resp | défaut, corps encaisse=oui | 200 écrit (Chantier,JournalSaisieChantier)
 AD-COM | PATCH /api/chantiers/:id/encaisse | chantier-tech-branche-resp | défaut, corps encaisse=oui | 200 écrit (Chantier,JournalSaisieChantier)
 AD-COM | PATCH /api/chantiers/:id/encaisse | chantier-termine | défaut, corps encaisse=oui | 200 écrit (Chantier,JournalSaisieChantier)
+AD-COM | PATCH /api/chantiers/:id/encaisse | chantier-termine-encaisse | défaut, corps encaisse=non | 200 écrit (Chantier,JournalSaisieChantier)
 AD-COM | PATCH /api/comptabilite/comptes/:id | compte-comptable-clients | défaut, corps libellé, motif et version | 200 écrit (CompteComptable,JournalCompteComptable)
 AD-COM | PATCH /api/comptabilite/comptes/:id/activation | compte-comptable-clients | défaut, corps actif=non et motif | 409 « Compte utilisé par une règle comptable ou TVA : remappez la règle avant de désactiver. » inchangé
 AD-COM | PATCH /api/contrats-maintenance/:id | contrat-actif | défaut, corps note de couverture et motif | 200 écrit (ContratMaintenance,JournalSaisieChantier)
@@ -945,7 +953,7 @@ CPT | PATCH /api/chantiers/:id | chantier-com-titulaire | défaut, corps nom, bu
 CPT | PATCH /api/chantiers/:id | chantier-com-titulaire | défaut, corps responsableId=autre conducteur | 404 « Chantier introuvable » inchangé
 CPT | PATCH /api/chantiers/:id | chantier-com-titulaire | défaut, corps statut=TERMINE seul | 404 « Chantier introuvable » inchangé
 CPT | PATCH /api/chantiers/:id | chantier-cpt | défaut, corps clientId=client-second seul | 200 inchangé
-CPT | PATCH /api/chantiers/:id | chantier-cpt | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier)
+CPT | PATCH /api/chantiers/:id | chantier-cpt | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
 CPT | PATCH /api/chantiers/:id | chantier-cpt | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
 CPT | PATCH /api/chantiers/:id | chantier-cpt | défaut, corps statut=TERMINE seul | 200 inchangé
 CPT | PATCH /api/chantiers/:id | chantier-ct | défaut, corps clientId=client-second seul | 404 « Chantier introuvable » inchangé
@@ -1004,6 +1012,8 @@ CPT | PATCH /api/chantiers/:id/commercial | chantier-tech-branche-resp | défaut
 CPT | PATCH /api/chantiers/:id/commercial | chantier-tech-branche-resp | défaut, corps commercialId=COM | 404 « Chantier introuvable » inchangé
 CPT | PATCH /api/chantiers/:id/commercial | chantier-termine | défaut, corps commercialId vide | 404 « Chantier introuvable » inchangé
 CPT | PATCH /api/chantiers/:id/commercial | chantier-termine | défaut, corps commercialId=COM | 404 « Chantier introuvable » inchangé
+CPT | PATCH /api/chantiers/:id/commercial | chantier-termine-encaisse | défaut, corps commercialId vide | 404 « Chantier introuvable » inchangé
+CPT | PATCH /api/chantiers/:id/commercial | chantier-termine-encaisse | défaut, corps commercialId=COM | 404 « Chantier introuvable » inchangé
 CPT | PATCH /api/heures/:id | heure-archivee-chantier-cpt | droit chantiers:write, corps commentaire, heures et motif | 404 « Chantier introuvable » inchangé
 CPT | PATCH /api/heures/:id | heure-archivee-chantier-ct | droit chantiers:write, corps commentaire, heures et motif | 404 « Chantier introuvable » inchangé
 CPT | PATCH /api/heures/:id | heure-chantier-autre | droit chantiers:write, corps commentaire, heures et motif | 404 « Chantier introuvable » inchangé
@@ -1195,6 +1205,8 @@ CPT-FINANCE | PATCH /api/chantiers/:id/commercial | chantier-tech-branche-resp |
 CPT-FINANCE | PATCH /api/chantiers/:id/commercial | chantier-tech-branche-resp | défaut, corps commercialId=COM | 404 « Chantier introuvable » inchangé
 CPT-FINANCE | PATCH /api/chantiers/:id/commercial | chantier-termine | défaut, corps commercialId vide | 404 « Chantier introuvable » inchangé
 CPT-FINANCE | PATCH /api/chantiers/:id/commercial | chantier-termine | défaut, corps commercialId=COM | 404 « Chantier introuvable » inchangé
+CPT-FINANCE | PATCH /api/chantiers/:id/commercial | chantier-termine-encaisse | défaut, corps commercialId vide | 404 « Chantier introuvable » inchangé
+CPT-FINANCE | PATCH /api/chantiers/:id/commercial | chantier-termine-encaisse | défaut, corps commercialId=COM | 404 « Chantier introuvable » inchangé
 CPT-FINANCE | PATCH /api/interventions/:id/couts/:type/:coutId | heures-archivees-suite-affaire-annulee | défaut, corps nbrHeures et motif | 404 « Intervention introuvable. » inchangé
 CPT-FINANCE | PATCH /api/interventions/:id/couts/:type/:coutId | heures-suite-affaire-close | défaut, corps nbrHeures et motif | 404 « Intervention introuvable. » inchangé
 CPT-FINANCE | PATCH /api/interventions/:id/couts/:type/:coutId | materiel-archive-suite-affaire-annulee | défaut, corps montantHT et motif | 404 « Intervention introuvable. » inchangé
@@ -1302,7 +1314,7 @@ CT | PATCH /api/chantiers/:id | chantier-cpt | défaut, corps nom, budgets par p
 CT | PATCH /api/chantiers/:id | chantier-cpt | défaut, corps responsableId=autre conducteur | 404 « Chantier introuvable » inchangé
 CT | PATCH /api/chantiers/:id | chantier-cpt | défaut, corps statut=TERMINE seul | 404 « Chantier introuvable » inchangé
 CT | PATCH /api/chantiers/:id | chantier-ct | défaut, corps clientId=client-second seul | 200 inchangé
-CT | PATCH /api/chantiers/:id | chantier-ct | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier)
+CT | PATCH /api/chantiers/:id | chantier-ct | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
 CT | PATCH /api/chantiers/:id | chantier-ct | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
 CT | PATCH /api/chantiers/:id | chantier-ct | défaut, corps statut=TERMINE seul | 200 inchangé
 CT | PATCH /api/chantiers/:id | chantier-ct-branche-resp | défaut, corps clientId=client-second seul | 404 « Chantier introuvable » inchangé
@@ -1326,7 +1338,7 @@ CT | PATCH /api/chantiers/:id | chantier-tech-branche-resp | défaut, corps nom,
 CT | PATCH /api/chantiers/:id | chantier-tech-branche-resp | défaut, corps responsableId=autre conducteur | 404 « Chantier introuvable » inchangé
 CT | PATCH /api/chantiers/:id | chantier-tech-branche-resp | défaut, corps statut=TERMINE seul | 404 « Chantier introuvable » inchangé
 CT | PATCH /api/chantiers/:id | chantier-termine | défaut, corps clientId=client-second seul | 200 inchangé
-CT | PATCH /api/chantiers/:id | chantier-termine | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier)
+CT | PATCH /api/chantiers/:id | chantier-termine | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
 CT | PATCH /api/chantiers/:id | chantier-termine | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
 CT | PATCH /api/chantiers/:id | chantier-termine | défaut, corps statut=TERMINE seul | 200 inchangé
 CT | PATCH /api/chantiers/:id/commercial | chantier-ac | défaut, corps commercialId vide | 404 « Chantier introuvable » inchangé
@@ -1357,6 +1369,8 @@ CT | PATCH /api/chantiers/:id/commercial | chantier-tech-branche-resp | défaut,
 CT | PATCH /api/chantiers/:id/commercial | chantier-tech-branche-resp | défaut, corps commercialId=COM | 404 « Chantier introuvable » inchangé
 CT | PATCH /api/chantiers/:id/commercial | chantier-termine | défaut, corps commercialId vide | 400 « Un chantier doit toujours avoir un commercial rattaché. » inchangé
 CT | PATCH /api/chantiers/:id/commercial | chantier-termine | défaut, corps commercialId=COM | 200 écrit (Chantier,JournalSaisieChantier)
+CT | PATCH /api/chantiers/:id/commercial | chantier-termine-encaisse | défaut, corps commercialId vide | 400 « Un chantier doit toujours avoir un commercial rattaché. » inchangé
+CT | PATCH /api/chantiers/:id/commercial | chantier-termine-encaisse | défaut, corps commercialId=COM | 200 écrit (Chantier,JournalSaisieChantier)
 CT | PATCH /api/devis/:id | devis-brouillon | droit devis, corps client, objet et ligne | 200 écrit (Devis,DevisLigne)
 CT | PATCH /api/devis/:id | devis-brouillon | droit devis:write, corps client, objet et ligne | 200 écrit (Devis,DevisLigne)
 CT | PATCH /api/devis/:id | devis-converti | droit devis, corps client, objet et ligne | 409 « Ce devis est signé : créez une nouvelle révision brouillon pour le modifier. » inchangé
@@ -1594,6 +1608,8 @@ CT-N1 | PATCH /api/chantiers/:id/commercial | chantier-tech-branche-resp | défa
 CT-N1 | PATCH /api/chantiers/:id/commercial | chantier-tech-branche-resp | défaut, corps commercialId=COM | 404 « Chantier introuvable » inchangé
 CT-N1 | PATCH /api/chantiers/:id/commercial | chantier-termine | défaut, corps commercialId vide | 404 « Chantier introuvable » inchangé
 CT-N1 | PATCH /api/chantiers/:id/commercial | chantier-termine | défaut, corps commercialId=COM | 404 « Chantier introuvable » inchangé
+CT-N1 | PATCH /api/chantiers/:id/commercial | chantier-termine-encaisse | défaut, corps commercialId vide | 404 « Chantier introuvable » inchangé
+CT-N1 | PATCH /api/chantiers/:id/commercial | chantier-termine-encaisse | défaut, corps commercialId=COM | 404 « Chantier introuvable » inchangé
 CT-N1 | PATCH /api/heures/:id | heure-archivee-chantier-ct | défaut, corps chantierId=chantier-autre et motif | 404 « Chantier introuvable » inchangé
 CT-N1 | PATCH /api/heures/:id | heure-archivee-chantier-ct | défaut, corps commentaire, heures et motif | 404 « Chantier introuvable » inchangé
 CT-N1 | PATCH /api/heures/:id | heure-chantier-autre | défaut, corps chantierId=chantier-autre et motif | 404 « Chantier introuvable » inchangé
@@ -1745,7 +1761,7 @@ DC | PATCH /api/chantiers/:id | chantier-ct-branche-resp | défaut, corps nom, b
 DC | PATCH /api/chantiers/:id | chantier-ct-branche-resp | défaut, corps responsableId=autre conducteur | 404 « Chantier introuvable » inchangé
 DC | PATCH /api/chantiers/:id | chantier-ct-branche-resp | défaut, corps statut=TERMINE seul | 404 « Chantier introuvable » inchangé
 DC | PATCH /api/chantiers/:id | chantier-dc | défaut, corps clientId=client-second seul | 200 inchangé
-DC | PATCH /api/chantiers/:id | chantier-dc | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier)
+DC | PATCH /api/chantiers/:id | chantier-dc | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
 DC | PATCH /api/chantiers/:id | chantier-dc | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
 DC | PATCH /api/chantiers/:id | chantier-dc | défaut, corps statut=TERMINE seul | 200 inchangé
 DC | PATCH /api/chantiers/:id | chantier-dir | défaut, corps clientId=client-second seul | 404 « Chantier introuvable » inchangé
@@ -1792,6 +1808,8 @@ DC | PATCH /api/chantiers/:id/commercial | chantier-tech-branche-resp | défaut,
 DC | PATCH /api/chantiers/:id/commercial | chantier-tech-branche-resp | défaut, corps commercialId=COM | 404 « Chantier introuvable » inchangé
 DC | PATCH /api/chantiers/:id/commercial | chantier-termine | défaut, corps commercialId vide | 404 « Chantier introuvable » inchangé
 DC | PATCH /api/chantiers/:id/commercial | chantier-termine | défaut, corps commercialId=COM | 404 « Chantier introuvable » inchangé
+DC | PATCH /api/chantiers/:id/commercial | chantier-termine-encaisse | défaut, corps commercialId vide | 404 « Chantier introuvable » inchangé
+DC | PATCH /api/chantiers/:id/commercial | chantier-termine-encaisse | défaut, corps commercialId=COM | 404 « Chantier introuvable » inchangé
 DC | PATCH /api/heures/:id | heure-archivee-chantier-ct | droit chantiers:write, corps commentaire, heures et motif | 404 « Chantier introuvable » inchangé
 DC | PATCH /api/heures/:id | heure-archivee-chantier-dc | droit chantiers:write, corps commentaire, heures et motif | 404 « Chantier introuvable » inchangé
 DC | PATCH /api/heures/:id | heure-chantier-autre | droit chantiers:write, corps commentaire, heures et motif | 404 « Chantier introuvable » inchangé
@@ -2081,7 +2099,7 @@ RESP | PATCH /api/chantiers/:id | chantier-dir | défaut, corps nom, budgets par
 RESP | PATCH /api/chantiers/:id | chantier-dir | défaut, corps responsableId=autre conducteur | 404 « Chantier introuvable » inchangé
 RESP | PATCH /api/chantiers/:id | chantier-dir | défaut, corps statut=TERMINE seul | 404 « Chantier introuvable » inchangé
 RESP | PATCH /api/chantiers/:id | chantier-resp | défaut, corps clientId=client-second seul | 200 inchangé
-RESP | PATCH /api/chantiers/:id | chantier-resp | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier)
+RESP | PATCH /api/chantiers/:id | chantier-resp | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
 RESP | PATCH /api/chantiers/:id | chantier-resp | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
 RESP | PATCH /api/chantiers/:id | chantier-resp | défaut, corps statut=TERMINE seul | 200 inchangé
 RESP | PATCH /api/chantiers/:id | chantier-tech-branche-resp | défaut, corps clientId=client-second seul | 404 « Chantier introuvable » inchangé
@@ -2120,6 +2138,8 @@ RESP | PATCH /api/chantiers/:id/commercial | chantier-tech-branche-resp | défau
 RESP | PATCH /api/chantiers/:id/commercial | chantier-tech-branche-resp | défaut, corps commercialId=COM | 404 « Chantier introuvable » inchangé
 RESP | PATCH /api/chantiers/:id/commercial | chantier-termine | défaut, corps commercialId vide | 404 « Chantier introuvable » inchangé
 RESP | PATCH /api/chantiers/:id/commercial | chantier-termine | défaut, corps commercialId=COM | 404 « Chantier introuvable » inchangé
+RESP | PATCH /api/chantiers/:id/commercial | chantier-termine-encaisse | défaut, corps commercialId vide | 404 « Chantier introuvable » inchangé
+RESP | PATCH /api/chantiers/:id/commercial | chantier-termine-encaisse | défaut, corps commercialId=COM | 404 « Chantier introuvable » inchangé
 RESP | PATCH /api/devis/:id | devis-brouillon | droit devis, corps client, objet et ligne | 200 écrit (Devis,DevisLigne)
 RESP | PATCH /api/devis/:id | devis-brouillon | droit devis:write, corps client, objet et ligne | 200 écrit (Devis,DevisLigne)
 RESP | PATCH /api/devis/:id | devis-converti | droit devis, corps client, objet et ligne | 409 « Ce devis est signé : créez une nouvelle révision brouillon pour le modifier. » inchangé
@@ -2369,6 +2389,8 @@ RESP-SANS-BRANCHE | PATCH /api/chantiers/:id/commercial | chantier-tech-branche-
 RESP-SANS-BRANCHE | PATCH /api/chantiers/:id/commercial | chantier-tech-branche-resp | défaut, corps commercialId=COM | 404 « Chantier introuvable » inchangé
 RESP-SANS-BRANCHE | PATCH /api/chantiers/:id/commercial | chantier-termine | défaut, corps commercialId vide | 404 « Chantier introuvable » inchangé
 RESP-SANS-BRANCHE | PATCH /api/chantiers/:id/commercial | chantier-termine | défaut, corps commercialId=COM | 404 « Chantier introuvable » inchangé
+RESP-SANS-BRANCHE | PATCH /api/chantiers/:id/commercial | chantier-termine-encaisse | défaut, corps commercialId vide | 404 « Chantier introuvable » inchangé
+RESP-SANS-BRANCHE | PATCH /api/chantiers/:id/commercial | chantier-termine-encaisse | défaut, corps commercialId=COM | 404 « Chantier introuvable » inchangé
 RESP-SANS-BRANCHE | PATCH /api/heures/:id | heure-archivee-chantier-ct | défaut, corps chantierId=chantier-autre et motif | 404 « Chantier introuvable » inchangé
 RESP-SANS-BRANCHE | PATCH /api/heures/:id | heure-archivee-chantier-ct | défaut, corps commentaire, heures et motif | 404 « Chantier introuvable » inchangé
 RESP-SANS-BRANCHE | PATCH /api/heures/:id | heure-chantier-autre | défaut, corps chantierId=chantier-autre et motif | 404 « Chantier introuvable » inchangé
@@ -2479,11 +2501,11 @@ SA | PATCH /api/achats/:id | achat-chantier-ct-branche-resp | défaut, corps des
 SA | PATCH /api/achats/:id | achat-chantier-termine | défaut, corps chantierId=chantier-autre et motif | 200 écrit (AchatReel,JournalSaisieChantier) ; chantier de l’achat inchangé
 SA | PATCH /api/achats/:id | achat-chantier-termine | défaut, corps description, montantHT et motif | 200 écrit (AchatReel,JournalSaisieChantier)
 SA | PATCH /api/chantiers/:id | chantier-ac | défaut, corps clientId=client-second seul | 200 écrit (Chantier,JournalSaisieChantier)
-SA | PATCH /api/chantiers/:id | chantier-ac | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier)
+SA | PATCH /api/chantiers/:id | chantier-ac | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
 SA | PATCH /api/chantiers/:id | chantier-ac | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
 SA | PATCH /api/chantiers/:id | chantier-ac | défaut, corps statut=TERMINE seul | 200 écrit (Chantier)
 SA | PATCH /api/chantiers/:id | chantier-ad | défaut, corps clientId=client-second seul | 200 écrit (Chantier,JournalSaisieChantier)
-SA | PATCH /api/chantiers/:id | chantier-ad | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier)
+SA | PATCH /api/chantiers/:id | chantier-ad | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
 SA | PATCH /api/chantiers/:id | chantier-ad | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
 SA | PATCH /api/chantiers/:id | chantier-ad | défaut, corps statut=TERMINE seul | 200 écrit (Chantier)
 SA | PATCH /api/chantiers/:id | chantier-annule | défaut, corps clientId=client-second seul | 409 « Cette affaire est annulée : elle n’est plus modifiable. » inchangé
@@ -2491,47 +2513,47 @@ SA | PATCH /api/chantiers/:id | chantier-annule | défaut, corps nom, budgets pa
 SA | PATCH /api/chantiers/:id | chantier-annule | défaut, corps responsableId=autre conducteur | 409 « Cette affaire est annulée : elle n’est plus modifiable. » inchangé
 SA | PATCH /api/chantiers/:id | chantier-annule | défaut, corps statut=TERMINE seul | 409 « Cette affaire est annulée : elle n’est plus modifiable. » inchangé
 SA | PATCH /api/chantiers/:id | chantier-autre | défaut, corps clientId=client-second seul | 200 écrit (Chantier,JournalSaisieChantier)
-SA | PATCH /api/chantiers/:id | chantier-autre | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier)
+SA | PATCH /api/chantiers/:id | chantier-autre | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
 SA | PATCH /api/chantiers/:id | chantier-autre | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
 SA | PATCH /api/chantiers/:id | chantier-autre | défaut, corps statut=TERMINE seul | 200 écrit (Chantier)
 SA | PATCH /api/chantiers/:id | chantier-com | défaut, corps clientId=client-second seul | 200 écrit (Chantier,JournalSaisieChantier)
-SA | PATCH /api/chantiers/:id | chantier-com | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier)
+SA | PATCH /api/chantiers/:id | chantier-com | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
 SA | PATCH /api/chantiers/:id | chantier-com | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
 SA | PATCH /api/chantiers/:id | chantier-com | défaut, corps statut=TERMINE seul | 200 écrit (Chantier)
 SA | PATCH /api/chantiers/:id | chantier-com-titulaire | défaut, corps clientId=client-second seul | 200 écrit (Chantier,JournalSaisieChantier)
-SA | PATCH /api/chantiers/:id | chantier-com-titulaire | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier)
+SA | PATCH /api/chantiers/:id | chantier-com-titulaire | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
 SA | PATCH /api/chantiers/:id | chantier-com-titulaire | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
 SA | PATCH /api/chantiers/:id | chantier-com-titulaire | défaut, corps statut=TERMINE seul | 200 écrit (Chantier)
 SA | PATCH /api/chantiers/:id | chantier-cpt | défaut, corps clientId=client-second seul | 200 écrit (Chantier,JournalSaisieChantier)
-SA | PATCH /api/chantiers/:id | chantier-cpt | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier)
+SA | PATCH /api/chantiers/:id | chantier-cpt | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
 SA | PATCH /api/chantiers/:id | chantier-cpt | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
 SA | PATCH /api/chantiers/:id | chantier-cpt | défaut, corps statut=TERMINE seul | 200 écrit (Chantier)
 SA | PATCH /api/chantiers/:id | chantier-ct | défaut, corps clientId=client-second seul | 409 « Des interventions SAV sont rattachées à cette affaire : elle ne change pas de client. » inchangé
-SA | PATCH /api/chantiers/:id | chantier-ct | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier)
+SA | PATCH /api/chantiers/:id | chantier-ct | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
 SA | PATCH /api/chantiers/:id | chantier-ct | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
 SA | PATCH /api/chantiers/:id | chantier-ct | défaut, corps statut=TERMINE seul | 200 écrit (Chantier)
 SA | PATCH /api/chantiers/:id | chantier-ct-branche-resp | défaut, corps clientId=client-second seul | 200 écrit (Chantier,JournalSaisieChantier)
-SA | PATCH /api/chantiers/:id | chantier-ct-branche-resp | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier)
+SA | PATCH /api/chantiers/:id | chantier-ct-branche-resp | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
 SA | PATCH /api/chantiers/:id | chantier-ct-branche-resp | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
 SA | PATCH /api/chantiers/:id | chantier-ct-branche-resp | défaut, corps statut=TERMINE seul | 200 écrit (Chantier)
 SA | PATCH /api/chantiers/:id | chantier-dc | défaut, corps clientId=client-second seul | 200 écrit (Chantier,JournalSaisieChantier)
-SA | PATCH /api/chantiers/:id | chantier-dc | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier)
+SA | PATCH /api/chantiers/:id | chantier-dc | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
 SA | PATCH /api/chantiers/:id | chantier-dc | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
 SA | PATCH /api/chantiers/:id | chantier-dc | défaut, corps statut=TERMINE seul | 200 écrit (Chantier)
 SA | PATCH /api/chantiers/:id | chantier-dir | défaut, corps clientId=client-second seul | 200 écrit (Chantier,JournalSaisieChantier)
-SA | PATCH /api/chantiers/:id | chantier-dir | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier)
+SA | PATCH /api/chantiers/:id | chantier-dir | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
 SA | PATCH /api/chantiers/:id | chantier-dir | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
 SA | PATCH /api/chantiers/:id | chantier-dir | défaut, corps statut=TERMINE seul | 200 écrit (Chantier)
 SA | PATCH /api/chantiers/:id | chantier-resp | défaut, corps clientId=client-second seul | 200 écrit (Chantier,JournalSaisieChantier)
-SA | PATCH /api/chantiers/:id | chantier-resp | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier)
+SA | PATCH /api/chantiers/:id | chantier-resp | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
 SA | PATCH /api/chantiers/:id | chantier-resp | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
 SA | PATCH /api/chantiers/:id | chantier-resp | défaut, corps statut=TERMINE seul | 200 écrit (Chantier)
 SA | PATCH /api/chantiers/:id | chantier-tech-branche-resp | défaut, corps clientId=client-second seul | 409 « Des interventions SAV sont rattachées à cette affaire : elle ne change pas de client. » inchangé
-SA | PATCH /api/chantiers/:id | chantier-tech-branche-resp | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier)
+SA | PATCH /api/chantiers/:id | chantier-tech-branche-resp | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
 SA | PATCH /api/chantiers/:id | chantier-tech-branche-resp | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
 SA | PATCH /api/chantiers/:id | chantier-tech-branche-resp | défaut, corps statut=TERMINE seul | 200 écrit (Chantier)
 SA | PATCH /api/chantiers/:id | chantier-termine | défaut, corps clientId=client-second seul | 200 écrit (Chantier,JournalSaisieChantier)
-SA | PATCH /api/chantiers/:id | chantier-termine | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier)
+SA | PATCH /api/chantiers/:id | chantier-termine | défaut, corps nom, budgets par poste et heures vendues | 200 écrit (Chantier) ; budgets par poste et heures vendues écrits
 SA | PATCH /api/chantiers/:id | chantier-termine | défaut, corps responsableId=autre conducteur | 200 écrit (Chantier,JournalSaisieChantier)
 SA | PATCH /api/chantiers/:id | chantier-termine | défaut, corps statut=TERMINE seul | 200 écrit (Chantier)
 SA | PATCH /api/chantiers/:id/commercial | chantier-ac | défaut, corps commercialId vide | 400 « Un chantier doit toujours avoir un commercial rattaché. » inchangé
@@ -2562,6 +2584,8 @@ SA | PATCH /api/chantiers/:id/commercial | chantier-tech-branche-resp | défaut,
 SA | PATCH /api/chantiers/:id/commercial | chantier-tech-branche-resp | défaut, corps commercialId=COM | 200 écrit (Chantier,JournalSaisieChantier)
 SA | PATCH /api/chantiers/:id/commercial | chantier-termine | défaut, corps commercialId vide | 400 « Un chantier doit toujours avoir un commercial rattaché. » inchangé
 SA | PATCH /api/chantiers/:id/commercial | chantier-termine | défaut, corps commercialId=COM | 200 écrit (Chantier,JournalSaisieChantier)
+SA | PATCH /api/chantiers/:id/commercial | chantier-termine-encaisse | défaut, corps commercialId vide | 400 « Un chantier doit toujours avoir un commercial rattaché. » inchangé
+SA | PATCH /api/chantiers/:id/commercial | chantier-termine-encaisse | défaut, corps commercialId=COM | 200 écrit (Chantier,JournalSaisieChantier)
 SA | PATCH /api/chantiers/:id/encaisse | chantier-ac | défaut, corps encaisse=oui | 200 écrit (Chantier,JournalSaisieChantier)
 SA | PATCH /api/chantiers/:id/encaisse | chantier-ad | défaut, corps encaisse=oui | 200 écrit (Chantier,JournalSaisieChantier)
 SA | PATCH /api/chantiers/:id/encaisse | chantier-annule | défaut, corps encaisse=oui | 200 écrit (Chantier,JournalSaisieChantier)
@@ -2576,6 +2600,7 @@ SA | PATCH /api/chantiers/:id/encaisse | chantier-dir | défaut, corps encaisse=
 SA | PATCH /api/chantiers/:id/encaisse | chantier-resp | défaut, corps encaisse=oui | 200 écrit (Chantier,JournalSaisieChantier)
 SA | PATCH /api/chantiers/:id/encaisse | chantier-tech-branche-resp | défaut, corps encaisse=oui | 200 écrit (Chantier,JournalSaisieChantier)
 SA | PATCH /api/chantiers/:id/encaisse | chantier-termine | défaut, corps encaisse=oui | 200 écrit (Chantier,JournalSaisieChantier)
+SA | PATCH /api/chantiers/:id/encaisse | chantier-termine-encaisse | défaut, corps encaisse=non | 200 écrit (Chantier,JournalSaisieChantier)
 SA | PATCH /api/comptabilite/comptes/:id | compte-comptable-clients | défaut, corps libellé, motif et version | 200 écrit (CompteComptable,JournalCompteComptable)
 SA | PATCH /api/comptabilite/comptes/:id/activation | compte-comptable-clients | défaut, corps actif=non et motif | 409 « Compte utilisé par une règle comptable ou TVA : remappez la règle avant de désactiver. » inchangé
 SA | PATCH /api/contrats-maintenance/:id | contrat-actif | défaut, corps note de couverture et motif | 200 écrit (ContratMaintenance,JournalSaisieChantier)
@@ -2856,6 +2881,8 @@ TECH | PATCH /api/chantiers/:id/commercial | chantier-tech-branche-resp | défau
 TECH | PATCH /api/chantiers/:id/commercial | chantier-tech-branche-resp | défaut, corps commercialId=COM | 403 « Un compte technicien n’est pas autorisé à réattribuer le commercial d’une affaire. Adressez-vous à votre responsable. » inchangé
 TECH | PATCH /api/chantiers/:id/commercial | chantier-termine | défaut, corps commercialId vide | 404 « Chantier introuvable » inchangé
 TECH | PATCH /api/chantiers/:id/commercial | chantier-termine | défaut, corps commercialId=COM | 404 « Chantier introuvable » inchangé
+TECH | PATCH /api/chantiers/:id/commercial | chantier-termine-encaisse | défaut, corps commercialId vide | 404 « Chantier introuvable » inchangé
+TECH | PATCH /api/chantiers/:id/commercial | chantier-termine-encaisse | défaut, corps commercialId=COM | 404 « Chantier introuvable » inchangé
 TECH | PATCH /api/interventions/:id/couts/:type/:coutId | heures-archivees-suite-affaire-annulee | défaut, corps nbrHeures et motif | 409 « L’affaire de cette suite est annulée : plus aucun coût ne peut y être saisi. » inchangé
 TECH | PATCH /api/interventions/:id/couts/:type/:coutId | heures-suite-affaire-close | défaut, corps nbrHeures et motif | 403 « Le chantier de cette suite est clôturé : ses coûts ne peuvent plus être saisis ni modifiés. » inchangé
 TECH | PATCH /api/interventions/:id/couts/:type/:coutId | materiel-archive-suite-affaire-annulee | défaut, corps montantHT et motif | 403 « Accès non autorisé. » inchangé
@@ -2977,6 +3004,8 @@ TECH-SANS-FICHE | PATCH /api/chantiers/:id/commercial | chantier-tech-branche-re
 TECH-SANS-FICHE | PATCH /api/chantiers/:id/commercial | chantier-tech-branche-resp | défaut, corps commercialId=COM | 404 « Chantier introuvable » inchangé
 TECH-SANS-FICHE | PATCH /api/chantiers/:id/commercial | chantier-termine | défaut, corps commercialId vide | 404 « Chantier introuvable » inchangé
 TECH-SANS-FICHE | PATCH /api/chantiers/:id/commercial | chantier-termine | défaut, corps commercialId=COM | 404 « Chantier introuvable » inchangé
+TECH-SANS-FICHE | PATCH /api/chantiers/:id/commercial | chantier-termine-encaisse | défaut, corps commercialId vide | 404 « Chantier introuvable » inchangé
+TECH-SANS-FICHE | PATCH /api/chantiers/:id/commercial | chantier-termine-encaisse | défaut, corps commercialId=COM | 404 « Chantier introuvable » inchangé
 TECH-SANS-FICHE | PATCH /api/interventions/:id/couts/:type/:coutId | heures-archivees-suite-affaire-annulee | défaut, corps nbrHeures et motif | 404 « Intervention introuvable. » inchangé
 TECH-SANS-FICHE | PATCH /api/interventions/:id/couts/:type/:coutId | heures-suite-affaire-close | défaut, corps nbrHeures et motif | 404 « Intervention introuvable. » inchangé
 TECH-SANS-FICHE | PATCH /api/interventions/:id/couts/:type/:coutId | materiel-archive-suite-affaire-annulee | défaut, corps montantHT et motif | 404 « Intervention introuvable. » inchangé
