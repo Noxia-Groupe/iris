@@ -28,8 +28,8 @@
 //    droit est donné par la route d'administration, puis retiré, comme dans D1a-4.
 // Une ligne : compte, route, cible, contexte (« défaut, corps <nom> », ou « droit <nom>, corps <nom> » pour un droit
 // individuel), réponse (code, et message exact d'un refus ou d'un 400), puis « écrit (tables) » ou « inchangé » selon
-// l'empreinte de toute la base, et, pour un champ ignoré d'une route qui écrit ou pour les budgets par poste et les
-// heures vendues d'un chantier, le constat relu en base. Jamais un montant : un 2xx s'écrit par son code seul, suivi
+// l'empreinte de toute la base, et, pour un champ ignoré d'une route qui écrit, pour les budgets par poste et les
+// heures vendues d'un chantier ou pour le taux horaire d'une fiche, le constat relu en base. Jamais un montant : un 2xx s'écrit par son code seul, suivi
 // au plus d'un constat sans chiffre (garde lignesAvecMontant d'outils.mjs).
 //
 // Déroulement : les cas qu'entrees.txt (ou individuels-sans-gain.txt pour un droit) annonce comme un refus 403, 404, 409
@@ -110,13 +110,19 @@ const CIBLE_DU_CORPS = {
 // --- Corps valides ---
 // Chaque variante a un nom, écrit dans le contexte de la ligne ; `s` marque un corps du bloc S (champ ignoré ou refus
 // selon le corps), que les droits individuels ne rejouent pas ; `constat` relit en base, après un cas qui a écrit, le
-// champ ignoré, ou les budgets par poste et les heures vendues écrits (texte sans chiffre). `d` : identifiants et dates (rempli avant la matrice).
+// champ ignoré, ou les montants écrits (budgets par poste et heures vendues d'un chantier, taux horaire d'une fiche),
+// en texte sans chiffre. `d` : identifiants et dates (rempli avant la matrice).
 const motif = (quoi) => `TEST ${quoi} par la matrice des modifications`;
 const LIGNE_DEVIS = (designation, quantite = 1) => ({ designation, nature: 'MAIN_OEUVRE', quantite, prixUnitaireHt: 150, tauxTva: 20 });
 // Budgets par poste et heures vendues du corps valide d'un chantier (#387). Le nom changeant aussi, « écrit (Chantier) »
 // ne prouverait pas que ces montants sont écrits : le constat les relit en base (C1 de l'audit des montants de #440),
 // et le jeu de données n'en porte aucun à ces valeurs (vérifié avant la matrice).
 const BUDGETS = { budgetMaterielVendu: 1200, budgetMainOeuvreVendu: 800, heuresVendues: 16 };
+// Taux horaire chargé du corps valide d'une fiche intervenant : il fait le coût des pointages futurs, donc les marges. Le
+// nom changeant aussi, « écrit (Intervenant) » ne prouverait pas que le taux est écrit, et aucun autre test ne modifie
+// une fiche : le constat le relit en base (C5 de l'audit des montants de #440), et aucune fiche du jeu n'a déjà ce taux
+// (vérifié avant la matrice).
+const TAUX_HORAIRE = 45;
 const CORPS = {
   // --- Chantiers (titulaire, administration) ---
   // Le corps valide ordinaire modifie le nom, les budgets par poste et les heures vendues (#387), sans le montant vendu
@@ -196,7 +202,10 @@ const CORPS = {
   // Période fixe (aucune dépendance au jour) ; sans plan commercial, le suivi n'ouvre aucune prime.
   'PUT /api/commerciaux/:id/prime-mensuelle': () => [{ nom: 'période et suivi administratif', corps: () => ({ periode: '2026-09', suiviAdministratif: true }) }],
   'POST /api/intervenants': () => [{ nom: 'nom, fonction et taux horaire', corps: () => ({ nom: 'TEST Fiche créée par la matrice', role: 'Technicien', tauxHoraireCharge: 38 }) }],
-  'PUT /api/intervenants/:id': () => [{ nom: 'nom et taux horaire', corps: () => ({ nom: 'TEST Fiche modifiée par la matrice', tauxHoraireCharge: 45 }) }],
+  'PUT /api/intervenants/:id': (cible) => [{ nom: 'nom et taux horaire', corps: () => ({ nom: 'TEST Fiche modifiée par la matrice', tauxHoraireCharge: TAUX_HORAIRE }), constat: async (p) => {
+    const fiche = await p.intervenant.findUniqueOrThrow({ where: { id: cible.ids.id } });
+    return Number(fiche.tauxHoraireCharge) === TAUX_HORAIRE ? 'taux horaire écrit' : 'taux horaire non écrit';
+  } }],
   'PUT /api/intervenants/:id/main-oeuvre': (_cible, d) => [{ nom: 'mainOeuvreId=main-oeuvre-matrice', corps: () => ({ mainOeuvreId: d.mainOeuvre }) }],
   // --- Clients, contacts, sites, parc ---
   'POST /api/clients': () => [{ nom: 'raison sociale', corps: () => ({ raisonSociale: 'TEST Client créé par la matrice' }) }],
@@ -614,6 +623,10 @@ if (!TEST_DATABASE_URL) {
         const chantier = await appli.prisma.chantier.findUniqueOrThrow({ where: { id: cible.ids.id } });
         assert.ok(Object.keys(BUDGETS).every((champ) => Number(chantier[champ]) !== BUDGETS[champ]), `${cible.nom} : un budget vaut déjà celui du corps valide`);
       }
+      for (const cible of FAMILLES['fiche-intervenant'].cibles) if (cible.nom !== INEXISTANT) {
+        const fiche = await appli.prisma.intervenant.findUniqueOrThrow({ where: { id: cible.ids.id } });
+        assert.notEqual(Number(fiche.tauxHoraireCharge), TAUX_HORAIRE, `${cible.nom} : le taux horaire vaut déjà celui du corps valide`);
+      }
 
       // Instantané et outil de remise en état, une fois tout construit.
       const tables = await tablesDeLaBase(appli.prisma);
@@ -776,10 +789,13 @@ if (!TEST_DATABASE_URL) {
       assert.match(reponse('CT', 'POST /api/interventions', 'chantierId=chantier-ct', corps('client, titre et chantier')), /^201 écrit \(/);
       // Chantier terminé : son titulaire le modifie (nom, budgets, heures vendues, relus en base) ; un autre conducteur
       // reçoit 404. Terminé et encaissé : son titulaire réattribue le commercial, donc le CA et la marge validés, et
-      // l'administration retire l'encaissement (C2 de l'audit des montants de #440 ; question posée à Nelson).
+      // l'administration retire l'encaissement (C2 de l'audit des montants de #440). Nelson a décidé le 02-11-2026 de fermer
+      // ce cas hors administration : le correctif qui suit cette PR mettra ces lignes à jour.
       assert.equal(reponse('CT', 'PATCH /api/chantiers/:id', 'chantier-termine', corps('nom, budgets par poste et heures vendues')), '200 écrit (Chantier) ; budgets par poste et heures vendues écrits');
       assert.equal(reponse('CT', 'PATCH /api/chantiers/:id/commercial', 'chantier-termine-encaisse', corps('commercialId=COM')), '200 écrit (Chantier,JournalSaisieChantier)');
       for (const compte of ADMINISTRATION) assert.equal(reponse(compte, 'PATCH /api/chantiers/:id/encaisse', 'chantier-termine-encaisse', corps('encaisse=non')), '200 écrit (Chantier,JournalSaisieChantier)');
+      // Taux horaire d'une fiche, relu en base : l'administration l'écrit (C5 de l'audit des montants de #440).
+      for (const compte of ADMINISTRATION) for (const fiche of ['fiche-tech', 'fiche-libre']) assert.equal(reponse(compte, 'PUT /api/intervenants/:id', fiche, corps('nom et taux horaire')), '200 écrit (Intervenant) ; taux horaire écrit');
       assert.equal(reponse('CT-N1', 'PATCH /api/chantiers/:id', 'chantier-termine', corps('nom, budgets par poste et heures vendues')), '404 « Chantier introuvable » inchangé');
       // #285 : l'administration encaisse une affaire annulée.
       for (const compte of ADMINISTRATION) assert.match(reponse(compte, 'PATCH /api/chantiers/:id/encaisse', 'chantier-annule', corps('encaisse=oui')), /^200 écrit \(/);

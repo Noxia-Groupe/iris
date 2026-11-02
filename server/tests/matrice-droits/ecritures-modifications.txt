@@ -499,8 +499,8 @@ AD | PUT /api/devis/:id/statut | devis-brouillon | défaut, corps statut=ENVOYE 
 AD | PUT /api/devis/:id/statut | devis-converti | défaut, corps statut=EN_ATTENTE_ACOMPTE | 400 « Le chantier de ce devis est déjà ouvert : seule une annulation peut revenir dessus. » inchangé
 AD | PUT /api/devis/:id/statut | devis-signe | défaut, corps statut=EN_ATTENTE_ACOMPTE | 400 « Ce devis n’exige pas d’acompte. » inchangé
 AD | PUT /api/fournisseurs/:id | fournisseur | défaut, corps nom | 200 écrit (Fournisseur)
-AD | PUT /api/intervenants/:id | fiche-libre | défaut, corps nom et taux horaire | 200 écrit (Intervenant)
-AD | PUT /api/intervenants/:id | fiche-tech | défaut, corps nom et taux horaire | 200 écrit (Intervenant)
+AD | PUT /api/intervenants/:id | fiche-libre | défaut, corps nom et taux horaire | 200 écrit (Intervenant) ; taux horaire écrit
+AD | PUT /api/intervenants/:id | fiche-tech | défaut, corps nom et taux horaire | 200 écrit (Intervenant) ; taux horaire écrit
 AD | PUT /api/intervenants/:id/main-oeuvre | fiche-libre | défaut, corps mainOeuvreId=main-oeuvre-matrice | 200 écrit (IntervenantMainOeuvre,JournalAdministration)
 AD | PUT /api/intervenants/:id/main-oeuvre | fiche-tech | défaut, corps mainOeuvreId=main-oeuvre-matrice | 200 écrit (IntervenantMainOeuvre,JournalAdministration)
 AD | PUT /api/interventions/:id/a-suivre | intervention-a-suivre | défaut, corps aSuivre=non | 200 écrit (Intervention,JournalSaisieChantier)
@@ -802,8 +802,8 @@ AD-COM | PUT /api/devis/:id/statut | devis-brouillon | défaut, corps statut=ENV
 AD-COM | PUT /api/devis/:id/statut | devis-converti | défaut, corps statut=EN_ATTENTE_ACOMPTE | 400 « Le chantier de ce devis est déjà ouvert : seule une annulation peut revenir dessus. » inchangé
 AD-COM | PUT /api/devis/:id/statut | devis-signe | défaut, corps statut=EN_ATTENTE_ACOMPTE | 400 « Ce devis n’exige pas d’acompte. » inchangé
 AD-COM | PUT /api/fournisseurs/:id | fournisseur | défaut, corps nom | 200 écrit (Fournisseur)
-AD-COM | PUT /api/intervenants/:id | fiche-libre | défaut, corps nom et taux horaire | 200 écrit (Intervenant)
-AD-COM | PUT /api/intervenants/:id | fiche-tech | défaut, corps nom et taux horaire | 200 écrit (Intervenant)
+AD-COM | PUT /api/intervenants/:id | fiche-libre | défaut, corps nom et taux horaire | 200 écrit (Intervenant) ; taux horaire écrit
+AD-COM | PUT /api/intervenants/:id | fiche-tech | défaut, corps nom et taux horaire | 200 écrit (Intervenant) ; taux horaire écrit
 AD-COM | PUT /api/intervenants/:id/main-oeuvre | fiche-libre | défaut, corps mainOeuvreId=main-oeuvre-matrice | 200 écrit (IntervenantMainOeuvre,JournalAdministration)
 AD-COM | PUT /api/intervenants/:id/main-oeuvre | fiche-tech | défaut, corps mainOeuvreId=main-oeuvre-matrice | 200 écrit (IntervenantMainOeuvre,JournalAdministration)
 AD-COM | PUT /api/interventions/:id/a-suivre | intervention-a-suivre | défaut, corps aSuivre=non | 200 écrit (Intervention,JournalSaisieChantier)
@@ -2768,8 +2768,8 @@ SA | PUT /api/devis/:id/statut | devis-brouillon | défaut, corps statut=ENVOYE 
 SA | PUT /api/devis/:id/statut | devis-converti | défaut, corps statut=EN_ATTENTE_ACOMPTE | 400 « Le chantier de ce devis est déjà ouvert : seule une annulation peut revenir dessus. » inchangé
 SA | PUT /api/devis/:id/statut | devis-signe | défaut, corps statut=EN_ATTENTE_ACOMPTE | 400 « Ce devis n’exige pas d’acompte. » inchangé
 SA | PUT /api/fournisseurs/:id | fournisseur | défaut, corps nom | 200 écrit (Fournisseur)
-SA | PUT /api/intervenants/:id | fiche-libre | défaut, corps nom et taux horaire | 200 écrit (Intervenant)
-SA | PUT /api/intervenants/:id | fiche-tech | défaut, corps nom et taux horaire | 200 écrit (Intervenant)
+SA | PUT /api/intervenants/:id | fiche-libre | défaut, corps nom et taux horaire | 200 écrit (Intervenant) ; taux horaire écrit
+SA | PUT /api/intervenants/:id | fiche-tech | défaut, corps nom et taux horaire | 200 écrit (Intervenant) ; taux horaire écrit
 SA | PUT /api/intervenants/:id/main-oeuvre | fiche-libre | défaut, corps mainOeuvreId=main-oeuvre-matrice | 200 écrit (IntervenantMainOeuvre,JournalAdministration)
 SA | PUT /api/intervenants/:id/main-oeuvre | fiche-tech | défaut, corps mainOeuvreId=main-oeuvre-matrice | 200 écrit (IntervenantMainOeuvre,JournalAdministration)
 SA | PUT /api/interventions/:id/a-suivre | intervention-a-suivre | défaut, corps aSuivre=non | 200 écrit (Intervention,JournalSaisieChantier)
