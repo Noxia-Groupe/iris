@@ -197,14 +197,31 @@ export const MONTANTS_MIS_A_ZERO = [
 
 // Montants masqués dans les RÉPONSES D'ÉCRITURE : même règle que la lecture, mais une écriture réelle est nécessaire
 // pour les voir. Ils relèvent de D1a-5 (écritures réelles, cadrage §3) et ne sont pas observés ici ; ils sont listés
-// pour que la liste soit fermée.
+// pour que la liste soit fermée. D1a-5d-2 les observe (matrice-droits-montants.test.mjs ; cadrage de D1a-5d, version 3,
+// §5.2), et son test de couverture exige, pour chaque couple (groupe, champ), un compte qui le voit « présent » et un
+// compte qui ne le voit pas « null » ou « absent ».
+//
+// `annotations` (D1a-5d-2, liste FERMÉE du cadrage de D1a-5d, §5.2) : un côté d'un champ INOBSERVABLE PAR UNE ÉCRITURE,
+// avec sa raison ; aucun compte de ce côté n'écrit la route, ou aucune réponse ne porte le champ. Une annotation ne
+// dispense jamais d'observer l'autre côté ; un champ non porté est observé « absent » (ou « non porté ») pour chaque
+// compte joué. `cote` : « voit » ou « ne voit pas » ; `nonPorte` : aucune réponse ne porte le champ, observé alors
+// « non porté » pour chaque compte ; `jusqua` : la sous-PR qui observe ce côté et retire l'annotation (D1a-5d-3, par une
+// clé sans finances:read). Ni D1a-3 ni D1a-4 ne lisent cette liste : l'ajout ne change pas leur comportement, ce que
+// leurs fichiers rejoués prouvent.
+const A = (champs, cote, raison, { jusqua = null, nonPorte = false } = {}) => ({ champs, cote, raison, jusqua, nonPorte });
 export const MONTANTS_MASQUES_ECRITURES = [
-  { routes: ['PATCH /api/chantiers/:id', 'PATCH /api/chantiers/:id/statut', 'PATCH /api/chantiers/:id/commercial'], champs: ['budgetGlobalVendu', 'coutMaterielPrevu', 'budgetMaterielVendu', 'budgetMainOeuvreVendu'], source: 'chantiers/droits.ts:95-101 (chantierSelonRentabilite) ; chantiers/routes.ts:383, :451, :497' },
-  { routes: ['POST /api/devis/:id/convertir', 'POST /api/v1/devis/:id/convertir'], champs: ['coutMaterielPrevu'], source: 'devis/routes.ts:423' },
-  { routes: ['POST /api/devis', 'PATCH /api/devis/:id', 'POST /api/devis/:id/revisions', 'PUT /api/devis/:id/statut', 'POST /api/devis/:id/acompte', 'POST /api/devis/:id/annulation', 'POST /api/devis/:id/duplication', 'et leurs jumelles /api/v1'], champs: ['lignes[].prixAchatUnitaireHt'], source: 'devis/routes.ts:82, :113, :136, :237, :564, :582, :648 (devisPourLecteur)' },
-  { routes: ['POST /api/heures', 'PATCH /api/heures/:id', 'POST /api/heures/:id/restaurer'], champs: ['tauxHoraireApplique', 'intervenant.tauxHoraireCharge'], source: 'chantiers/saisies.ts:286, :339, :393 (saisieSelonDroits)' },
-  { routes: ['POST /api/interventions/:id/couts/heures', 'PATCH /api/interventions/:id/couts/heures/:coutId'], champs: ['tauxHoraireApplique', 'prixVenteHoraireApplique'], source: 'interventions/metier.ts:96-98 (heureOperationnelleTechnicien) ; interventions/routes.ts:154 et :234' },
-  { routes: ['POST /api/interventions/:id/couts/:type/:coutId/:action'], champs: ['tauxHoraireApplique', 'prixVenteHoraireApplique', 'montantHT'], source: 'interventions/routes.ts:257 (saisieSelonDroits)' },
-  { routes: ['POST /api/catalogue/:family', 'PUT /api/catalogue/:family/:id', 'DELETE /api/catalogue/:family/:id', 'et leurs jumelles /api/v1'], champs: ['prixAchatHt'], source: 'catalogue/routes.ts:67, :71, :86, :91, :111, :112 (ficheCataloguePourLecteur)' },
-  { routes: ['POST /api/clients/:clientId/equipements', 'POST /api/clients/:clientId/equipements/:id/archiver', 'et leurs jumelles /api/v1'], champs: ['catalogueEquipement.prixAchatHt'], source: 'clients/equipements.ts:92 et :104 (equipementPourLecteur)' },
+  { routes: ['PATCH /api/chantiers/:id', 'PATCH /api/chantiers/:id/statut', 'PATCH /api/chantiers/:id/commercial'], champs: ['budgetGlobalVendu', 'coutMaterielPrevu', 'budgetMaterielVendu', 'budgetMainOeuvreVendu'], source: 'chantiers/droits.ts:95-101 (chantierSelonRentabilite) ; chantiers/routes.ts:383, :451, :497',
+    annotations: [A(['budgetMaterielVendu', 'budgetMainOeuvreVendu'], 'ne voit pas', 'seul le technicien ne les voit pas (droits/visibilite.ts:11-14), et il n’écrit pas un chantier')] },
+  { routes: ['POST /api/devis/:id/convertir', 'POST /api/v1/devis/:id/convertir'], champs: ['coutMaterielPrevu'], source: 'devis/routes.ts:423', annotations: [] },
+  { routes: ['POST /api/devis', 'PATCH /api/devis/:id', 'POST /api/devis/:id/revisions', 'PUT /api/devis/:id/statut', 'POST /api/devis/:id/acompte', 'POST /api/devis/:id/annulation', 'POST /api/devis/:id/duplication', 'et leurs jumelles /api/v1'], champs: ['lignes[].prixAchatUnitaireHt'], source: 'devis/routes.ts:82, :113, :136, :237, :564, :582, :648 (devisPourLecteur)', annotations: [] },
+  { routes: ['POST /api/heures', 'PATCH /api/heures/:id', 'POST /api/heures/:id/restaurer'], champs: ['tauxHoraireApplique', 'intervenant.tauxHoraireCharge'], source: 'chantiers/saisies.ts:286, :339, :393 (saisieSelonDroits)',
+    annotations: [A(['intervenant.tauxHoraireCharge'], 'voit', 'porté par aucune réponse d’écriture : aucune ne joint l’intervenant (chantiers/saisies.ts:272-286)', { nonPorte: true })] },
+  { routes: ['POST /api/interventions/:id/couts/heures', 'PATCH /api/interventions/:id/couts/heures/:coutId'], champs: ['tauxHoraireApplique', 'prixVenteHoraireApplique'], source: 'interventions/metier.ts:96-98 (heureOperationnelleTechnicien) ; interventions/routes.ts:154 et :234',
+    annotations: [A(['tauxHoraireApplique', 'prixVenteHoraireApplique'], 'voit', 'seul le technicien affecté écrit ces heures (interventions/routes.ts:132 et :195), et il ne voit pas ces taux')] },
+  { routes: ['POST /api/interventions/:id/couts/:type/:coutId/:action'], champs: ['tauxHoraireApplique', 'prixVenteHoraireApplique', 'montantHT'], source: 'interventions/routes.ts:257 (saisieSelonDroits)',
+    annotations: [A(['montantHT'], 'ne voit pas', 'seul le technicien ne le voit pas (droits/visibilite.ts:18-26), et il n’écrit pas cette action (encadrement, interventions/routes.ts:250)')] },
+  { routes: ['POST /api/catalogue/:family', 'PUT /api/catalogue/:family/:id', 'DELETE /api/catalogue/:family/:id', 'et leurs jumelles /api/v1'], champs: ['prixAchatHt'], source: 'catalogue/routes.ts:67, :71, :86, :91, :111, :112 (ficheCataloguePourLecteur)',
+    annotations: [A(['prixAchatHt'], 'ne voit pas', 'en session, seule l’administration écrit le catalogue (http/routes-mixtes.ts:24-27), et elle voit ce prix', { jusqua: 'D1a-5d-3' })] },
+  { routes: ['POST /api/clients/:clientId/equipements', 'POST /api/clients/:clientId/equipements/:id/archiver', 'et leurs jumelles /api/v1'], champs: ['catalogueEquipement.prixAchatHt'], source: 'clients/equipements.ts:92 et :104 (equipementPourLecteur)',
+    annotations: [A(['catalogueEquipement.prixAchatHt'], 'ne voit pas', 'en session, seule l’administration écrit le parc (routeMixte, clients/routes.ts:195-196), et elle voit ce prix', { jusqua: 'D1a-5d-3' })] },
 ];
