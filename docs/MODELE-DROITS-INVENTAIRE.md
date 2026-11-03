@@ -1,6 +1,6 @@
 # Inventaire des règles de droits d'Iris (état du code à `84e27a1`)
 
-> Annexe de la proposition [`MODELE-DROITS-CIBLE.md`](MODELE-DROITS-CIBLE.md) (chantier technique 3, 17-10-2026). Photographie du code à une date donnée, et non documentation tenue à jour : l'état décidé des droits reste décrit par [`MODELE-DROITS-COMPTES.md`](MODELE-DROITS-COMPTES.md). Le découpage du serveur par domaine (chantier 2) déplace les lignes citées, mais garde les noms des fonctions.
+> Annexe de la proposition [`MODELE-DROITS-CIBLE.md`](MODELE-DROITS-CIBLE.md) (chantier technique 3, 17-10-2026). Photographie du code à une date donnée, et non documentation tenue à jour : l'état décidé des droits reste décrit par [`MODELE-DROITS-COMPTES.md`](MODELE-DROITS-COMPTES.md). Le découpage du serveur par domaine (chantier 2) déplace les lignes citées, mais garde les noms des fonctions. La matrice de non-régression exécutable (lot D1a, implémenté en tests seuls) enregistre le comportement actuel route par route et écran par écran, et la CI la rejoue : côté serveur dans `server/tests/matrice-droits/`, côté écran dans `client/tests/e2e/matrice-droits/` ([`MODELE-DROITS-CIBLE.md`](MODELE-DROITS-CIBLE.md), section 7.1).
 
 Commit de référence : `84e27a18eb1abcc1cf21b78def7de5a65dac4dac` (« Merge #175 », `main`). Toutes les références `fichier:ligne` portent sur ce commit (`git show 84e27a1:server/index.ts`).
 

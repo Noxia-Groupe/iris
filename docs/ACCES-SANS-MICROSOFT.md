@@ -104,12 +104,17 @@ retrouve pas.
 | Scope | Donne accès à |
 |---|---|
 | `clients:read` | lire les clients, leurs contacts et leurs sites |
-| `clients:write` | créer et modifier clients, contacts, sites |
+| `clients:write` | créer et modifier clients, contacts et sites, et désactiver un client (`DELETE /api/v1/clients/:id`) |
+| `equipements:read` | lire le parc d'équipements d'un client |
+| `equipements:write` | installer un équipement chez un client et l'archiver |
 | `catalogue:read` | lire les prestations, articles, équipements et catégories |
-| `catalogue:write` | créer et modifier les fiches catalogue |
+| `catalogue:write` | créer une catégorie, créer et modifier les fiches du catalogue, et désactiver une fiche (`DELETE /api/v1/catalogue/:family/:id`) ; les corps de main d'œuvre, et la modification ou la désactivation d'une main d'œuvre existante, sont refusés à une clé (403) |
+| `devis:read` | lire les devis |
+| `devis:write` | créer et modifier un devis, changer son statut, en créer une révision et le convertir en chantier ; la conversion en intervention ou en contrat, les champs d'ouverture du chantier (titulaire, date de début) et le prix d'achat prévu d'une ligne de devis sont refusés à une clé (403), même avec `finances:read` |
 | `company:read` | lire l'identité de la société (en-tête de documents) |
 | `chantiers:read` | lire les chantiers, leurs achats et leurs heures |
-| `finances:read` | ajoute les montants vendus et la marge aux chantiers |
+| `chantiers:write`, `chantiers:archive` | aucune des 28 routes `/api/v1` actuelles n'exige ces scopes : la saisie, la correction et l'archivage des écritures d'un chantier ne se font qu'en session |
+| `finances:read` | ajoute les montants vendus et la marge aux chantiers, le coût matériel prévu d'un chantier, et le prix d'achat des fiches du catalogue, du modèle joint à un équipement du parc et des lignes de devis |
 
 Donnez le minimum : un agent qui rédige des devis n'a pas besoin d'écrire dans le
 référentiel client.
@@ -135,7 +140,8 @@ scopes utiles à l'agent.
 
 Ce n'est pas un chemin plus permissif accordé aux robots : les deux portes exécutent le
 **même handler** (cf. `routeMixte` dans `server/src/http/routes-mixtes.ts`), avec les mêmes validations et
-les mêmes réponses d'erreur. Seule la façon de calculer le périmètre diffère, comme elle
+les mêmes réponses d'erreur, à quelques refus près qu'une clé reçoit là où l'administration est admise
+(voir « Réponses possibles »). Seule la façon de calculer le périmètre diffère, comme elle
 diffère déjà entre un administrateur et un conducteur.
 
 ### Utilisation
@@ -148,17 +154,19 @@ curl -H "Authorization: Bearer iris_xxxxxxxx" https://<instance>/api/v1/achats
 curl -H "Authorization: Bearer iris_xxxxxxxx" https://<instance>/api/v1/heures
 ```
 
-Les routes `/api/v1/…` sont servies par **exactement les mêmes handlers** que l'interface
-(cf. `routeMixte` dans `server/src/http/routes-mixtes.ts`). Un agent ne dispose donc d'aucun chemin plus
-permissif qu'un humain : mêmes validations, mêmes messages d'erreur, mêmes règles métier.
+Vingt-sept des 28 routes `/api/v1/…` sont servies par **exactement les mêmes handlers** que l'interface
+(cf. `routeMixte` dans `server/src/http/routes-mixtes.ts`) ; seule `GET /api/v1/company` a son propre gestionnaire.
+Un agent ne dispose donc d'aucun chemin plus permissif qu'un humain : mêmes validations, mêmes messages d'erreur,
+mêmes règles métier, sauf les refus propres aux clés listés dans « Réponses possibles ».
 Une correction faite pour l'interface vaut aussitôt pour l'agent.
 
 ### Réponses possibles
 
 | Code | Signification |
 |---|---|
-| 401 | clé absente, inconnue, expirée ou révoquée |
-| 403 | clé valide, mais le scope demandé lui manque |
+| 401 | clé absente, inconnue, inactive, expirée ou révoquée |
+| 403 | clé valide, mais le scope demandé lui manque ; ou refus du gestionnaire, qu'une clé reçoit là où l'administration est admise : conversion d'un devis en intervention ou en contrat, champs d'ouverture du chantier, main d'œuvre du catalogue, prix d'achat prévu d'une ligne de devis |
+| 404 | ressource introuvable (identifiant inexistant, ou contact ou site qui n'appartient pas au client indiqué) |
 | 400 | la requête est refusée par la validation métier (même règle que l'interface) |
 
 ### Révoquer
