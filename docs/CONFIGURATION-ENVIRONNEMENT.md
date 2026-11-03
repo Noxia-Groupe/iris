@@ -106,7 +106,7 @@ Les variables préfixées `VITE_` sont intégrées dans le JavaScript du navigat
 
 | Variable | Requise | Usage |
 |---|---:|---|
-| `TEST_DATABASE_URL` | seulement tests API locaux | PostgreSQL jetable pour les tests HTTP/backend, sur `localhost` ou `127.0.0.1` ; les tests de migration et les fichiers de tests propres à un lot y créent leurs propres bases (droit CREATEDB) ; les matrices des écritures réelles (lot D1a-5, `matrice-droits-ecritures-*.test.mjs`) remettent en plus leur base à l'état de référence sous `session_replication_role` : rôle super-utilisateur, ou qui a reçu `GRANT SET ON PARAMETER session_replication_role` (PostgreSQL 15 et plus) ; sinon ces fichiers échouent avec un message clair, sans `SKIP` |
+| `TEST_DATABASE_URL` | seulement tests API locaux | PostgreSQL jetable pour les tests HTTP/backend, sur `localhost` ou `127.0.0.1` ; les tests de migration et les fichiers de tests propres à un lot y créent leurs propres bases (droit CREATEDB) ; les matrices des écritures réelles du lot D1a-5 (`matrice-droits-ecritures-*.test.mjs`, `matrice-droits-journaux.test.mjs`, `matrice-droits-factures.test.mjs`, `matrice-droits-montants.test.mjs` et `matrice-droits-cles-montants.test.mjs`) remettent en plus leur base à l'état de référence sous `session_replication_role` : rôle super-utilisateur, ou qui a reçu `GRANT SET ON PARAMETER session_replication_role` (PostgreSQL 15 et plus) ; sinon ces fichiers échouent avec un message clair, sans `SKIP` |
 | `E2E_DATABASE_URL` | seulement E2E locaux | PostgreSQL jetable Playwright |
 | `E2E_BASE_URL` | non | URL frontend E2E, défaut `http://127.0.0.1:5199` |
 | `E2E_API_PORT` | non | port API E2E, défaut `3001` |
