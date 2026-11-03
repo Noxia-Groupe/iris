@@ -1,0 +1,46 @@
+DC | administration | onglet par défaut | défaut | redirigé vers /
+DC | devis | devis-brouillon | défaut | boutons : Dupliquer, Envoyer le devis <devis-brouillon> version #, Faire signer le client, Marquer envoyé, Modifier, PDF du devis <devis-brouillon> version #
+DC | devis | devis-signe | défaut | boutons : Créer une révision, Dupliquer, Envoyer le devis <devis-signe> version #, Ouvrir le chantier, PDF du devis <devis-signe> version #
+DC | devis | hors lignes | défaut | titre « Devis » ; boutons : Actualiser, Ajouter la ligne au jour ou à la demi-journée (désactivé), Ajouter une ligne, Créer le brouillon
+DC | factures | hors lignes | défaut | redirigé vers /
+DC | fiche chantier | chantier-annule | défaut | titre « Chantier introuvable » ; boutons : aucun
+DC | fiche chantier | chantier-en-cours | défaut | titre « Chantier introuvable » ; boutons : aucun
+DC | fiche chantier | chantier-termine | défaut | titre « Chantier introuvable » ; boutons : aucun
+DC | fiche chantier | chantier-titulaire-dc | défaut | titre « Écrans titulaire DC <s> » ; boutons : Rapport interne (PDF), Retour au tableau de bord
+DC | fiche chantier | chantier-titulaire-tech | défaut | titre « Chantier introuvable » ; boutons : aucun
+DC | fiche intervention | intervention-planifiee | défaut | redirigé vers /
+DC | fiche intervention | intervention-terminee | défaut | redirigé vers /
+DC | liste des chantiers | chantier-annule | défaut | ligne absente
+DC | liste des chantiers | chantier-en-cours | défaut | ligne absente
+DC | liste des chantiers | chantier-termine | défaut | ligne absente
+DC | liste des chantiers | chantier-titulaire-dc | défaut | boutons : Clôturer
+DC | liste des chantiers | chantier-titulaire-tech | défaut | ligne absente
+DC | liste des chantiers | hors lignes | défaut | titre « Liste des Chantiers » ; boutons : Chantiers Terminés / Archivés# chantier(s), Créer une affaire (devis), En cours#, Heures dépassées, Main-d’œuvre dépassée, Matériel dépassé, Sans saisie, Tous, À surveiller, À surveiller#
+DC | liste des interventions | hors lignes | défaut | redirigé vers /
+DC | menu | — | défaut | sections : Accueil, Chantiers ; type affiché : Directeur commercial
+DC | planning | hors lignes | défaut | redirigé vers /
+DC | route / | — | défaut | menu « Accueil › Tableau de bord » ; accessible
+DC | route /achats | — | défaut | hors menu ; redirigée vers /
+DC | route /admin | — | défaut | hors menu ; redirigée vers /
+DC | route /administration/api | — | défaut | hors menu ; redirigée vers /
+DC | route /catalogue | — | défaut | hors menu ; redirigée vers /
+DC | route /chantiers | — | défaut | menu « Chantiers › Liste des chantiers » ; accessible
+DC | route /chantiers/:id | chantier-en-cours | défaut | hors menu ; accessible
+DC | route /clients | — | défaut | hors menu ; redirigée vers /
+DC | route /clients/:id | client | défaut | hors menu ; redirigée vers /
+DC | route /commerciaux | — | défaut | hors menu ; redirigée vers /
+DC | route /comptabilite | — | défaut | hors menu ; redirigée vers /
+DC | route /contrats-maintenance | — | défaut | hors menu ; redirigée vers /
+DC | route /devis | — | défaut | menu « Chantiers › Devis » ; accessible
+DC | route /factures | — | défaut | hors menu ; redirigée vers /
+DC | route /heures | — | défaut | hors menu ; redirigée vers /
+DC | route /interventions | — | défaut | hors menu ; redirigée vers /
+DC | route /interventions/:id | intervention-planifiee | défaut | hors menu ; redirigée vers /
+DC | route /mentions-legales | — | défaut | hors menu ; redirigée vers /
+DC | route /performances | — | défaut | hors menu ; redirigée vers /
+DC | route /planning | — | défaut | hors menu ; redirigée vers /
+DC | route /prete-a-facturer | — | défaut | hors menu ; redirigée vers /
+DC | route /reglements | — | défaut | hors menu ; redirigée vers /
+DC | route /resultat-commercial | — | défaut | hors menu ; redirigée vers /
+DC | route /societe | — | défaut | hors menu ; redirigée vers /
+DC | route /statistiques | — | défaut | hors menu ; redirigée vers /

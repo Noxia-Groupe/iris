@@ -1,0 +1,49 @@
+AD | administration | catégorie | défaut | boutons : Modifier, Supprimer
+AD | administration | fournisseur | défaut | boutons : Modifier, Supprimer
+AD | administration | onglet par défaut | défaut | titre « Administration & Paramétrage » ; boutons : Catégories, Chantiers, Fournisseurs, Intervenants, Journal, Marges & Commissions, Ouvrir le chantier (désactivé), Utilisateurs
+AD | administration › utilisateurs | compte CT | défaut | bouton « Révoquer », case « Accès financier — <CT> » (désactivé), case « Archiver Travaux — <CT> » (désactivé), case « Corriger Travaux — <CT> » (désactivé), case « Droit devis — <CT> » (désactivé), case « Oui », liste « Modifier le rôle » (options : Conducteur de Travaux, Commercial, Assistante commerciale, Technicien, Comptable, Directeur commercial, Responsable, Directeur, Administrateur), liste « Responsable hiérarchique de <CT> »
+AD | devis | devis-brouillon | défaut | boutons : Annuler, Constater l’acompte, Dupliquer, Envoyer le devis <devis-brouillon> version #, Faire signer le client, Marquer envoyé, Modifier, PDF du devis <devis-brouillon> version #
+AD | devis | devis-signe | défaut | boutons : Annuler, Créer le contrat, Créer l’intervention, Créer une révision, Dupliquer, Envoyer le devis <devis-signe> version #, Ouvrir le chantier, PDF du devis <devis-signe> version #
+AD | devis | hors lignes | défaut | titre « Devis » ; boutons : Actualiser, Ajouter la ligne au jour ou à la demi-journée (désactivé), Ajouter une ligne, Créer le brouillon
+AD | factures | hors lignes | défaut | titre « Factures » ; boutons : Actualiser, Export comptable, Nouvelle facture
+AD | fiche chantier | chantier-annule | défaut | titre « Écrans annulé <s> » ; boutons : Rapport client (PDF), Rapport interne (PDF), Retour au tableau de bord
+AD | fiche chantier | chantier-en-cours | défaut | titre « Écrans en cours <s> » ; boutons : Archiver ce pointage, Archiver cet achat, Corriger ce pointage, Corriger cet achat, Envoyer le rapport de chantier Écrans en cours <s>, Modifier, Modifier, PDF, Rapport client (PDF), Rapport interne (PDF), Retour au tableau de bord
+AD | fiche chantier | chantier-termine | défaut | titre « Écrans terminé <s> » ; boutons : Archiver ce pointage, Archiver cet achat, Corriger ce pointage, Corriger cet achat, Envoyer le rapport de chantier Écrans terminé <s>, Modifier, Modifier, Non encaissé, Rapport client (PDF), Rapport interne (PDF), Retour au tableau de bord, Valider l'encaissement
+AD | fiche chantier | chantier-titulaire-dc | défaut | titre « Écrans titulaire DC <s> » ; boutons : Archiver ce pointage, Archiver cet achat, Corriger ce pointage, Corriger cet achat, Envoyer le rapport de chantier Écrans titulaire DC <s>, Modifier, Modifier, Rapport client (PDF), Rapport interne (PDF), Retour au tableau de bord
+AD | fiche chantier | chantier-titulaire-tech | défaut | titre « Écrans titulaire TECH <s> » ; boutons : Archiver ce pointage, Archiver cet achat, Corriger ce pointage, Corriger cet achat, Envoyer le rapport de chantier Écrans titulaire TECH <s>, Modifier, Modifier, Rapport client (PDF), Rapport interne (PDF), Retour au tableau de bord
+AD | fiche intervention | intervention-planifiee | défaut | titre « Fiche intervention » ; boutons : Annuler, Créer la suite, Démarrer, Enregistrer l’achat matériel, Remettre à planifier
+AD | fiche intervention | intervention-terminee | défaut | titre « Fiche intervention » ; boutons : Créer la suite, Enregistrer l’achat matériel, Envoyer le compte rendu de l’intervention <intervention-terminee>, Faire signer ce compte rendu, Marquer « à suivre », PDF du compte rendu de l’intervention <intervention-terminee>
+AD | liste des chantiers | chantier-annule | défaut | ligne absente
+AD | liste des chantiers | chantier-en-cours | défaut | boutons : Clôturer
+AD | liste des chantiers | chantier-termine | défaut | boutons : Réouvrir
+AD | liste des chantiers | chantier-titulaire-dc | défaut | boutons : Clôturer
+AD | liste des chantiers | chantier-titulaire-tech | défaut | boutons : Clôturer
+AD | liste des chantiers | hors lignes | défaut | titre « Liste des Chantiers » ; boutons : Chantiers Terminés / Archivés# chantier(s), Créer une affaire (devis), En cours#, En perte, En perte#, Heures dépassées, Main-d’œuvre dépassée, Marge faible, Matériel dépassé, Sans saisie, Tous, À surveiller, À surveiller#
+AD | liste des interventions | hors lignes | défaut | titre « Interventions SAV » ; boutons : Nouvelle intervention
+AD | menu | — | défaut | sections : Accueil, Chantiers, Interventions, Facturation, Pilotage, Référentiels, Réglages ; type affiché : Admin
+AD | planning | hors lignes | défaut | titre « Planning d'intervention » ; boutons : <partage du planning>, Affectation, Semaine #, Semaine précédente, Semaine suivante, Types d'événements
+AD | route / | — | défaut | menu « Accueil › Tableau de bord » ; accessible
+AD | route /achats | — | défaut | menu « Chantiers › Journal des achats » ; accessible
+AD | route /admin | — | défaut | menu « Réglages › Administration » ; accessible
+AD | route /administration/api | — | défaut | hors menu ; redirigée vers /
+AD | route /catalogue | — | défaut | menu « Référentiels › Catalogue » ; accessible
+AD | route /chantiers | — | défaut | menu « Chantiers › Liste des chantiers » ; accessible
+AD | route /chantiers/:id | chantier-en-cours | défaut | hors menu ; accessible
+AD | route /clients | — | défaut | menu « Référentiels › Clients » ; accessible
+AD | route /clients/:id | client | défaut | hors menu ; accessible
+AD | route /commerciaux | — | défaut | menu « Pilotage › Mes commerciaux » ; accessible
+AD | route /comptabilite | — | défaut | menu « Facturation › Plan comptable » ; accessible
+AD | route /contrats-maintenance | — | défaut | menu « Interventions › Contrats de maintenance » ; accessible
+AD | route /devis | — | défaut | menu « Chantiers › Devis » ; accessible
+AD | route /factures | — | défaut | menu « Facturation › Factures » ; accessible
+AD | route /heures | — | défaut | menu « Chantiers › Journal des heures » ; accessible
+AD | route /interventions | — | défaut | menu « Interventions › Interventions SAV » ; accessible
+AD | route /interventions/:id | intervention-planifiee | défaut | hors menu ; accessible
+AD | route /mentions-legales | — | défaut | menu « Facturation › Mentions & CGV » ; accessible
+AD | route /performances | — | défaut | menu « Pilotage › Performances » ; accessible
+AD | route /planning | — | défaut | menu « Chantiers › Planning » ; accessible
+AD | route /prete-a-facturer | — | défaut | menu « Facturation › Prêt à facturer » ; accessible
+AD | route /reglements | — | défaut | menu « Facturation › Règlements » ; accessible
+AD | route /resultat-commercial | — | défaut | hors menu ; redirigée vers /
+AD | route /societe | — | défaut | menu « Réglages › Société » ; accessible
+AD | route /statistiques | — | défaut | menu « Pilotage › Statistiques » ; accessible

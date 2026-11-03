@@ -1,0 +1,46 @@
+RESP | administration | catégorie | défaut | boutons : Modifier, Supprimer
+RESP | administration | fournisseur | défaut | boutons : Modifier, Supprimer
+RESP | administration | onglet par défaut | défaut | titre « Administration & Paramétrage » ; boutons : Catégories, Enregistrer, Fournisseurs
+RESP | devis | hors lignes | défaut | redirigé vers /
+RESP | factures | hors lignes | défaut | redirigé vers /
+RESP | fiche chantier | chantier-annule | défaut | titre « Écrans annulé <s> » ; boutons : Rapport interne (PDF), Retour au tableau de bord
+RESP | fiche chantier | chantier-en-cours | défaut | titre « Écrans en cours <s> » ; boutons : Archiver ce pointage, Archiver cet achat, Corriger ce pointage, Corriger cet achat, Rapport interne (PDF), Retour au tableau de bord
+RESP | fiche chantier | chantier-termine | défaut | titre « Écrans terminé <s> » ; boutons : Archiver ce pointage, Archiver cet achat, Corriger ce pointage, Corriger cet achat, Rapport interne (PDF), Retour au tableau de bord
+RESP | fiche chantier | chantier-titulaire-dc | défaut | titre « Chantier introuvable » ; boutons : aucun
+RESP | fiche chantier | chantier-titulaire-tech | défaut | titre « Écrans titulaire TECH <s> » ; boutons : Archiver ce pointage, Archiver cet achat, Corriger ce pointage, Corriger cet achat, Rapport interne (PDF), Retour au tableau de bord
+RESP | fiche intervention | intervention-planifiee | défaut | titre « Fiche intervention » ; boutons : Annuler, Créer la suite, Démarrer, Remettre à planifier
+RESP | fiche intervention | intervention-terminee | défaut | titre « Fiche intervention » ; boutons : Créer la suite, Faire signer ce compte rendu, Marquer « à suivre », PDF du compte rendu de l’intervention <intervention-terminee>
+RESP | liste des chantiers | chantier-annule | défaut | ligne absente
+RESP | liste des chantiers | chantier-en-cours | défaut | boutons : aucun
+RESP | liste des chantiers | chantier-termine | défaut | boutons : aucun
+RESP | liste des chantiers | chantier-titulaire-dc | défaut | ligne absente
+RESP | liste des chantiers | chantier-titulaire-tech | défaut | boutons : Clôturer
+RESP | liste des chantiers | hors lignes | défaut | titre « Liste des Chantiers » ; boutons : Chantiers Terminés / Archivés# chantier(s), Créer une affaire (devis), En cours#, En perte, En perte#, Heures dépassées, Main-d’œuvre dépassée, Marge faible, Matériel dépassé, Sans saisie, Tous, À surveiller, À surveiller#
+RESP | liste des interventions | hors lignes | défaut | titre « Interventions SAV » ; boutons : aucun
+RESP | menu | — | défaut | sections : Accueil, Chantiers, Interventions, Pilotage, Réglages ; type affiché : Responsable
+RESP | planning | hors lignes | défaut | titre « Planning d'intervention » ; boutons : Affectation, Semaine #, Semaine précédente, Semaine suivante, Types d'événements
+RESP | route / | — | défaut | menu « Accueil › Tableau de bord » ; accessible
+RESP | route /achats | — | défaut | menu « Chantiers › Journal des achats » ; accessible
+RESP | route /admin | — | défaut | menu « Réglages › Administration » ; accessible
+RESP | route /administration/api | — | défaut | hors menu ; redirigée vers /
+RESP | route /catalogue | — | défaut | hors menu ; redirigée vers /
+RESP | route /chantiers | — | défaut | menu « Chantiers › Liste des chantiers » ; accessible
+RESP | route /chantiers/:id | chantier-en-cours | défaut | hors menu ; accessible
+RESP | route /clients | — | défaut | hors menu ; redirigée vers /
+RESP | route /clients/:id | client | défaut | hors menu ; redirigée vers /
+RESP | route /commerciaux | — | défaut | hors menu ; redirigée vers /
+RESP | route /comptabilite | — | défaut | hors menu ; redirigée vers /
+RESP | route /contrats-maintenance | — | défaut | hors menu ; redirigée vers /
+RESP | route /devis | — | défaut | hors menu ; redirigée vers /
+RESP | route /factures | — | défaut | hors menu ; redirigée vers /
+RESP | route /heures | — | défaut | menu « Chantiers › Journal des heures » ; accessible
+RESP | route /interventions | — | défaut | menu « Interventions › Interventions SAV » ; accessible
+RESP | route /interventions/:id | intervention-planifiee | défaut | hors menu ; accessible
+RESP | route /mentions-legales | — | défaut | hors menu ; redirigée vers /
+RESP | route /performances | — | défaut | hors menu ; redirigée vers /
+RESP | route /planning | — | défaut | menu « Chantiers › Planning » ; accessible
+RESP | route /prete-a-facturer | — | défaut | hors menu ; redirigée vers /
+RESP | route /reglements | — | défaut | hors menu ; redirigée vers /
+RESP | route /resultat-commercial | — | défaut | hors menu ; redirigée vers /
+RESP | route /societe | — | défaut | hors menu ; redirigée vers /
+RESP | route /statistiques | — | défaut | menu « Pilotage › Statistiques » ; accessible

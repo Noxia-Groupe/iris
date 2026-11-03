@@ -15,6 +15,8 @@ const liens = (role: string, planningActif = true, permissions: string[] = []) =
 function attendu(role: string, planningActif: boolean, permissions: string[]) {
   const admin = role === 'ADMIN' || role === 'SUPERADMIN';
   const commercial = role === 'COMMERCIAL';
+  // Directeur : exclu des opérations comme le commercial (estExcluDesOperations), sans résultat commercial.
+  const exclu = commercial || role === 'DIRECTEUR';
   const sansPlanning = ['DIRECTEUR_COMMERCIAL', 'ASSISTANTE_COMMERCIALE', 'COMPTABLE'].includes(role);
   const travaux = admin || role === 'CONDUCTEUR_TRAVAUX' || role === 'RESPONSABLE';
   const regles: [string, boolean][] = [
@@ -24,17 +26,17 @@ function attendu(role: string, planningActif: boolean, permissions: string[]) {
     ['/contrats-maintenance', admin], ['/prete-a-facturer', admin], ['/factures', admin], ['/reglements', admin], ['/mentions-legales', admin],
     ['/comptabilite', admin], ['/clients', admin || role === 'TECHNICIEN' || role === 'CONDUCTEUR_TRAVAUX'], ['/catalogue', admin],
     ['/achats', travaux], ['/heures', travaux], ['/statistiques', travaux],
-    ['/planning', !commercial && !sansPlanning && planningActif], ['/resultat-commercial', commercial],
+    ['/planning', !exclu && !sansPlanning && planningActif], ['/resultat-commercial', commercial],
     // Administration : plus pour le technicien, qui ne modifie plus les référentiels (lot pilote 3),
     // ni pour les trois types que #179 en écarte.
-    ['/admin', !commercial && role !== 'TECHNICIEN' && !sansPlanning], ['/societe', admin], ['/administration/api', role === 'SUPERADMIN'],
+    ['/admin', !exclu && role !== 'TECHNICIEN' && !sansPlanning], ['/societe', admin], ['/administration/api', role === 'SUPERADMIN'],
     ['/performances', admin], ['/commerciaux', admin],
   ];
   return regles.filter(([, visible]) => visible).map(([to]) => to).sort();
 }
 
 test('chaque rôle voit exactement les mêmes pages qu’avant le regroupement', () => {
-  for (const role of ['SUPERADMIN', 'ADMIN', 'CONDUCTEUR_TRAVAUX', 'RESPONSABLE', 'TECHNICIEN', 'COMMERCIAL', 'COMPTABLE', 'ASSISTANTE_COMMERCIALE', 'DIRECTEUR_COMMERCIAL']) {
+  for (const role of ['SUPERADMIN', 'ADMIN', 'CONDUCTEUR_TRAVAUX', 'RESPONSABLE', 'TECHNICIEN', 'COMMERCIAL', 'COMPTABLE', 'ASSISTANTE_COMMERCIALE', 'DIRECTEUR_COMMERCIAL', 'DIRECTEUR']) {
     for (const planningActif of [true, false]) {
       for (const permissions of [[], ['devis:read']]) {
         assert.deepEqual(liens(role, planningActif, permissions), attendu(role, planningActif, permissions), `${role} planning=${planningActif} ${permissions.join(',')}`);

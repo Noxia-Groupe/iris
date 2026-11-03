@@ -19,9 +19,10 @@
 //  - §5.2 : chaque couple (route, compte) des réponses 2xx de 5a et 5b sur les routes des 8 groupes, et chaque triplet
 //    (compte, route, droit) des contextes « droit … », joué une fois (réduction R-A, déclarée), la réponse lue (état de
 //    chaque champ : présent, null, absent ou non porté, jamais sa valeur) ; test de couverture par (groupe, champ),
-//    annotations en liste fermée dans matrice-droits/montants-masques.mjs ; le côté « ne voit pas » de G7 et G8, que
-//    seule une clé sans finances:read peut écrire, est observé par D1a-5d-3 et relu dans sa référence
-//    (matrice-droits/cles-montants.txt), les annotations de 5d-2 qui l'attendaient étant retirées ;
+//    annotations en liste fermée dans matrice-droits/montants-masques.mjs ; le côté « ne voit pas » de G7 et G8,
+//    qu'aucun compte de session n'écrit sans voir le prix (seule l'administration écrit ces routes), est observé par
+//    D1a-5d-3 par une clé sans finances:read et relu dans sa référence (matrice-droits/cles-montants.txt), les
+//    annotations de 5d-2 qui l'attendaient étant retirées ;
 //  - §5.3 : prix d'achat prévu d'une ligne de devis (refusé hors administration, copié d'une fiche, gardé quand la ligne
 //    est modifiée), prix d'achat d'une fiche (écrit en création ; un PUT qui l'omet l'efface : état actuel enregistré),
 //    mains d'œuvre (création avec tous leurs prix, modification, désactivation, passage d'une prestation, retour, refus
