@@ -51,9 +51,9 @@ export function scenarios({ comptes, noms, chantiers, planning }) {
     ] },
     { nom: 'admin-conducteur', compte: comptes.conducteur, url: '/admin', actions: [onglet('Catégories')] },
 
-    // Fiche chantier : administration (modale, corrections, filtres et tri des journaux,
-    // choix du commercial en place), conducteur titulaire, technicien titulaire, chantiers
-    // terminés en attente d'encaissement et encaissé.
+    // Fiche chantier : administration (modale, corrections, filtres, tri et recherche sans
+    // résultat des journaux, choix du commercial en place), conducteur titulaire, technicien
+    // titulaire, chantiers terminés en attente d'encaissement et encaissé.
     { nom: 'chantier-admin', compte: comptes.superAdmin, url: ficheA, actions: [
       { nom: 'modale-modifier', faire: (page) => cliquer(bouton(page, 'Modifier')) },
       { nom: 'modale-annuler', faire: (page) => cliquer(modale(page).getByRole('button', { name: 'Annuler', exact: true })) },
@@ -65,11 +65,15 @@ export function scenarios({ comptes, noms, chantiers, planning }) {
       { nom: 'achats-fournisseur', faire: (page) => choixParOption(page, 'Tous les fournisseurs').selectOption(noms.fournisseurA) },
       { nom: 'achats-categorie', faire: (page) => choixParOption(page, 'Toutes les catégories').selectOption(noms.categorieA) },
       { nom: 'achats-tri', faire: (page) => choixParOption(page, 'Montant décroissant').selectOption('montant-asc') },
+      // Recherche sans résultat, juste avant la réinitialisation : « Aucun achat ne correspond… ».
+      { nom: 'achats-recherche-vide', faire: (page) => main(page).getByPlaceholder('Rechercher (description, n° de facture, fournisseur, montant...)').fill('Introuvable') },
       { nom: 'achats-reinitialiser', faire: (page) => cliquer(main(page).getByRole('button', { name: 'Réinitialiser', exact: true }).first()) },
       { nom: 'heures-recherche', faire: (page) => main(page).getByPlaceholder('Rechercher (intervenant, rôle, commentaire, date...)').fill('Pose') },
       { nom: 'heures-intervenant', faire: (page) => choixParOption(page, 'Tous les intervenants').selectOption(noms.intervenantA) },
       { nom: 'heures-role', faire: (page) => choixParOption(page, 'Tous les rôles').selectOption('TECHNICIEN') },
       { nom: 'heures-tri', faire: (page) => choixParOption(page, 'Heures décroissantes').selectOption('heures-desc') },
+      // De même : « Aucun pointage ne correspond… ».
+      { nom: 'heures-recherche-vide', faire: (page) => main(page).getByPlaceholder('Rechercher (intervenant, rôle, commentaire, date...)').fill('Introuvable') },
       // Le « Réinitialiser » des achats a disparu avec leurs filtres : reste celui des heures.
       { nom: 'heures-reinitialiser', faire: (page) => cliquer(main(page).getByRole('button', { name: 'Réinitialiser', exact: true }).last()) },
       // En dernier : le choix du commercial se referme dès qu'il perd le focus.
@@ -82,6 +86,11 @@ export function scenarios({ comptes, noms, chantiers, planning }) {
     { nom: 'chantier-termine-admin', compte: comptes.superAdmin, url: `/chantiers/${chantiers.C}`, actions: [] },
     { nom: 'chantier-termine-conducteur', compte: comptes.conducteur, url: `/chantiers/${chantiers.C}`, actions: [] },
     { nom: 'chantier-encaisse-admin', compte: comptes.superAdmin, url: `/chantiers/${chantiers.D}`, actions: [] },
+    // Coûts de l'intervention issue du devis et des suites SAV, marge négative et alerte « En perte » ;
+    // affaire annulée ; chantier en cours sans saisie ni commercial.
+    { nom: 'chantier-suites-admin', compte: comptes.superAdmin, url: `/chantiers/${chantiers.E}`, actions: [] },
+    { nom: 'chantier-annule-admin', compte: comptes.superAdmin, url: `/chantiers/${chantiers.F}`, actions: [] },
+    { nom: 'chantier-sans-saisie-admin', compte: comptes.superAdmin, url: `/chantiers/${chantiers.G}`, actions: [] },
 
     // Planning : grille, file et chaque modale et chaque branche de la modale d'affectation
     // pour l'administration ; consultation pour le conducteur et le technicien.

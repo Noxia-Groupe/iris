@@ -2,8 +2,10 @@
 //
 // Les deux clients voient ensuite exactement ces données (mêmes identifiants, mêmes dates) :
 // aucune normalisation n'est nécessaire. Elles rendent les sections que le découpage déplace :
-// journaux d'achats et d'heures avec correction et archivage, journal d'audit, facture liée,
-// barème réduit, chantiers terminés (encaissé ou non), planning de la semaine (chantier,
+// journaux d'achats et d'heures avec correction, archivage et restauration, journal d'audit,
+// factures liées (facture et avoir), barème réduit, chantiers terminés (encaissé ou non), affaire
+// annulée, chantier en cours sans saisie ni commercial, coûts de l'intervention issue du devis et
+// des suites SAV avec une marge négative, planning de la semaine (chantier,
 // hors suivi, événement à deux techniciens, affectation issue d'une intervention), file à
 // planifier (visite de contrat et curative), partage publié, barèmes, devis signé à ouvrir,
 // comptes de chaque sorte (administrateur, responsable hiérarchique, actif ou désactivé, compte
@@ -41,10 +43,11 @@ export async function preparerDonnees(api) {
   // Le jeton de secours expire au bout d'une heure ; un jeton signé pour le même compte non.
   const jeton = jetonPour(superAdmin.id);
 
-  const appel = async (methode, chemin, corps) => {
+  // Par défaut au nom du super administrateur ; `auNomDe` ouvre l'appel au nom d'un autre compte.
+  const appel = async (methode, chemin, corps, auNomDe = jeton) => {
     const reponse = await fetch(`${api}${chemin}`, {
       method: methode,
-      headers: { Authorization: `Bearer ${jeton}`, ...(corps === undefined ? {} : { 'Content-Type': 'application/json' }) },
+      headers: { Authorization: `Bearer ${auNomDe}`, ...(corps === undefined ? {} : { 'Content-Type': 'application/json' }) },
       body: corps === undefined ? undefined : JSON.stringify(corps),
     });
     const texte = await reponse.text();
@@ -78,8 +81,9 @@ export async function preparerDonnees(api) {
   await appel('PATCH', `/users/${conducteur.id}/responsable-hierarchique`, { responsableHierarchiqueId: parti.id });
   await appel('PATCH', `/users/${parti.id}/actif`, { actif: false });
 
-  // Client, référentiels, intervenants (le premier relié au compte technicien).
-  const client = await appel('POST', '/clients', { raisonSociale: nom('Client') });
+  // Client, référentiels, intervenants (le premier relié au compte technicien). Sans SIREN, un devis
+  // ne se signe pas (lot 6a-2 bis) ; unique en base, il est tiré du suffixe de l'exécution.
+  const client = await appel('POST', '/clients', { raisonSociale: nom('Client'), siren: suffixe.slice(-9) });
   await appel('POST', `/clients/${client.id}/sites`, { nom: 'Facturation', adresse: '2 rue du Relevé', codePostal: '14000', ville: 'Caen', estSiteFacturation: true });
   const fournisseurs = [await appel('POST', '/fournisseurs', { nom: nom('Fournisseur A'), contact: 'Contact A' }), await appel('POST', '/fournisseurs', { nom: nom('Fournisseur B') })];
   const categories = [await appel('POST', '/categories', { nom: nom('Catégorie A'), description: 'Matériel' }), await appel('POST', '/categories', { nom: nom('Catégorie B') })];
@@ -151,10 +155,48 @@ export async function preparerDonnees(api) {
     libelleBaremeReduit: 'Barème réduit du relevé', objectifCaMensuel: 20000, primeObjectifCa: 150, objectifMargeMensuel: 5000, primeObjectifMarge: 100, primeSuiviAdministratif: 50,
   });
 
+  // Fiche chantier, branches ajoutées pour la PR C (découpage de la fiche) : créées en dernier, sans
+  // nouveau compte ni référentiel, pour que les numéros déjà relevés ne changent pas. Hors des fiches
+  // A, E, F et G, seuls changent la liste des chantiers de l'Administration et le choix d'un chantier
+  // du planning, qui comptent E et G, en cours.
+  //
+  // Chantier E : le devis ouvre le chantier, puis une intervention, rattachée au chantier, et la suite
+  // SAV de celle-ci ; le technicien déclare ses heures sur chacune (coûts de l'intervention issue du
+  // devis et des suites). Elles sont placées deux semaines avant la semaine en cours : hors des deux
+  // semaines du planning relevé, et hors de la file « Interventions à planifier ». Un achat au-delà du
+  // budget vendu rend la marge et la marge estimée négatives, avec l'alerte « En perte ».
+  const devisE = await devisSigne('Affaire avec suites');
+  const chantierE = await ouvrir(devisE, conducteur.id);
+  const interventionE = await appel('POST', `/devis/${devisE.id}/convertir`, { cible: 'INTERVENTION' });
+  const suiteE = await appel('POST', `/interventions/${interventionE.id}/suites`, {});
+  const jetonTechnicien = jetonPour(technicien.id);
+  for (const [intervention, nbrHeures] of [[interventionE, 1.5], [suiteE, 0.5]]) {
+    await appel('PUT', `/interventions/${intervention.id}/planning`, { dateDebut: jourCivil(lundi - 14, 'iso'), creneau: 'HEURES', heureDebut: '08:30', heureFin: '09:30', intervenantIds: [intervenants[0].id] });
+    await appel('POST', `/interventions/${intervention.id}/couts/heures`, { date: jourCivil(lundi - 14), nbrHeures }, jetonTechnicien);
+  }
+  await appel('POST', '/achats', { chantierId: chantierE.id, fournisseurId: fournisseurs[1].id, categorieId: categories[1].id, date: jourCivil(-5), description: 'Centrale de remplacement', montantHT: 1400, numeroFacture: 'F-E' });
+
+  // Chantiers F et G, sans saisie ni commercial : la clé `commercialId` est omise, une valeur vide
+  // étant refusée dès qu'un compte commercial existe. F est annulé (affaire annulée), G reste en cours
+  // (« aucune depuis le démarrage »).
+  const ouvrirSansCommercial = async (devis) => appel('POST', `/devis/${devis.id}/convertir`, {
+    cible: 'CHANTIER', responsableId: conducteur.id, types: ['Vidéo'], dateDebut: jourCivil(-20),
+  });
+  const devisF = await devisSigne('Affaire annulée');
+  const chantierF = await ouvrirSansCommercial(devisF);
+  await appel('POST', `/devis/${devisF.id}/annulation`, { motif: 'Annulation du relevé' });
+  const chantierG = await ouvrirSansCommercial(await devisSigne('Affaire sans saisie'));
+
+  // Chantier A : un pointage archivé puis restauré (entrée « RESTAURATION » du journal d'audit), et un
+  // avoir partiel de sa facture émise (ligne « Avoir » des factures liées, facturé HT diminué).
+  await appel('DELETE', `/heures/${heures[0].id}`, { motifArchivage: 'Archivé par erreur' });
+  await appel('POST', `/heures/${heures[0].id}/restaurer`, { motifRestauration: 'Pointage bien réalisé' });
+  await appel('POST', `/factures/${facture.id}/avoirs`, { lignes: [{ designation: 'Remise du relevé', quantite: 1, prixUnitaireHt: 50, tauxTva: 20 }] });
+
   return {
     comptes: { superAdmin: superAdmin.id, administrateur: administrateur.id, conducteur: conducteur.id, technicien: technicien.id },
     noms: { technicien: technicien.name, conducteur: conducteur.name, fournisseurA: fournisseurs[0].nom, categorieA: categories[0].nom, intervenantA: intervenants[0].nom },
-    chantiers: { A: chantierA.id, B: chantierB.id, C: chantierC.id, D: chantierD.id },
+    chantiers: { A: chantierA.id, B: chantierB.id, C: chantierC.id, D: chantierD.id, E: chantierE.id, F: chantierF.id, G: chantierG.id },
     planning: { depannage: nom('Dépannage'), formation: type.nom, planifiee: planifiee.titre ?? nom('Remplacement détecteur') },
   };
 }
