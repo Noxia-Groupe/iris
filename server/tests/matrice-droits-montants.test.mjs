@@ -18,8 +18,10 @@
 //    (CT refusé, SA et AD écrivent) ; les refus de la hiérarchie et du directeur, état décrit ;
 //  - §5.2 : chaque couple (route, compte) des réponses 2xx de 5a et 5b sur les routes des 8 groupes, et chaque triplet
 //    (compte, route, droit) des contextes « droit … », joué une fois (réduction R-A, déclarée), la réponse lue (état de
-//    chaque champ : présent, null, absent, jamais sa valeur) ; test de couverture par (groupe, champ), annotations en
-//    liste fermée dans matrice-droits/montants-masques.mjs ;
+//    chaque champ : présent, null, absent ou non porté, jamais sa valeur) ; test de couverture par (groupe, champ),
+//    annotations en liste fermée dans matrice-droits/montants-masques.mjs ; le côté « ne voit pas » de G7 et G8, que
+//    seule une clé sans finances:read peut écrire, est observé par D1a-5d-3 et relu dans sa référence
+//    (matrice-droits/cles-montants.txt), les annotations de 5d-2 qui l'attendaient étant retirées ;
 //  - §5.3 : prix d'achat prévu d'une ligne de devis (refusé hors administration, copié d'une fiche, gardé quand la ligne
 //    est modifiée), prix d'achat d'une fiche (écrit en création ; un PUT qui l'omet l'efface : état actuel enregistré),
 //    mains d'œuvre (création avec tous leurs prix, modification, désactivation, passage d'une prestation, retour, refus
@@ -28,7 +30,7 @@
 //    commentaire, test témoin qui le recalcule), ou à sa source au moment de l'écriture (lignes copiées par une
 //    révision ou une duplication, relues dans l'instantané) ; pour chaque refus et chaque écriture sans montant, les
 //    montants des chantiers, des devis et du catalogue relus inchangés ; chaque source copiée ou figée (fiche, main
-//    d'œuvre, article) changée après coup, avant l'instantané ;
+//    d'œuvre, article, taux d'acompte) changée après coup, avant l'instantané ;
 //  - §5.4 : N1 de #435 ; les 10 écritures du planning sous planningActif=non, SA écrit, AD refusé en témoin ; l'outil de
 //    l'export (#457 T1 : il reconnaît l'export du SA avant de conclure ; N4 : chaque ligne de l'export lu reconnue) ;
 //  - chaque entrée nouvelle lue par SA, AD, l'auteur hors administration et un compte refusé, et l'export CSV du journal
@@ -61,11 +63,14 @@ import {
   nommerEntree, ouvrirConnexionLecture, verifierLectureExport,
 } from './matrice-droits/journaux.mjs';
 import { etatMontant, memeValeur } from './matrice-droits/montants-ecritures.mjs';
-import { MONTANTS_MASQUES_ECRITURES } from './matrice-droits/montants-masques.mjs';
+import { MONTANTS_MASQUES_ECRITURES, groupeDeRouteEcriture } from './matrice-droits/montants-masques.mjs';
 
 const TITRE = 'Lot D1a-5d-2 : montants des écritures de session et réglages, montant vendu sous les trois destinataires de la rentabilité, montants masqués des réponses d’écriture, prix d’achat et mains d’œuvre, montants relus en base, N1 de #435, planning désactivé, outil de l’export';
 const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
 const REFERENCE = join(DOSSIER_MATRICES, 'montants.txt');
+// Référence de D1a-5d-3 (clés d'intégration), relue pour le côté « ne voit pas » des groupes que seule une clé sans
+// finances:read peut écrire sans voir le montant (G7 et G8 : en session, seule l'administration les écrit).
+const REFERENCE_CLES = join(DOSSIER_MATRICES, 'cles-montants.txt');
 const SA = 'SA';
 const ADMINISTRATION = ['SA', 'AD', 'AD-COM'];
 // Porteurs du droit devis par leur type (5a et 5b : 2xx sur les routes des devis au contexte « défaut »).
@@ -114,6 +119,10 @@ const MONTANTS_SESSION = {
   CatalogueEquipement: { colonnes: ['tauxTva', 'prixVenteHt', 'prixAchatHt'], cle: 'id' },
 };
 const PRIX_MAIN_OEUVRE = ['prixVenteHt', 'prixJourHorsContratHt', 'prixHeureSousContratHt', 'prixJourSousContratHt', 'prixDemiJourneeHorsContratHt', 'prixDemiJourneeSousContratHt', 'heuresParJour'];
+// Montants d'une main d'œuvre relus dans son entrée de journal : ses prix et ses heures, et sa TVA, journalisée elle aussi
+// (catalogue/main-oeuvre.ts:129-130, CHAMPS_JOURNAL et CHAMPS_CREATION ; N3 de l'audit des montants de #465, suivie par
+// #466).
+const MONTANTS_JOURNAL_MAIN_OEUVRE = ['tauxTva', ...PRIX_MAIN_OEUVRE];
 const CHAMPS_LIGNE_DEVIS = ['quantite', 'prixUnitaireHt', 'tauxTva', 'totalHt', 'totalTtc', 'prixAchatUnitaireHt', 'minutesPrevuesUnite'];
 
 // --- Montants envoyés et attendus (cadrage §3, §5.1, §5.3 ; étude §5) ---
@@ -165,10 +174,10 @@ const MONTANTS = {
   conversion: { budgetGlobalVendu: 987.09, budgetMaterielVendu: 70.1, budgetMainOeuvreVendu: 916.99, heuresVendues: 16.5, coutMaterielPrevu: 1.06 },
   // Acompte constaté sur devis-acompte-prix-achat : 98,76, distinct du taux d'acompte par défaut (30 %) appliqué au TTC.
   acompte: 98.76,
-  // Acompte reçu sur devis-acompte-recu, constaté avant l'instantané : 3 × 17,29 = 51,87 HT, TVA 10,374 arrondie à 10,37,
+  // Acompte constaté sur devis-acompte-recu avant l'instantané : 3 × 17,29 = 51,87 HT, TVA 10,374 arrondie à 10,37,
   // TTC 62,24 ; acompte 21,37, distinct du taux d'acompte (30 %) appliqué au TTC (18,67) et de l'acompte du jeu (98,76).
   // Une révision le reprend (devis/routes.ts:131-132) ; une duplication, devis neuf en brouillon, ne le reprend pas
-  // (devis/routes.ts:632-644). Lecture écartée : la duplication qui reprend l'acompte reçu, comme une révision.
+  // (devis/routes.ts:632-644). Lecture écartée : la duplication qui reprend l'acompte constaté, comme une révision.
   acompteRecu: 21.37,
   // Taux d'acompte par défaut changé à 37,5 % après la création de devis-acompte-prix-achat (copié à 30 %) : une révision
   // garde 30 (copie), une duplication relit 37,5 (réglage du jour). Lectures écartées : l'une pour l'autre.
@@ -277,7 +286,8 @@ if (!TEST_DATABASE_URL) {
       return ecarts;
     };
     // Journal d'administration d'une main d'œuvre (cadrage §5.3 : « relecture partielle comme les barèmes de 5c ») : seuls
-    // les champs qui changent sont journalisés (catalogue/main-oeuvre.ts:149-162) ; un prix absent de l'entrée doit être
+    // les champs qui changent sont journalisés (catalogue/main-oeuvre.ts:149-162) ; ses prix, ses heures et sa TVA
+    // (MONTANTS_JOURNAL_MAIN_OEUVRE) sont relus ; un prix absent de l'entrée doit être
     // inchangé en base, et un prix inchangé en être absent ; un prix journalisé égale la base (après) et l'instantané
     // (avant). Chaque écriture admise d'une main d'œuvre change la fiche (création, prix, activité ou nature), et l'entrée
     // est exigée (catalogue/main-oeuvre.ts:146 : « Une entrée par écriture qui change une main d'œuvre »).
@@ -286,13 +296,13 @@ if (!TEST_DATABASE_URL) {
       const ecarts = [];
       if (!entree) {
         ecarts.push('entrée MAIN_OEUVRE absente');
-        if (PRIX_MAIN_OEUVRE.some((c) => !memeValeur(ligne[c], avant?.[c]))) ecarts.push('montant écrit sans entrée de journal');
+        if (MONTANTS_JOURNAL_MAIN_OEUVRE.some((c) => !memeValeur(ligne[c], avant?.[c]))) ecarts.push('montant écrit sans entrée de journal');
         return ecarts;
       }
       const apres = entree.ligne.apres ?? {};
       const avantEntree = entree.ligne.avant ?? {};
       const creation = !avant;
-      for (const c of PRIX_MAIN_OEUVRE) {
+      for (const c of MONTANTS_JOURNAL_MAIN_OEUVRE) {
         if (!creation && !(c in apres)) {
           if (!memeValeur(ligne[c], avant[c])) ecarts.push(`montant changé non journalisé : ${c}`);
           continue;
@@ -483,7 +493,7 @@ if (!TEST_DATABASE_URL) {
       // Devis signé dont l'acompte est attendu, une ligne au prix d'achat prévu.
       P['devis-acompte-prix-achat'] = (await api(SA, 'POST', '/api/devis', { clientId: d.clientActif, objet: 'TEST Devis à acompte de la matrice des montants', acompteExige: true, lignes: [ligneLibre('TEST Ligne du devis à acompte', 'FOURNITURE', 3, 41.11, { prixAchatUnitaireHt: MONTANTS.prixAchatLigne })] }, 201)).id;
       await signer(P['devis-acompte-prix-achat']);
-      // Devis signé dont l'acompte est reçu avant l'instantané : la copie de l'acompte par une révision, et non par une
+      // Devis signé dont l'acompte est constaté avant l'instantané : la copie de l'acompte par une révision, et non par une
       // duplication.
       P['devis-acompte-recu'] = (await api(SA, 'POST', '/api/devis', { clientId: d.clientActif, objet: 'TEST Devis à acompte reçu de la matrice des montants', acompteExige: true, lignes: [ligneLibre('TEST Ligne du devis à acompte reçu', 'FOURNITURE', 3, 17.29, { prixAchatUnitaireHt: MONTANTS.prixAchatLigne })] }, 201)).id;
       await signer(P['devis-acompte-recu']);
@@ -660,7 +670,7 @@ if (!TEST_DATABASE_URL) {
       // Copie figée du taux d'acompte (cadrage §3) : une révision copie le taux du devis qu'elle révise
       // (devis/routes.ts:127) ; une duplication relit le taux d'acompte par défaut du jour (devis/routes.ts:600-601
       // et :638), changé après la création de devis-acompte-prix-achat.
-      // Acompte reçu (devis-acompte-recu, constaté avant l'instantané) : une révision le reprend (devis/routes.ts:131-132) ;
+      // Acompte constaté (devis-acompte-recu, avant l'instantané) : une révision le reprend (devis/routes.ts:131-132) ;
       // une duplication, devis neuf en brouillon, ne le reprend pas (devis/routes.ts:632-644), enregistré tel quel.
       const sourceAcompte = (cible, duplication) => async () => {
         const totaux = await ligneDe('instantane', 'Devis', P[cible], ['totalHt', 'totalTva', 'totalTtc', 'tauxAcompte', 'acompteMontant']);
@@ -834,13 +844,13 @@ if (!TEST_DATABASE_URL) {
       assert.ok(MONTANTS.acompte !== Math.round(MONTANTS.acompte), 'acompte : pas un nombre d’euros entier');
       assert.equal(t.devisAcompte.acompteMontant, null, 'devis-acompte-prix-achat : acompte non encore constaté');
       assert.notEqual(exact.euros(auCentime(enUnites(t.devisAcompte.totalTtc, 2) * enUnites(t.devisAcompte.tauxAcompte, 2), 10000n)), MONTANTS.acompte, 'acompte, lecture écartée : taux d’acompte appliqué au TTC');
-      // Acompte reçu (devis-acompte-recu) : relu en base, ni un nombre d'euros entier, ni le taux d'acompte appliqué au TTC ;
+      // Acompte constaté (devis-acompte-recu) : relu en base, ni un nombre d'euros entier, ni le taux d'acompte appliqué au TTC ;
       // non nul, donc distinct de l'acompte absent d'un duplicata (lecture écartée : la duplication qui le reprend).
       const r = t.devisAcompteRecu;
       assert.deepEqual([r.totalHt, r.totalTva, r.totalTtc], [exact.euros(exact.ligneHt(3, 17.29)), exact.euros(exact.tva(exact.ligneHt(3, 17.29), 20)), exact.euros(exact.ligneHt(3, 17.29) + exact.tva(exact.ligneHt(3, 17.29), 20))], 'devis-acompte-recu : totaux relus en base, recalculés');
-      assert.equal(r.acompteMontant, MONTANTS.acompteRecu, 'devis-acompte-recu : acompte reçu relu en base');
-      assert.ok(MONTANTS.acompteRecu !== Math.round(MONTANTS.acompteRecu) && MONTANTS.acompteRecu !== MONTANTS.acompte, 'acompte reçu : ni un nombre d’euros entier, ni l’acompte du jeu');
-      assert.notEqual(exact.euros(auCentime(enUnites(r.totalTtc, 2) * enUnites(r.tauxAcompte, 2), 10000n)), MONTANTS.acompteRecu, 'acompte reçu, lecture écartée : taux d’acompte appliqué au TTC');
+      assert.equal(r.acompteMontant, MONTANTS.acompteRecu, 'devis-acompte-recu : acompte constaté relu en base');
+      assert.ok(MONTANTS.acompteRecu !== Math.round(MONTANTS.acompteRecu) && MONTANTS.acompteRecu !== MONTANTS.acompte, 'acompte constaté : ni un nombre d’euros entier, ni l’acompte du jeu');
+      assert.notEqual(exact.euros(auCentime(enUnites(r.totalTtc, 2) * enUnites(r.tauxAcompte, 2), 10000n)), MONTANTS.acompteRecu, 'acompte constaté, lecture écartée : taux d’acompte appliqué au TTC');
       assert.equal(r.tauxAcompte, d.tauxAcompteInitial, 'devis-acompte-recu : taux d’acompte copié du réglage à sa création');
       // Taux d'acompte : copié à la création (taux d'avant), relu du jour par une duplication ; distincts.
       assert.equal(t.devisAcompte.tauxAcompte, d.tauxAcompteInitial, 'devis-acompte-prix-achat : taux d’acompte copié du réglage à sa création');
@@ -899,12 +909,13 @@ if (!TEST_DATABASE_URL) {
         [ecritureCtN1.replace('chantier-ct |', 'chantier-ct 12,50 |'), 'montant dans la cible d’une ligne de CT-N1'],
       ]) assert.equal(garde(ligne), true, `garde, ${quoi} : refusé`);
       // Annotations : liste fermée du cadrage §5.2, chacune avec sa raison.
-      const annotations = MONTANTS_MASQUES_ECRITURES.flatMap((g, i) => g.annotations.map((a) => `G${i + 1} ${a.champs.join('+')} ${a.cote}${a.nonPorte ? ', non porté' : ''}${a.jusqua ? ` jusqu’à ${a.jusqua}` : ''}`));
+      // Les annotations de G7 et G8 côté « ne voit pas » sont retirées par D1a-5d-3, qui observe ce côté par une clé sans
+      // finances:read (cadrage §5.2 et §6).
+      const annotations = MONTANTS_MASQUES_ECRITURES.flatMap((g, i) => g.annotations.map((a) => `G${i + 1} ${a.champs.join('+')} ${a.cote}${a.nonPorte ? ', non porté' : ''}`));
       assert.deepEqual(annotations, [
         'G1 budgetMaterielVendu+budgetMainOeuvreVendu ne voit pas', 'G4 intervenant.tauxHoraireCharge voit, non porté',
         'G5 tauxHoraireApplique+prixVenteHoraireApplique voit', 'G6 montantHT ne voit pas',
-        'G7 prixAchatHt ne voit pas jusqu’à D1a-5d-3', 'G8 catalogueEquipement.prixAchatHt ne voit pas jusqu’à D1a-5d-3',
-      ], 'annotations des 8 groupes : liste fermée du cadrage §5.2');
+      ], 'annotations des 8 groupes : liste fermée du cadrage §5.2, sans celles de G7 et G8 retirées par D1a-5d-3');
       for (const [i, g] of MONTANTS_MASQUES_ECRITURES.entries()) {
         for (const a of g.annotations) {
           assert.ok(a.raison && a.champs.every((champ) => g.champs.includes(champ)) && ['voit', 'ne voit pas'].includes(a.cote), `G${i + 1} : annotation sans raison ou hors des champs du groupe`);
@@ -915,11 +926,11 @@ if (!TEST_DATABASE_URL) {
     // Cadrage §5.2 (R-A) : chaque couple (route, compte) des réponses 2xx de 5a et 5b sur les routes des 8 groupes, et
     // chaque triplet (compte, route, droit) des contextes « droit … », a un cas ici.
     testPrepare('couverture des cas : chaque couple (route, compte) et chaque triplet (compte, route, droit) des réponses 2xx de 5a et 5b sur les routes des 8 groupes joué ici (réduction R-A déclarée)', (t) => {
-      // Routes réelles des 8 groupes : les jumelles /api/v1 relèvent de 5d-3 ; la correction d'une heure SAV est la route
-      // PATCH /api/interventions/:id/couts/:type/:coutId, type « heures » (cible heures-…), son matériel n'étant pas du G5.
-      const ALIAS = { 'PATCH /api/interventions/:id/couts/heures/:coutId': 'PATCH /api/interventions/:id/couts/:type/:coutId' };
+      // Routes de session des 8 groupes : les jumelles /api/v1 relèvent de 5d-3 ; la correction d'une heure SAV (G5) est la
+      // route PATCH /api/interventions/:id/couts/:type/:coutId de type « heures » (cible heures-…), son matériel n'étant pas
+      // du G5 (route réelle dans MONTANTS_MASQUES_ECRITURES depuis 5d-3, N4 de l'audit des droits de #465, suivie par #466).
       const groupeDe = new Map();
-      MONTANTS_MASQUES_ECRITURES.forEach((g, i) => { for (const r of g.routes) if (!r.startsWith('et ') && !r.includes('/api/v1/')) groupeDe.set(ALIAS[r] ?? r, i + 1); });
+      MONTANTS_MASQUES_ECRITURES.forEach((g, i) => { for (const r of g.routes) if (!r.startsWith('et ') && !r.includes('/api/v1/')) groupeDe.set(r, i + 1); });
       const couples = new Map(); const triplets = new Set();
       for (const fichier of ['ecritures-actions.txt', 'ecritures-modifications.txt']) {
         const texte = lireReference(join(DOSSIER_MATRICES, fichier));
@@ -1028,10 +1039,32 @@ if (!TEST_DATABASE_URL) {
 
     // Cadrage §5.2 et §3 (classement C) : pour chaque couple (groupe, champ) de MONTANTS_MASQUES_ECRITURES, un compte qui le
     // voit l'a « présent » et un compte qui ne le voit pas l'a « null » ou « absent », sauf côté annoté ; aucun compte qui
-    // ne le voit pas ne l'a « présent » ; un champ non porté ne l'est pour aucun compte.
-    testPrepare('montants masqués des réponses d’écriture : chaque champ des 8 groupes vu présent par un compte qui le voit, masqué pour un compte qui ne le voit pas, jamais présent pour un compte qui ne le voit pas (annotations en liste fermée)', () => {
+    // ne le voit pas ne l'a « présent » ; un champ non porté ne l'est pour aucun compte. Test « posé en 5d-2 et complété
+    // en 5d-3 » (cadrage §5.2) : le côté « ne voit pas » peut être observé par une clé sans finances:read sur une jumelle
+    // /api/v1 du groupe, dont l'état est relu dans la référence de D1a-5d-3 (matrice-droits/cles-montants.txt, comparée au
+    // caractère près par son fichier) ; c'est le seul côté « ne voit pas » de G7 et G8, dont les annotations sont retirées.
+    const masquesParCle = () => {
+      const texte = lireReference(REFERENCE_CLES);
+      assert.ok(texte, `${REFERENCE_CLES} absent : la référence de D1a-5d-3 porte le côté « ne voit pas » de G7 et G8`);
+      const masques = new Set();
+      for (const ligne of texte.split('\n').filter(Boolean)) {
+        const [compte, route, , , reponse] = ligne.split(SEPARATEUR);
+        if (!compte.startsWith('CLE ') || compte.includes('finances:read') || !/^2\d\d /.test(reponse)) continue;
+        const groupe = groupeDeRouteEcriture(route);
+        const observe = / ; réponse : ([^;]+?)(?: ;|$)/.exec(reponse)?.[1];
+        if (!groupe || !observe) continue;
+        for (const morceau of observe.split(', ')) {
+          const [, champ, etat] = /^(\S+) (.+)$/.exec(morceau) ?? [];
+          if (['null', 'absent', 'non porté'].includes(etat)) masques.add(`G${groupe} ${champ}`);
+        }
+      }
+      return masques;
+    };
+    testPrepare('montants masqués des réponses d’écriture : chaque champ des 8 groupes vu présent par un compte qui le voit, masqué pour un compte qui ne le voit pas (ou, côté « ne voit pas », pour une clé sans finances:read de la référence de D1a-5d-3), jamais présent pour un compte qui ne le voit pas (annotations en liste fermée)', (t) => {
       const ecarts = [];
       const MASQUE = ['null', 'absent', 'non porté'];
+      const parCle = masquesParCle();
+      const parCleSeulement = [];
       for (const [i, g] of MONTANTS_MASQUES_ECRITURES.entries()) {
         const groupe = i + 1;
         const observes = cas.filter((c) => c.groupe === groupe && c.observation);
@@ -1039,13 +1072,17 @@ if (!TEST_DATABASE_URL) {
           const annote = (cote) => g.annotations.some((a) => a.cote === cote && a.champs.includes(champ));
           const obs = observes.map((c) => ({ c, voit: c.voit(champ), etat: c.observation[champ] }));
           if (!annote('voit') && !obs.some((o) => o.voit && o.etat === 'présent')) ecarts.push(`G${groupe} ${champ} : aucun compte qui le voit ne l’a présent`);
-          if (!annote('ne voit pas') && !obs.some((o) => !o.voit && MASQUE.includes(o.etat))) ecarts.push(`G${groupe} ${champ} : aucun compte qui ne le voit pas ne l’a masqué`);
+          const masqueEnSession = obs.some((o) => !o.voit && MASQUE.includes(o.etat));
+          if (!masqueEnSession && parCle.has(`G${groupe} ${champ}`)) parCleSeulement.push(`G${groupe} ${champ}`);
+          if (!annote('ne voit pas') && !masqueEnSession && !parCle.has(`G${groupe} ${champ}`)) ecarts.push(`G${groupe} ${champ} : aucun compte qui ne le voit pas, ni aucune clé sans finances:read, ne l’a masqué`);
           for (const o of obs.filter((x) => !x.voit && !MASQUE.includes(x.etat))) ecarts.push(`G${groupe} ${champ} : ${o.etat} pour ${o.c.compte} (${o.c.route}, ${o.c.cible}, ${o.c.contexte}), qui ne le voit pas`);
           if (annote('voit') && annote('ne voit pas')) ecarts.push(`G${groupe} ${champ} : annoté des deux côtés`);
           if (g.annotations.some((a) => a.nonPorte && a.champs.includes(champ))) for (const o of obs.filter((x) => !['absent', 'non porté'].includes(x.etat))) ecarts.push(`G${groupe} ${champ} : non porté selon l’annotation, mais ${o.etat} pour ${o.c.compte} (${o.c.route})`);
         }
         if (!observes.length) ecarts.push(`G${groupe} : aucune réponse observée`);
       }
+      t.diagnostic(`côté « ne voit pas » observé par une clé sans finances:read seulement (référence de D1a-5d-3) : ${parCleSeulement.join(', ') || 'aucun'}`);
+      assert.deepEqual(parCleSeulement, ['G7 prixAchatHt', 'G8 catalogueEquipement.prixAchatHt'], 'côté « ne voit pas » observé par une clé seulement : G7 et G8, que seule l’administration écrit en session');
       assert.deepEqual(ecarts, [], 'champs des 8 groupes non observés, ou montant vu par un compte qui ne le voit pas');
     });
 

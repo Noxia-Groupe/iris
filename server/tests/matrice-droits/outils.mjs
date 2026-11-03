@@ -274,9 +274,16 @@ export const SEPARATEUR = ' | ';
 // l'audit des droits et N7 de l'audit des montants), avec `journaux` seulement et sans effet sans elle : le nom d'un
 // compte joué qui porte un chiffre (CT-N1), auteur d'une entrée ou cité par la cible d'une lecture, n'est pas un
 // montant ; il est remplacé par « COMPTE » dans la cible et la réponse avant le contrôle. Un nom inconnu (CT-N2) reste
-// refusé. Sans cette option, un mutant qui fait écrire CT-N1 échouerait sur la garde avant d'imprimer son diff.
-export function lignesAvecMontant(lignes, { comptes, constat = false, ciblesAdmises = [], journaux = false, comptesAChiffre = false }) {
-  if (journaux) return lignesAvecMontantJournaux(lignes, { comptes, ciblesAdmises, comptesAChiffre });
+// refusé. Sans cette option, un mutant qui fait écrire CT-N1 échouerait sur la garde avant d'imprimer son diff. Une
+// clé d'intégration jouée (« CLE <scope> », D1a-5d-3) est un compte joué comme un autre : l'appelant l'ajoute à
+// `comptes`, et l'option couvre de même le nom d'une clé qui porterait un chiffre.
+// Option `routesCles` (D1a-5d-3 ; cadrage de D1a-5d, version 3, §6, suite de N2 et N7 de #457), avec `journaux`
+// seulement et sans effet sans elle : la cible d'une lecture qui cite une écriture par clé (« … ← CLE <scope> DELETE
+// /api/v1/catalogue/:family/:id sur … ») porte le chiffre du préfixe /api/v1/, qui n'est pas un montant ; ce préfixe
+// est remplacé par « /api/vN/ » dans la cible avant le contrôle. Tout autre chiffre de la cible reste refusé. Sans
+// elle, un mutant qui fait écrire une entrée par une clé (M5b) échouerait sur la garde avant d'imprimer son diff.
+export function lignesAvecMontant(lignes, { comptes, constat = false, ciblesAdmises = [], journaux = false, comptesAChiffre = false, routesCles = false }) {
+  if (journaux) return lignesAvecMontantJournaux(lignes, { comptes, ciblesAdmises, comptesAChiffre, routesCles });
   const deuxCents = constat ? /^2\d\d (inchangé|écrit \([^()\d]+\))( ; [^\d;|]+)?$/ : /^2\d\d (inchangé|écrit \([^()\d]+\))$/;
   return lignes.filter((l) => {
     const [compte, , cible, contexte, reponse] = l.split(SEPARATEUR);
@@ -285,7 +292,7 @@ export function lignesAvecMontant(lignes, { comptes, constat = false, ciblesAdmi
     return /\d/.test(reponse.replace(/^\d{3} /, '').replace(/\b\d+ [^\s()]+\(s\)/g, ''));
   });
 }
-function lignesAvecMontantJournaux(lignes, { comptes, ciblesAdmises, comptesAChiffre }) {
+function lignesAvecMontantJournaux(lignes, { comptes, ciblesAdmises, comptesAChiffre, routesCles }) {
   const chiffre = /\p{Nd}/u;
   const tables = String.raw`écrit \([^()\p{Nd}]+\)`;
   const constats = String.raw`( ; [^\p{Nd};|]+)*`;
@@ -297,9 +304,11 @@ function lignesAvecMontantJournaux(lignes, { comptes, ciblesAdmises, comptesAChi
   const aChiffre = comptesAChiffre ? comptes.filter((c) => chiffre.test(c)).sort((x, y) => y.length - x.length) : [];
   // Sans l'option, le texte est rendu tel quel (même valeur, même comportement que D1a-5c, ligne mal formée comprise).
   const sansComptes = (texte) => (aChiffre.length ? aChiffre.reduce((t, c) => t.split(c).join('COMPTE'), texte) : texte);
+  // Sans l'option `routesCles`, la cible est rendue telle quelle (même valeur, même comportement que D1a-5c à D1a-5d-2).
+  const sansRoutesCles = (texte) => (routesCles && typeof texte === 'string' ? texte.split('/api/v1/').join('/api/vN/') : texte);
   return lignes.filter((l) => {
     const [compte, route, cibleBrute, contexte, reponseBrute] = l.split(SEPARATEUR);
-    const cible = sansComptes(cibleBrute);
+    const cible = sansRoutesCles(sansComptes(cibleBrute));
     const reponse = sansComptes(reponseBrute);
     let cibleControlee = ciblesAdmises.includes(cible) ? '' : cible;
     if (cibleControlee && cible.includes(' ← ')) {
