@@ -40,8 +40,8 @@ Côté client, il n'existe pas d'équivalent de `server/scripts/verifier-deplace
 
    Limites : aucune action qui écrit (enregistrement, glisser-déposer, suppression) n'est relevée, ni l'état qui suivrait une écriture ; ces parcours restent couverts par les E2E. Les branches de l'onglet Utilisateurs qui affichent le message réservé aux comptes super administrateur ne se rendent pas : le serveur ne renvoie pas ces comptes à un administrateur. L'horloge du serveur n'est pas figée (exécution refusée à cheval sur minuit). L'outil ne compte que les requêtes API parties par `fetch` : une requête partie autrement l'arrêterait au bout de 120 s (code 2). Une PR de découpage qui touche une zone non couverte ajoute d'abord le scénario qui la rend.
 2. `npm run build` (`tsc -b`, dont `noUnusedLocals` et `verbatimModuleSyntax`) et `npm run lint`, avec un nombre d'avertissements égal ou inférieur au départ : Admin 10, ChantierDetail 8, Planning 0. Les directives `eslint-disable-next-line` positionnelles (Planning l.126, 137, 153 ; ChantierDetail l.135) restent attachées à leur ligne.
-3. `npm run test:unit`, puis les E2E deux fois sur la même base. 134 parcours, dont plus de trente touchent ces trois écrans. Plusieurs de leurs sélecteurs dépendent de la structure du DOM, ce qui en fait aussi une preuve de non-régression du rendu.
-4. Un audit indépendant par PR, puis la fusion par Claude Code dans les conditions de [CLAUDE.md](../CLAUDE.md#mode-de-livraison) (aucun montant ne change).
+3. `npm run test:unit`, puis les E2E deux fois sur la même base. Les parcours de la suite complète (134 au 18-10-2026, dont plus de trente touchent ces trois écrans ; 284 sur la CI de `80f7a34`, dernière tête de #478). Plusieurs de leurs sélecteurs dépendent de la structure du DOM, ce qui en fait aussi une preuve de non-régression du rendu.
+4. Un audit interne par PR, assuré depuis le 31-10-2026 par les auditeurs de projet, et un audit indépendant à la demande de Nelson (« Audits », [CLAUDE.md](../CLAUDE.md#mode-de-livraison)), puis la fusion par Claude Code dans les conditions de [CLAUDE.md](../CLAUDE.md#mode-de-livraison) (aucun montant ne change).
 
 ## Découpage proposé
 
