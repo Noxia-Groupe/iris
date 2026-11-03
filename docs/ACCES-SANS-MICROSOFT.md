@@ -166,7 +166,7 @@ Une correction faite pour l'interface vaut aussitôt pour l'agent.
 |---|---|
 | 401 | clé absente, inconnue, inactive, expirée ou révoquée |
 | 403 | clé valide, mais le scope demandé lui manque ; ou refus du gestionnaire, qu'une clé reçoit là où l'administration est admise : conversion d'un devis en intervention ou en contrat, champs d'ouverture du chantier, main d'œuvre du catalogue, prix d'achat prévu d'une ligne de devis |
-| 404 | ressource introuvable (identifiant inexistant ou hors périmètre) |
+| 404 | ressource introuvable (identifiant inexistant, ou contact ou site qui n'appartient pas au client indiqué) |
 | 400 | la requête est refusée par la validation métier (même règle que l'interface) |
 
 ### Révoquer
