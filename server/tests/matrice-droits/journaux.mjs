@@ -4,7 +4,10 @@
 // par défaut, que la référence de 5c rejouée prouve. D1a-5d-2 (montants des écritures de session et réglages ; même
 // cadrage, §5.4, notes T1 et N4 de l'audit des droits de #456, suivies par #457) ajoute verifierLectureExport et
 // lignesNonReconnues, et l'option `lignesExport` de lireVisibilite, sans effet sur le comportement par défaut, que les
-// références de 5c et de 5d-1 rejouées prouvent.
+// références de 5c et de 5d-1 rejouées prouvent. D1a-5d-3 (clés d'intégration ; même cadrage, §6) fait ignorer à
+// entreesNouvelles la dernière utilisation d'une clé (ApiAccessKey.dernierUsageLe), que la porte /api/v1 écrit à chaque
+// appel admis et qui n'est pas une entrée de l'historique des clés ; les références de 5c, 5d-1 et 5d-2 rejouées
+// restent identiques.
 //
 // Ce fichier n'est pas un fichier de tests (pas de suffixe « .test.mjs »). Il sert aux matrices des écritures réelles,
 // une fois l'instantané de la base pris par l'outil de remise en état (remise-en-etat.mjs, dont il ne reprend que le
@@ -13,7 +16,8 @@
 //    et ses routes de lecture, avec le compte refusé par défaut de chacune (cadrage §2.2 : « un compte refusé par
 //    couple (route de lecture, dossier parent), le refus passant avant l'entrée, par la garde ou par le périmètre ») ;
 //  - ouvrirConnexionLecture et entreesNouvelles : les lignes de ces tables absentes de l'instantané, ou changées depuis
-//    lui, relues par une connexion pg en lecture seule, distincte de celle de la remise et de celles de l'application ;
+//    lui (hors de la dernière utilisation d'une clé, D1a-5d-3), relues par une connexion pg en lecture seule,
+//    distincte de celle de la remise et de celles de l'application ;
 //  - nommerEntree : « Table nature action par COMPTE », suivi des marques « concerne un SA » et « réservée au SA »
 //    quand elles sont posées, sans identifiant, date ni chiffre (cadrage §2.1) ; avec l'option `pieces` (D1a-5d-1), la
 //    nature d'une entrée JournalFacture nomme sa pièce ;
@@ -242,12 +246,24 @@ const ident = (nom) => {
   return `"${nom}"`;
 };
 // Lignes des tables de journal absentes de l'instantané, ou changées depuis lui (comparaison de la ligne entière, par
-// son identifiant). Rend [{ table, ligne, avant }], `avant` étant la ligne de l'instantané (null pour une ligne
-// nouvelle), triées par table puis identifiant.
+// son identifiant, hors des colonnes de COLONNES_HORS_ENTREE). Rend [{ table, ligne, avant }], `avant` étant la ligne
+// de l'instantané (null pour une ligne nouvelle), lignes entières, triées par table puis identifiant.
+// COLONNES_HORS_ENTREE (D1a-5d-3 ; cadrage de D1a-5d, version 3, §6) : la dernière utilisation d'une clé, notée sans
+// attente par la porte /api/v1 après chaque appel admis (http/cles-api.ts), n'est pas une entrée de l'historique des
+// clés (création, révocation) : sans cette exclusion, chaque écriture admise par clé produirait une fausse entrée
+// « ApiAccessKey CLE MODIFICATION ». Une clé créée reste une entrée, et tout autre changement de sa ligne (actif,
+// révocation, scopes, nom) aussi ; la matrice des clés contrôle la dernière utilisation à part, clé par clé. Aucune
+// autre table n'en est concernée : leur requête est celle de D1a-5c, au caractère près.
+export const COLONNES_HORS_ENTREE = { ApiAccessKey: ['dernierUsageLe'] };
+const sansColonnesHorsEntree = (table, alias) => {
+  const colonnes = COLONNES_HORS_ENTREE[table] ?? [];
+  for (const colonne of colonnes) assert.match(colonne, /^[A-Za-z]+$/, `colonne hors entrée : ${colonne}`);
+  return colonnes.length ? `(to_jsonb(${alias})${colonnes.map((c) => ` - '${c}'`).join('')})` : `to_jsonb(${alias})`;
+};
 export async function entreesNouvelles(connexion, { tables = Object.keys(TABLES_DE_JOURNAL) } = {}) {
   const morceaux = tables.map((table) => `SELECT '${table}' AS "table", to_jsonb(t) AS ligne, CASE WHEN s.id IS NULL THEN NULL ELSE to_jsonb(s) END AS avant
     FROM public.${ident(table)} t LEFT JOIN ${ident(SCHEMA_INSTANTANE)}.${ident(table)} s ON s.id = t.id
-    WHERE s.id IS NULL OR to_jsonb(s) IS DISTINCT FROM to_jsonb(t)`);
+    WHERE s.id IS NULL OR ${sansColonnesHorsEntree(table, 's')} IS DISTINCT FROM ${sansColonnesHorsEntree(table, 't')}`);
   const texte = `${morceaux.join(' UNION ALL ')} ORDER BY 1, 2`;
   // Requête préparée (nommée), planifiée une fois : nom tiré de son texte, propre à chaque liste de tables.
   const { rows } = await connexion.query({ name: `entrees-nouvelles-${createHash('md5').update(texte).digest('hex')}`, text: texte });

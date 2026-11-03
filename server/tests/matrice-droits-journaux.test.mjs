@@ -16,7 +16,9 @@
 //    telles quelles (« aucune entrée ») : écarts connus, état décidé, clôture et réouverture d'un chantier ;
 //  - §2.2 : chaque entrée nouvelle lue par SA, par AD, par l'auteur s'il est hors administration, et par un compte
 //    refusé par couple (route de lecture, dossier parent) ; l'export CSV du journal d'administration lu par SA et AD,
-//    l'entrée y étant comptée par la fin de sa ligne ; les filtres du journal d'administration ;
+//    l'entrée y étant comptée par la fin de sa ligne, l'outil vérifiant d'abord qu'il reconnaît l'export du SA
+//    (verifierLectureExport, T1 de l'audit des droits de #456, suivi #457, versé par D1a-5d-3) ; les filtres du journal
+//    d'administration ;
 //  - §2.3 : la génération des visites, réglage vide en témoin (D1a-1 l'enregistre), réglé à trente jours par AD, passage
 //    manuel de chaque administrateur, refus des autres comptes, passage automatique au nom du compte système ;
 //  - §2.4 : pour chaque écriture d'un achat, d'une heure, d'un coût SAV ou d'un barème de rémunération, le montant relu
@@ -27,7 +29,8 @@
 // ou « aucune entrée », et pour un montant le constat. Une ligne de lecture : compte (le lecteur), route de lecture,
 // cible « entrée ← auteur route sur cible » (« préalable » devant l'entrée d'une écriture préalable lue), contexte de
 // l'écriture, verdict (« 200 visible », « 200 absente », ou le refus). Jamais un montant (garde lignesAvecMontant
-// d'outils.mjs, option `journaux`). Le tout est comparé au caractère près à server/tests/matrice-droits/journaux.txt.
+// d'outils.mjs, options `journaux` et `comptesAChiffre`, celle-ci versée par D1a-5d-3, N2 de #457). Le tout est comparé
+// au caractère près à server/tests/matrice-droits/journaux.txt.
 //
 // Rôle PostgreSQL : comme D1a-5a et D1a-5b, la remise pose session_replication_role ; si le rôle de TEST_DATABASE_URL ne
 // le peut pas, le test « rôle PostgreSQL » échoue avec un message clair, chacun des autres le cite, et aucune base n'est
@@ -50,7 +53,7 @@ import { ROUTES_SESSION } from './matrice-droits/routes.mjs';
 import { SCHEMA_INSTANTANE, creerRemiseEnEtat, exigerRoleReplication } from './matrice-droits/remise-en-etat.mjs';
 import {
   AUTEUR_SYSTEME, TABLES_DE_JOURNAL, compterFinDeLigne, entreesNouvelles, finDeLigneCsv, lireExports, lireVisibilite,
-  memeEntree, nommerEntree, ouvrirConnexionLecture,
+  memeEntree, nommerEntree, ouvrirConnexionLecture, verifierLectureExport,
 } from './matrice-droits/journaux.mjs';
 
 const TITRE = 'Lot D1a-5c : journaux, entrées écrites par chaque écriture et qui peut les lire, génération des visites, montants relus en base, base remise en état entre deux cas';
@@ -435,6 +438,10 @@ if (!TEST_DATABASE_URL) {
       lecture = await ouvrirConnexionLecture(base.url);
       assert.deepEqual(await entreesNouvelles(lecture), [], 'aucune entrée nouvelle juste après l’instantané');
       exportsReference = await lireExports({ appeler, adresse: appli.adresse, jetons });
+      // L'outil de l'export vérifie qu'il reconnaît l'export du super administrateur avant de conclure (T1 de l'audit des
+      // droits de #456, suivi #457, versé par D1a-5d-3) : sinon, la préparation s'arrête avec un message clair, au lieu de
+      // conclure « absente » pour chaque lecture de l'export.
+      await verifierLectureExport(lecture, exportsReference.SA);
       construireCas();
     });
 
@@ -965,7 +972,9 @@ if (!TEST_DATABASE_URL) {
       for (const [ligne, refusee] of temoins) assert.equal(lignesAvecMontant([ligne], { comptes: comptesAdmis, ciblesAdmises, journaux: true }).length === 1, refusee, `garde « aucun montant », témoin : ${ligne}`);
       // Le comportement par défaut d'outils.mjs (5a et 5b) ne change pas : une ligne de lecture n'y est pas admise.
       assert.equal(lignesAvecMontant([temoins[1][0]], { comptes: COMPTES_JOUES }).length, 1, 'comportement par défaut de lignesAvecMontant');
-      assert.deepEqual(lignesAvecMontant(lignes, { comptes: comptesAdmis, ciblesAdmises, journaux: true }), [], 'lignes qui portent un montant, ou un nombre hors du code de la réponse et des comptes d’objets d’un refus');
+      // Option `comptesAChiffre` (posée par D1a-5d-1) : un mutant qui fait écrire CT-N1 imprime son diff au lieu d'échouer sur
+      // la garde (N2 de l'audit des droits de #456, suivi #457).
+      assert.deepEqual(lignesAvecMontant(lignes, { comptes: comptesAdmis, ciblesAdmises, journaux: true, comptesAChiffre: true }), [], 'lignes qui portent un montant, ou un nombre hors du code de la réponse et des comptes d’objets d’un refus');
       // Remise (cadrage §5) : la base est revenue à l'état de référence après le dernier cas, filtres compris ; vérifié
       // après la comparaison à la référence, dont le diff nomme mieux un écart.
       const etatFinal = remise.changees(await remise.empreinte());
