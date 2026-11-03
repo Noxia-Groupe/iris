@@ -1,50 +1,25 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import html2pdf from 'html2pdf.js';
-import {
-  ArrowLeft, Calendar, User, FileDown,
-  Package, Users, Truck, Wallet, Clock3, Hammer, Briefcase, Pencil, Trash2, RotateCcw, X, MapPin, Search,
-} from 'lucide-react';
+import { ArrowLeft, FileDown, Pencil } from 'lucide-react';
 import { apiFetch } from '../api';
-import { SelecteurClient, type ClientActuel } from '../components/SelecteurClient';
-import { ProgressMeter } from '../components/ProgressMeter';
-import { BarBreakdown, type BreakdownRow } from '../components/BarBreakdown';
-import { TYPES_CHANTIER } from '../chantierTypes';
+import type { ClientActuel } from '../components/SelecteurClient';
+import type { BreakdownRow } from '../components/BarBreakdown';
 import { isAdminRole, ROLE_TECHNICIEN } from '../roles';
 import { useModules } from '../modules';
 import { useCompanyTimezone, useFuseauSocieteConnu } from '../companyTimezoneContext';
-import { formatCompanyDate, formatDateOnly, jourCivilChantier, jourCivilChantierIso, jourCivilEntrepriseIso, joursCivilsEntre, instantaneLisible } from '../lib/dateFormatting';
+import { jourCivilChantierIso, jourCivilEntrepriseIso, joursCivilsEntre } from '../lib/dateFormatting';
 import { archivagesRestaurables } from '../lib/archivesRestaurables';
-import { changementAffaire, titreEntreeJournal } from '../lib/journalChantier';
-import { AlertesChantier } from '../components/AlertesChantier';
-import { CoutsSuitesChantier } from '../components/CoutsSuitesChantier';
 import { RapportClientChantier } from '../components/RapportClientChantier';
-import { ancienneteSaisie, hypotheseCoutHoraire, hypotheseMateriel, type EstimationMarge } from '../lib/suiviChantiers';
-import { sommeExacte, differenceExacte, arrondiEuro, arrondiCentime } from '../lib/montants';
-
-// Date ISO (avec ou sans heure) -> format métier français JJ-MM-AAAA.
-const toDateFrancaise = (d: string | null | undefined) => {
-  if (!d) return '';
-  const [annee, mois, jour] = d.slice(0, 10).split('-');
-  return `${jour}-${mois}-${annee}`;
-};
-
-const fmtDate = (d: string) => formatDateOnly(d);
-const fmtEuro = (n: number) => `${arrondiEuro(n).toLocaleString('fr-FR')} €`;
-// Heures : jusqu'au centième (18,75 h), sans décimale inutile (8 h, 7,5 h).
-const fmtHeures = (n: number) => `${n.toLocaleString('fr-FR', { maximumFractionDigits: 2 })} h`;
-
-type FactureLiee = {
-  id: string;
-  numero: string;
-  type: 'FACTURE' | 'AVOIR';
-  statut: string;
-  dateEmission: string;
-  totalHt: number;
-  totalTtc: number;
-};
-
-const STATUT_LABELS: Record<string, string> = { EN_COURS: 'En cours', TERMINE: 'Terminé', ANNULE: 'Annulé' };
+import type { EstimationMarge } from '../lib/suiviChantiers';
+import { sommeExacte, differenceExacte, arrondiCentime } from '../lib/montants';
+import { fmtDate } from '../lib/formatsChantier';
+import { ChantierEnTete } from '../components/ChantierEnTete';
+import { ChantierIndicateurs, type FactureLiee } from '../components/ChantierIndicateurs';
+import { ChantierJournalAchats } from '../components/ChantierJournalAchats';
+import { ChantierJournalHeures } from '../components/ChantierJournalHeures';
+import { ChantierJournalAudit } from '../components/ChantierJournalAudit';
+import { ChantierModaleModification } from '../components/ChantierModaleModification';
 
 const ChantierDetail = () => {
   const companyTimezone = useCompanyTimezone();
@@ -698,326 +673,24 @@ const ChantierDetail = () => {
             <RapportClientChantier chantier={chantier} />
           </div>
 
-          <div className="mb-8">
-            <div className="flex items-center gap-3 flex-wrap mb-2">
-              <h2 className="text-3xl font-extrabold text-primary-dark tracking-tight m-0">{chantier.nom}</h2>
-              <span className={`text-xs font-bold uppercase tracking-wide px-2.5 py-1 rounded-full ${isTermine ? 'bg-gray-100 text-gray-500' : 'bg-blue-100 text-accent'}`}>
-                {STATUT_LABELS[chantier.statut] || chantier.statut}
-              </span>
-              {chantier.types?.map((t: string) => (
-                <span key={t} className="text-[11px] font-semibold px-2.5 py-1 bg-indigo-50 text-indigo-700 rounded-full">{t}</span>
-              ))}
-              {chantier.baremeReduit && (
-                <span className="text-[11px] font-semibold px-2.5 py-1 bg-amber-50 text-amber-700 rounded-full">{libelleBaremeReduit}</span>
-              )}
-              {chantier.statut === 'TERMINE' && (isAdminRole(userRole) ? (
-                <button
-                  type="button"
-                  onClick={handleToggleEncaisse}
-                  disabled={savingEncaisse}
-                  title="Réservé aux admins : conditionne le résultat commercial du mois de clôture"
-                  className={`text-[11px] font-bold uppercase tracking-wide px-2.5 py-1 rounded-full transition-colors ${chantier.encaisse ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' : 'bg-red-50 text-red-600 hover:bg-red-100'}`}
-                >
-                  {chantier.encaisse ? '✓ Encaissé' : 'Non encaissé'}
-                </button>
-              ) : (
-                <span className={`text-[11px] font-bold uppercase tracking-wide px-2.5 py-1 rounded-full ${chantier.encaisse ? 'bg-emerald-100 text-emerald-700' : 'bg-red-50 text-red-600'}`}>
-                  {chantier.encaisse ? '✓ Encaissé' : 'Non encaissé'}
-                </span>
-              ))}
-            </div>
-            <div className="flex flex-wrap gap-x-5 gap-y-1.5 text-sm text-gray-600">
-              <span className="flex items-center gap-1.5"><strong className="text-gray-800">Client:</strong> {chantier.client}</span>
-              <span className="flex items-center gap-1.5"><strong className="text-gray-800">Devis:</strong> {chantier.numeroDevis || 'N/A'}</span>
-              {chantier.adresse && (
-                <span className="flex items-center gap-1.5"><MapPin size={14} className="text-gray-400" /> {chantier.adresse}</span>
-              )}
-              {chantier.responsable?.name && (
-                <span className="flex items-center gap-1.5"><User size={14} className="text-gray-400" /> {chantier.responsable.name}</span>
-              )}
-              <span className="flex items-center gap-1.5">
-                <Calendar size={14} className="text-gray-400" />
-                Démarré le {jourCivilChantier(chantier.dateDebut, companyTimezone)}
-                {isTermine && chantier.dateFin ? ` — terminé le ${jourCivilChantier(chantier.dateFin, companyTimezone)} (${joursEcoules} j)` : ` (il y a ${joursEcoules} j)`}
-              </span>
-              {metrics.joursSansSaisie != null && (
-                <span className="flex items-center gap-1.5" data-derniere-saisie>
-                  <Clock3 size={14} className="text-gray-400" />
-                  Dernière saisie : {metrics.derniereSaisie ? `${toDateFrancaise(metrics.derniereSaisie)} (${ancienneteSaisie(metrics.joursSansSaisie)})` : 'aucune depuis le démarrage'}
-                </span>
-              )}
-              {editingCommercial ? (
-                <span className="flex items-center gap-1.5">
-                  <Briefcase size={14} className="text-gray-400" />
-                  <select
-                    autoFocus
-                    disabled={savingCommercial}
-                    defaultValue={chantier.commercial?.id || ''}
-                    onChange={(e) => handleAssignCommercial(e.target.value)}
-                    onBlur={() => setEditingCommercial(false)}
-                    className="text-sm border border-gray-200 rounded-md px-2 py-0.5"
-                  >
-                    <option value="" disabled>Sélectionner un commercial...</option>
-                    {commerciaux.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
-                </span>
-              ) : (
-                <span className="flex items-center gap-1.5">
-                  <Briefcase size={14} className="text-gray-400" />
-                  {chantier.commercial?.name || <span className="italic text-gray-400">Aucun commercial</span>}
-                  {canEditCommercial && (
-                    <button type="button" onClick={startEditCommercial} className="text-xs font-semibold text-accent hover:underline ml-1">
-                      Modifier
-                    </button>
-                  )}
-                </span>
-              )}
-            </div>
-          </div>
+          <ChantierEnTete
+            chantier={chantier} isTermine={isTermine} libelleBaremeReduit={libelleBaremeReduit} userRole={userRole}
+            handleToggleEncaisse={handleToggleEncaisse} savingEncaisse={savingEncaisse}
+            companyTimezone={companyTimezone} joursEcoules={joursEcoules} metrics={metrics}
+            editingCommercial={editingCommercial} savingCommercial={savingCommercial}
+            handleAssignCommercial={handleAssignCommercial} setEditingCommercial={setEditingCommercial}
+            commerciaux={commerciaux} canEditCommercial={canEditCommercial} startEditCommercial={startEditCommercial}
+          />
 
-          {/* Alertes de suivi, calculées par le serveur : une fiche saine le dit aussi. */}
-          <div className="-mt-4 mb-6" data-alertes-fiche>
-            <AlertesChantier chantier={chantier} afficherSiSain />
-          </div>
-
-          {/* Bannière de rappel : un chantier Terminé mais Non encaissé ne compte pas dans
-              le résultat commercial du mois (CA et marge validés).
-              Le badge ci-dessus permet déjà de basculer ce statut, mais reste discret parmi
-              les autres badges — cette bannière rend l'action impossible à manquer. */}
-          {chantier.statut === 'TERMINE' && !chantier.encaisse && isAdminRole(userRole) && (
-            <div className="mb-6 p-4 rounded-xl border-l-8 border-amber-500 bg-amber-50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div>
-                <div className="font-bold text-amber-800">Chantier terminé, en attente d'encaissement</div>
-                <div className="text-sm text-amber-700">
-                  Tant que l'encaissement n'est pas validé, ce chantier ne compte pas dans le CA et la marge validés du commercial.
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={handleToggleEncaisse}
-                disabled={savingEncaisse}
-                className="shrink-0 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg font-semibold text-sm transition-colors"
-              >
-                {savingEncaisse ? 'Validation...' : "Valider l'encaissement"}
-              </button>
-            </div>
-          )}
-
-          {/* Key Metrics */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-            {showBudgetVendu && (
-              <div className="bg-gray-50 p-5 rounded-xl border border-gray-100 flex flex-col justify-center relative overflow-hidden group">
-                <div aria-hidden="true" className="absolute top-0 right-0 w-16 h-16 bg-blue-100 rounded-bl-full -mr-8 -mt-8 transition-transform group-hover:scale-110"></div>
-                <div className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1 z-10">Budget Vendu</div>
-                <div className="text-2xl font-black text-primary-dark z-10">{chantier.budgetGlobalVendu.toLocaleString()} €</div>
-              </div>
-            )}
-
-            {chantier.facturation && (
-              <div className="bg-emerald-50 p-5 rounded-xl border border-emerald-100 flex flex-col justify-center">
-                <div className="text-xs font-bold text-emerald-700 uppercase tracking-widest mb-1">Facturé HT</div>
-                <div className="text-2xl font-black text-emerald-800">{fmtEuro(chantier.facturation.totalFactureHt)}</div>
-                <div className="mt-1 text-xs text-emerald-700">Reste à facturer : {fmtEuro(chantier.facturation.resteAFacturerHt)}</div>
-              </div>
-            )}
-
-            {chantier.facturation?.factures?.length > 0 && (
-              <section aria-label="Factures liées" className="lg:col-span-4 overflow-x-auto rounded-xl border border-emerald-100 bg-white">
-                <div className="flex items-center gap-2 border-b border-emerald-100 bg-emerald-50 px-5 py-3">
-                  <Wallet size={18} className="text-emerald-700" />
-                  <h3 className="m-0 text-lg font-bold text-emerald-900">Factures liées</h3>
-                  <span className="rounded-full bg-white px-2 py-0.5 text-xs font-bold text-emerald-700">{chantier.facturation.factures.length}</span>
-                </div>
-                <table className="w-full text-left text-sm">
-                  <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
-                    <tr><th className="p-3">Numéro</th><th className="p-3">Type</th><th className="p-3">Statut</th><th className="p-3">Émission</th><th className="p-3 text-right">Total HT</th><th className="p-3 text-right">Total TTC</th>{isAdminRole(userRole) && <th className="p-3">Action</th>}</tr>
-                  </thead>
-                  <tbody>
-                    {chantier.facturation.factures.map((facture: FactureLiee) => (
-                      <tr key={facture.id} className="border-t border-gray-100">
-                        <td className="p-3 font-semibold text-gray-800">{facture.numero}</td>
-                        <td className="p-3">{facture.type === 'AVOIR' ? 'Avoir' : 'Facture'}</td>
-                        <td className="p-3">{facture.statut}</td>
-                        <td className="p-3">{toDateFrancaise(facture.dateEmission)}</td>
-                        <td className="p-3 text-right font-semibold">{fmtEuro(facture.totalHt)}</td>
-                        <td className="p-3 text-right font-semibold">{fmtEuro(facture.totalTtc)}</td>
-                        {isAdminRole(userRole) && <td className="p-3"><button type="button" className="btn btn-secondary" onClick={() => void handleDownloadFacturePdf(facture)}><FileDown size={16} /> PDF</button></td>}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </section>
-            )}
-
-            {/* Budgets par poste : non communiqués à un compte technicien (null côté serveur). */}
-            {chantier.budgetMaterielVendu != null && (
-            <div className="bg-gray-50 p-5 rounded-xl border border-gray-100 flex flex-col justify-center relative overflow-hidden group">
-              <div aria-hidden="true" className="absolute top-0 right-0 w-16 h-16 bg-green-100 rounded-bl-full -mr-8 -mt-8 transition-transform group-hover:scale-110"></div>
-              <div className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1 z-10">Matériel Prévu</div>
-              <div className="text-2xl font-black text-accent z-10">{chantier.budgetMaterielVendu.toLocaleString()} €</div>
-            </div>
-            )}
-
-            <div className="bg-gray-50 p-5 rounded-xl border border-gray-100 flex flex-col justify-center relative overflow-hidden group">
-              <div aria-hidden="true" className="absolute top-0 right-0 w-16 h-16 bg-purple-100 rounded-bl-full -mr-8 -mt-8 transition-transform group-hover:scale-110"></div>
-              <div className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1 z-10">Heures Prévues</div>
-              <div className="text-2xl font-black text-purple-600 z-10">{fmtHeures(chantier.heuresVendues)}</div>
-            </div>
-
-            {chantier.budgetMainOeuvreVendu != null && (
-            <div className="bg-gray-50 p-5 rounded-xl border border-gray-100 flex flex-col justify-center relative overflow-hidden group">
-              <div aria-hidden="true" className="absolute top-0 right-0 w-16 h-16 bg-orange-100 rounded-bl-full -mr-8 -mt-8 transition-transform group-hover:scale-110"></div>
-              <div className="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1 z-10">Coût MO Prévu</div>
-              <div className="text-2xl font-black text-orange-600 z-10">{chantier.budgetMainOeuvreVendu.toLocaleString()} €</div>
-            </div>
-            )}
-          </div>
-
-          {/* Marge Commerciale (admin, ou conducteur responsable sur sa fiche chantier — cf.
-              GET /api/chantiers/:id côté serveur —, si activée dans les paramètres) */}
-          {showMarge && (
-            <div className={`mb-8 p-6 rounded-xl border-l-8 flex flex-col gap-4 shadow-sm relative overflow-hidden ${margeAffichee > 0 ? 'bg-emerald-50 border-emerald-500' : 'bg-red-50 border-red-500'}`}>
-              <div className="flex flex-col md:flex-row justify-between items-center gap-4">
-                <div className="z-10 text-center md:text-left">
-                  <div className={`text-xs font-bold uppercase tracking-widest ${margeAffichee > 0 ? 'text-emerald-700' : 'text-red-700'}`}>
-                    Marge Commerciale
-                  </div>
-                  <div className={`text-5xl font-black mt-2 tracking-tight ${margeAffichee > 0 ? 'text-emerald-700' : 'text-red-700'}`}>
-                    {margeAffichee.toLocaleString()} €
-                  </div>
-                  {metrics.margePct != null && (
-                    <div className={`text-sm font-bold mt-1 ${margeAffichee > 0 ? 'text-emerald-700' : 'text-red-700'}`}>
-                      {metrics.margePct.toFixed(1)}% du budget vendu
-                    </div>
-                  )}
-                </div>
-
-                {metrics.totalDepenses != null && (
-                <div className="z-10 bg-white/60 backdrop-blur-sm p-4 rounded-lg text-right">
-                  <div className="text-xs text-gray-500 font-bold uppercase tracking-wider mb-1">Dépenses Réelles Cumulées</div>
-                  <div className="font-bold text-2xl text-gray-800">{arrondiCentime(totalDepensesReelles).toLocaleString()} €</div>
-                </div>
-                )}
-              </div>
-              {/* Marge estimée en fin de chantier : les hypothèses sont écrites en clair, pour
-                  qu'on sache d'où vient le chiffre et ce qui le ferait bouger. */}
-              {estimation && metrics.margeEstimee != null && !isTermine && (
-                <div className="z-10 bg-white/60 p-4 rounded-lg" data-estimation>
-                  <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <div className="text-xs text-gray-500 font-bold uppercase tracking-wider">Marge estimée en fin de chantier</div>
-                    <div className={`text-2xl font-black ${arrondiEuro(metrics.margeEstimee) >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
-                      {fmtEuro(metrics.margeEstimee)}
-                      <span className="text-sm font-bold ml-2">{(metrics.margeEstimeePct ?? 0).toLocaleString('fr-FR', { maximumFractionDigits: 1 })} %</span>
-                    </div>
-                  </div>
-                  <ul className="mt-2 mb-0 pl-4 text-xs text-gray-600 space-y-0.5">
-                    <li>Main-d’œuvre attendue : {estimation.coutMainOeuvreAttendu != null && <><strong>{fmtEuro(estimation.coutMainOeuvreAttendu)}</strong> — </>}{hypotheseCoutHoraire(estimation, metrics.coutsSuites?.heures)}.</li>
-                    <li>Matériel attendu : <strong>{fmtEuro(estimation.coutMaterielAttendu)}</strong> — {hypotheseMateriel(estimation, metrics.coutsSuites?.materiel, chantier.coutMaterielPrevu)}.</li>
-                    <li>Un poste n’est jamais estimé sous ce qui a déjà été dépensé.</li>
-                  </ul>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Progress Bars */}
-          <div className={`grid grid-cols-1 gap-8 mb-8 ${montantsVisibles && !coutMainOeuvreVisible ? 'lg:grid-cols-2' : 'lg:grid-cols-3'}`}>
-            {/* Matériel et coût de main-d'œuvre : montants jamais montrés au technicien. */}
-            {montantsVisibles && (<>
-            {/* Matériel */}
-            <div>
-              <div className="flex justify-between items-end mb-2">
-                <h3 className="font-bold text-gray-800 flex items-center gap-2 m-0">
-                  <Package size={18} className="text-accent" /> Consommation Matériel
-                </h3>
-                <div className="text-right">
-                  <span className="text-xl font-black text-accent">{depenseMaterielReelle.toLocaleString()} €</span>
-                  {chantier.budgetMaterielVendu != null && <span className="text-sm font-semibold text-gray-400 ml-1">/ {chantier.budgetMaterielVendu.toLocaleString()} €</span>}
-                </div>
-              </div>
-              {chantier.budgetMaterielVendu != null && (
-                <>
-                  <ProgressMeter value={depenseMaterielReelle} max={chantier.budgetMaterielVendu} color="blue" striped />
-                  <div className="mt-2 text-right text-xs font-bold text-gray-500">
-                    {((depenseMaterielReelle / Math.max(1, chantier.budgetMaterielVendu)) * 100).toFixed(1)}%
-                  </div>
-                </>
-              )}
-            </div>
-
-            {/* Coût main d'oeuvre (€) — distinct de la barre "Heures" ci-dessous : un
-                dépassement d'heures se traduit ici en euros réellement dépensés en salaire,
-                avec le manque à gagner correspondant s'il dépasse le budget vendu. Réservé à
-                l'administration. */}
-            {coutMainOeuvreVisible && (
-            <div>
-              <div className="flex justify-between items-end mb-2">
-                <h3 className="font-bold text-gray-800 flex items-center gap-2 m-0">
-                  <Wallet size={18} className="text-orange-500" /> Coût Main d'Œuvre
-                </h3>
-                <div className="text-right">
-                  <span className="text-xl font-black text-orange-600">{arrondiCentime(coutMainOeuvreReel).toLocaleString()} €</span>
-                  {chantier.budgetMainOeuvreVendu != null && <span className="text-sm font-semibold text-gray-400 ml-1">/ {chantier.budgetMainOeuvreVendu.toLocaleString()} €</span>}
-                </div>
-              </div>
-              {chantier.budgetMainOeuvreVendu != null && <ProgressMeter value={coutMainOeuvreReel} max={chantier.budgetMainOeuvreVendu} color="orange" striped />}
-              <div className="mt-2 flex justify-between items-center text-xs font-bold">
-                <span className={arrondiCentime(manqueAGagnerMainOeuvre) > 0 ? 'text-red-600' : 'text-gray-300'}>
-                  {arrondiCentime(manqueAGagnerMainOeuvre) > 0 ? `Manque à gagner : -${arrondiCentime(manqueAGagnerMainOeuvre).toLocaleString()} €` : ''}
-                </span>
-                {chantier.budgetMainOeuvreVendu != null && (
-                  <span className="text-gray-500">
-                    {((coutMainOeuvreReel / Math.max(1, chantier.budgetMainOeuvreVendu)) * 100).toFixed(1)}%
-                  </span>
-                )}
-              </div>
-            </div>
-            )}
-            </>)}
-
-            {/* Heures */}
-            <div>
-              <div className="flex justify-between items-end mb-2">
-                <h3 className="font-bold text-gray-800 flex items-center gap-2 m-0">
-                  <Clock3 size={18} className="text-purple-500" /> Consommation Heures
-                </h3>
-                <div className="text-right">
-                  <span className="text-xl font-black text-purple-600">{fmtHeures(heuresRealisees)}</span>
-                  <span className="text-sm font-semibold text-gray-400 ml-1">/ {fmtHeures(chantier.heuresVendues)}</span>
-                </div>
-              </div>
-              <ProgressMeter value={heuresRealisees} max={chantier.heuresVendues} color="purple" striped />
-              <div className="mt-2 text-right text-xs font-bold text-gray-500">
-                {((heuresRealisees / Math.max(1, chantier.heuresVendues)) * 100).toFixed(1)}%
-              </div>
-            </div>
-          </div>
-
-          <CoutsSuitesChantier couts={metrics.coutsSuites} interventionDevis={metrics.coutsInterventionDevis} />
-
-          {/* Répartitions */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {montantsVisibles && (<>
-            <div className="bg-gray-50 rounded-xl border border-gray-100 p-5">
-              <h3 className="font-bold text-gray-800 flex items-center gap-2 mb-4 text-sm uppercase tracking-wide">
-                <Package size={16} className="text-accent" /> Achats par catégorie
-              </h3>
-              <BarBreakdown rows={parCategorie} color="#2563eb" formatValue={fmtEuro} emptyLabel="Aucun achat enregistré" />
-            </div>
-            <div className="bg-gray-50 rounded-xl border border-gray-100 p-5">
-              <h3 className="font-bold text-gray-800 flex items-center gap-2 mb-4 text-sm uppercase tracking-wide">
-                <Truck size={16} className="text-orange-500" /> Achats par fournisseur
-              </h3>
-              <BarBreakdown rows={parFournisseur} color="#ea580c" formatValue={fmtEuro} emptyLabel="Aucun achat enregistré" />
-            </div>
-            </>)}
-            <div className="bg-gray-50 rounded-xl border border-gray-100 p-5">
-              <h3 className="font-bold text-gray-800 flex items-center gap-2 mb-4 text-sm uppercase tracking-wide">
-                <Users size={16} className="text-purple-500" /> Heures par intervenant
-              </h3>
-              <BarBreakdown rows={parIntervenant} color="#8b5cf6" formatValue={fmtHeures} emptyLabel="Aucune heure enregistrée" />
-            </div>
-          </div>
+          <ChantierIndicateurs
+            showBudgetVendu={showBudgetVendu} chantier={chantier} userRole={userRole}
+            handleDownloadFacturePdf={handleDownloadFacturePdf} showMarge={showMarge} margeAffichee={margeAffichee}
+            metrics={metrics} totalDepensesReelles={totalDepensesReelles} estimation={estimation} isTermine={isTermine}
+            montantsVisibles={montantsVisibles} coutMainOeuvreVisible={coutMainOeuvreVisible}
+            depenseMaterielReelle={depenseMaterielReelle} coutMainOeuvreReel={coutMainOeuvreReel}
+            manqueAGagnerMainOeuvre={manqueAGagnerMainOeuvre} heuresRealisees={heuresRealisees}
+            parCategorie={parCategorie} parFournisseur={parFournisseur} parIntervenant={parIntervenant}
+          />
 
         </div>
 
@@ -1027,456 +700,57 @@ const ChantierDetail = () => {
               filtres et tri pour retrouver une ligne précise et la corriger ou la supprimer.
               C'est un journal de coûts : jamais montré au technicien. */}
           {montantsVisibles && (
-          <div className="bg-white rounded-2xl shadow-md border border-gray-100 overflow-hidden">
-            <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-gray-100">
-              <div className="flex items-center gap-2">
-                <Wallet size={18} className="text-accent" />
-                <h3 className="text-lg font-bold text-primary-dark m-0">Achats du chantier</h3>
-                <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-blue-50 text-accent">
-                  {achats.length} achat{achats.length > 1 ? 's' : ''}
-                </span>
-              </div>
-              <div className="text-sm text-muted">
-                Total dépensé : <strong className="text-primary-dark">{fmtEuro(achatsTotal)}</strong>
-              </div>
-            </div>
-
-            {achats.length > 0 && (
-              <div className="flex flex-wrap items-center gap-2 px-6 py-3 bg-gray-50 border-b border-gray-100">
-                {/* La place de la loupe est réservée en style inline : .form-input pose son
-                    propre padding hors couche Tailwind, un utilitaire pl-* serait ignoré. */}
-                <div className="relative flex-1 min-w-[220px]">
-                  <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-                  <input
-                    type="search"
-                    value={achatSearch}
-                    onChange={(e) => setAchatSearch(e.target.value)}
-                    placeholder="Rechercher (description, n° de facture, fournisseur, montant...)"
-                    style={{ paddingLeft: '2.25rem' }}
-                    className="form-input text-sm"
-                  />
-                </div>
-                {/* Largeurs portées par des conteneurs : sur le champ lui-même, les
-                    utilitaires Tailwind perdraient contre le width:100% de .form-input. */}
-                <div className="w-full sm:w-52">
-                  <select value={achatFournisseurFiltre} onChange={(e) => setAchatFournisseurFiltre(e.target.value)} className="form-input text-sm">
-                    <option value="">Tous les fournisseurs</option>
-                    {achatsFournisseursDispo.map((f) => <option key={f} value={f}>{f}</option>)}
-                  </select>
-                </div>
-                <div className="w-full sm:w-52">
-                  <select value={achatCategorieFiltre} onChange={(e) => setAchatCategorieFiltre(e.target.value)} className="form-input text-sm">
-                    <option value="">Toutes les catégories</option>
-                    {achatsCategoriesDispo.map((c) => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                </div>
-                <div className="w-full sm:w-60">
-                  <select value={achatTri} onChange={(e) => setAchatTri(e.target.value as typeof achatTri)} className="form-input text-sm">
-                    <option value="date-desc">Du plus récent au plus ancien</option>
-                    <option value="date-asc">Du plus ancien au plus récent</option>
-                    <option value="montant-desc">Montant décroissant</option>
-                    <option value="montant-asc">Montant croissant</option>
-                  </select>
-                </div>
-                {achatsFiltreActif && (
-                  <button type="button" onClick={resetAchatsFiltres} className="text-xs font-semibold text-accent hover:underline">
-                    Réinitialiser
-                  </button>
-                )}
-              </div>
-            )}
-
-            {achats.length === 0 ? (
-              <div className="px-6 py-8 text-center text-gray-400 italic">Aucun achat enregistré.</div>
-            ) : achatsAffiches.length === 0 ? (
-              <div className="px-6 py-8 text-center text-gray-400 italic">Aucun achat ne correspond à la recherche.</div>
-            ) : (
-              <div className="divide-y divide-gray-100 max-h-[32rem] overflow-y-auto">
-                {achatsAffiches.map((a) => (
-                  editingAchatId === a.id ? (
-                    <form
-                      key={a.id}
-                      onSubmit={(e) => handleAchatSubmit(e, a.id)}
-                      className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 px-6 py-3 bg-gray-50"
-                    >
-                      <input required type="text" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" placeholder="JJ-MM-AAAA" name="date" defaultValue={toDateFrancaise(a.date)} className="form-input text-sm" />
-                      <input required type="number" step="0.01" name="montantHT" defaultValue={a.montantHT} placeholder="Montant HT" className="form-input text-sm" />
-                      <select required name="fournisseurId" defaultValue={a.fournisseurId} className="form-input text-sm">
-                        {fournisseurs.length === 0 && <option value={a.fournisseurId}>{a.fournisseur?.nom}</option>}
-                        {fournisseurs.map((f) => <option key={f.id} value={f.id}>{f.nom}</option>)}
-                      </select>
-                      <select required name="categorieId" defaultValue={a.categorieId} className="form-input text-sm">
-                        {categories.length === 0 && <option value={a.categorieId}>{a.categorie?.nom}</option>}
-                        {categories.map((c) => <option key={c.id} value={c.id}>{c.nom}</option>)}
-                      </select>
-                      <input required type="text" name="description" defaultValue={a.description} placeholder="Description" className="form-input text-sm sm:col-span-2 lg:col-span-3" />
-                      <input type="text" name="numeroFacture" defaultValue={a.numeroFacture || ''} placeholder="N° de facture (optionnel)" className="form-input text-sm sm:col-span-2 lg:col-span-1" />
-                      <input required minLength={3} maxLength={500} type="text" name="motifCorrection" placeholder="Motif de la correction" className="form-input text-sm sm:col-span-2 lg:col-span-4" />
-                      <div className="sm:col-span-2 lg:col-span-4 flex gap-2 justify-end">
-                        <button type="button" disabled={savingAchat} onClick={() => setEditingAchatId(null)} className="btn bg-white border text-xs px-3 py-1.5">Annuler</button>
-                        <button type="submit" disabled={savingAchat} className="btn btn-primary text-xs px-3 py-1.5">
-                          {savingAchat ? 'Enregistrement...' : 'Enregistrer'}
-                        </button>
-                      </div>
-                    </form>
-                  ) : (
-                    <div key={a.id} className="flex items-center justify-between gap-3 px-6 py-3 text-sm hover:bg-gray-50 transition-colors">
-                      <div className="min-w-0">
-                        <div className="font-semibold text-gray-700">{a.description}</div>
-                        <div className="text-xs text-gray-400">
-                          {fmtDate(a.date)} · {a.fournisseur?.nom} · {a.categorie?.nom}
-                          {a.numeroFacture ? ` · Facture ${a.numeroFacture}` : ''}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <div className="font-bold text-gray-800 whitespace-nowrap">{fmtEuro(a.montantHT)}</div>
-                        {(peutCorrigerTravaux || peutArchiverTravaux) && (
-                          <>
-                            {peutCorrigerTravaux && <button
-                              onClick={() => startEditAchat(a.id)}
-                              className="p-1.5 text-gray-400 hover:text-accent hover:bg-blue-50 rounded-lg transition-colors"
-                              title="Corriger cet achat"
-                            >
-                              <Pencil size={14} />
-                            </button>}
-                            {peutArchiverTravaux && <button
-                              onClick={() => handleDeleteAchat(a.id)}
-                              disabled={savingAchat}
-                              className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                              title="Archiver cet achat"
-                            >
-                              <Trash2 size={14} />
-                            </button>}
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  )
-                ))}
-              </div>
-            )}
-            {/* Récapitulatif de la sélection : n'a de sens qu'une fois la liste filtrée,
-                sinon il répète le total affiché en en-tête. */}
-            {achatsFiltreActif && achatsAffiches.length > 0 && (
-              <div className="flex flex-wrap items-center justify-between gap-2 px-6 py-3 border-t border-gray-100 bg-gray-50 text-xs font-semibold text-gray-500">
-                <span>{achatsAffiches.length} achat{achatsAffiches.length > 1 ? 's' : ''} sur {achats.length}</span>
-                <span>Sous-total : <strong className="text-primary-dark">{fmtEuro(achatsAffichesTotal)}</strong></span>
-              </div>
-            )}
-          </div>
+          <ChantierJournalAchats
+            achats={achats} achatsTotal={achatsTotal} achatSearch={achatSearch} setAchatSearch={setAchatSearch}
+            achatFournisseurFiltre={achatFournisseurFiltre} setAchatFournisseurFiltre={setAchatFournisseurFiltre}
+            achatsFournisseursDispo={achatsFournisseursDispo} achatCategorieFiltre={achatCategorieFiltre}
+            setAchatCategorieFiltre={setAchatCategorieFiltre} achatsCategoriesDispo={achatsCategoriesDispo}
+            achatTri={achatTri} setAchatTri={setAchatTri} achatsFiltreActif={achatsFiltreActif}
+            resetAchatsFiltres={resetAchatsFiltres} achatsAffiches={achatsAffiches} editingAchatId={editingAchatId}
+            handleAchatSubmit={handleAchatSubmit} fournisseurs={fournisseurs} categories={categories}
+            savingAchat={savingAchat} setEditingAchatId={setEditingAchatId} peutCorrigerTravaux={peutCorrigerTravaux}
+            peutArchiverTravaux={peutArchiverTravaux} startEditAchat={startEditAchat}
+            handleDeleteAchat={handleDeleteAchat} achatsAffichesTotal={achatsAffichesTotal}
+          />
           )}
 
           {/* Journal complet des heures : tous les pointages du chantier, avec les mêmes
               outils de recherche que le journal des achats ci-dessus. */}
-          <div className="bg-white rounded-2xl shadow-md border border-gray-100 overflow-hidden">
-            <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-gray-100">
-              <div className="flex items-center gap-2">
-                <Hammer size={18} className="text-purple-500" />
-                <h3 className="text-lg font-bold text-primary-dark m-0">Heures du chantier</h3>
-                <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-purple-50 text-purple-600">
-                  {pointages.length} pointage{pointages.length > 1 ? 's' : ''}
-                </span>
-              </div>
-              <div className="text-sm text-muted">
-                Total pointé : <strong className="text-primary-dark">{fmtHeures(heuresTotal)}</strong>
-              </div>
-            </div>
-
-            {pointages.length > 0 && (
-              <div className="flex flex-wrap items-center gap-2 px-6 py-3 bg-gray-50 border-b border-gray-100">
-                <div className="relative flex-1 min-w-[220px]">
-                  <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-                  <input
-                    type="search"
-                    value={pointageSearch}
-                    onChange={(e) => setPointageSearch(e.target.value)}
-                    placeholder="Rechercher (intervenant, rôle, commentaire, date...)"
-                    style={{ paddingLeft: '2.25rem' }}
-                    className="form-input text-sm"
-                  />
-                </div>
-                <div className="w-full sm:w-52">
-                  <select value={pointageIntervenantFiltre} onChange={(e) => setPointageIntervenantFiltre(e.target.value)} className="form-input text-sm">
-                    <option value="">Tous les intervenants</option>
-                    {pointagesIntervenantsDispo.map((i) => <option key={i} value={i}>{i}</option>)}
-                  </select>
-                </div>
-                <div className="w-full sm:w-52">
-                  <select value={pointageRoleFiltre} onChange={(e) => setPointageRoleFiltre(e.target.value)} className="form-input text-sm">
-                    <option value="">Tous les rôles</option>
-                    {pointagesRolesDispo.map((r) => <option key={r} value={r}>{r}</option>)}
-                  </select>
-                </div>
-                <div className="w-full sm:w-60">
-                  <select value={pointageTri} onChange={(e) => setPointageTri(e.target.value as typeof pointageTri)} className="form-input text-sm">
-                    <option value="date-desc">Du plus récent au plus ancien</option>
-                    <option value="date-asc">Du plus ancien au plus récent</option>
-                    <option value="heures-desc">Heures décroissantes</option>
-                    <option value="heures-asc">Heures croissantes</option>
-                  </select>
-                </div>
-                {pointagesFiltreActif && (
-                  <button type="button" onClick={resetPointagesFiltres} className="text-xs font-semibold text-accent hover:underline">
-                    Réinitialiser
-                  </button>
-                )}
-              </div>
-            )}
-
-            {pointages.length === 0 ? (
-              <div className="px-6 py-8 text-center text-gray-400 italic">Aucune heure enregistrée.</div>
-            ) : pointagesAffiches.length === 0 ? (
-              <div className="px-6 py-8 text-center text-gray-400 italic">Aucun pointage ne correspond à la recherche.</div>
-            ) : (
-              <div className="divide-y divide-gray-100 max-h-[32rem] overflow-y-auto">
-                {pointagesAffiches.map((p) => (
-                  editingPointageId === p.id ? (
-                    <form
-                      key={p.id}
-                      onSubmit={(e) => handlePointageSubmit(e, p.id)}
-                      className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 px-6 py-3 bg-gray-50"
-                    >
-                      <input required type="text" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" placeholder="JJ-MM-AAAA" name="date" defaultValue={toDateFrancaise(p.date)} className="form-input text-sm" />
-                      <select required name="intervenantId" defaultValue={p.intervenantId} className="form-input text-sm">
-                        {intervenants.length === 0 && <option value={p.intervenantId}>{p.intervenant?.nom}</option>}
-                        {intervenants.map((i) => <option key={i.id} value={i.id}>{i.nom} ({i.role})</option>)}
-                      </select>
-                      <input required type="number" step="0.5" min="0.5" name="nbrHeures" defaultValue={p.nbrHeures} className="form-input text-sm" />
-                      <input type="text" name="commentaire" defaultValue={p.commentaire || ''} placeholder="Commentaire" className="form-input text-sm" />
-                      <input required minLength={3} maxLength={500} type="text" name="motifCorrection" placeholder="Motif de la correction" className="form-input text-sm sm:col-span-2 lg:col-span-3" />
-                      <div className="sm:col-span-2 lg:col-span-4 flex gap-2 justify-end">
-                        <button type="button" disabled={savingPointage} onClick={() => setEditingPointageId(null)} className="btn bg-white border text-xs px-3 py-1.5">Annuler</button>
-                        <button type="submit" disabled={savingPointage} className="btn btn-primary text-xs px-3 py-1.5">
-                          {savingPointage ? 'Enregistrement...' : 'Enregistrer'}
-                        </button>
-                      </div>
-                    </form>
-                  ) : (
-                    <div key={p.id} className="flex items-center justify-between gap-3 px-6 py-3 text-sm hover:bg-gray-50 transition-colors">
-                      <div className="min-w-0">
-                        <div className="font-semibold text-gray-700">{p.intervenant?.nom}</div>
-                        <div className="text-xs text-gray-400">
-                          {fmtDate(p.date)} · {p.intervenant?.role}
-                          {p.commentaire ? ` · ${p.commentaire}` : ''}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <div className="font-bold text-gray-800 whitespace-nowrap">{fmtHeures(p.nbrHeures)}</div>
-                        {(peutCorrigerTravaux || peutArchiverTravaux) && (
-                          <>
-                            {peutCorrigerTravaux && <button
-                              onClick={() => startEditPointage(p.id)}
-                              className="p-1.5 text-gray-400 hover:text-accent hover:bg-blue-50 rounded-lg transition-colors"
-                              title="Corriger ce pointage"
-                            >
-                              <Pencil size={14} />
-                            </button>}
-                            {peutArchiverTravaux && <button
-                              onClick={() => handleDeletePointage(p.id)}
-                              disabled={savingPointage}
-                              className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                              title="Archiver ce pointage"
-                            >
-                              <Trash2 size={14} />
-                            </button>}
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  )
-                ))}
-              </div>
-            )}
-            {pointagesFiltreActif && pointagesAffiches.length > 0 && (
-              <div className="flex flex-wrap items-center justify-between gap-2 px-6 py-3 border-t border-gray-100 bg-gray-50 text-xs font-semibold text-gray-500">
-                <span>{pointagesAffiches.length} pointage{pointagesAffiches.length > 1 ? 's' : ''} sur {pointages.length}</span>
-                <span>Sous-total : <strong className="text-primary-dark">{fmtHeures(pointagesAffichesTotal)}</strong></span>
-              </div>
-            )}
-          </div>
+          <ChantierJournalHeures
+            pointages={pointages} heuresTotal={heuresTotal} pointageSearch={pointageSearch}
+            setPointageSearch={setPointageSearch} pointageIntervenantFiltre={pointageIntervenantFiltre}
+            setPointageIntervenantFiltre={setPointageIntervenantFiltre}
+            pointagesIntervenantsDispo={pointagesIntervenantsDispo} pointageRoleFiltre={pointageRoleFiltre}
+            setPointageRoleFiltre={setPointageRoleFiltre} pointagesRolesDispo={pointagesRolesDispo}
+            pointageTri={pointageTri} setPointageTri={setPointageTri} pointagesFiltreActif={pointagesFiltreActif}
+            resetPointagesFiltres={resetPointagesFiltres} pointagesAffiches={pointagesAffiches}
+            editingPointageId={editingPointageId} handlePointageSubmit={handlePointageSubmit}
+            intervenants={intervenants} savingPointage={savingPointage} setEditingPointageId={setEditingPointageId}
+            peutCorrigerTravaux={peutCorrigerTravaux} peutArchiverTravaux={peutArchiverTravaux}
+            startEditPointage={startEditPointage} handleDeletePointage={handleDeletePointage}
+            pointagesAffichesTotal={pointagesAffichesTotal}
+          />
         </div>
 
-        <section aria-labelledby="journal-saisies-titre" className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-100">
-            <h2 id="journal-saisies-titre" className="font-bold text-primary-dark">Journal d’audit des saisies</h2>
-            <p className="text-sm text-gray-500 mt-1">Historique immuable des créations, corrections et archivages du chantier, et des changements de son client, de son titulaire, de son commercial et de son encaissement.</p>
-          </div>
-          {journalSaisies.length === 0 ? (
-            <p className="px-6 py-5 text-sm italic text-gray-400">Aucune entrée au journal de ce chantier.</p>
-          ) : (
-            <div className="divide-y divide-gray-100">
-              {journalSaisies.map((entree) => (
-                <div key={entree.id} className="px-6 py-4 text-sm">
-                  <div className="flex flex-wrap justify-between gap-2">
-                    <strong>{titreEntreeJournal(entree)}</strong>
-                    <span className="text-gray-500">{formatCompanyDate(entree.createdAt, companyTimezone)} · {entree.auteurNom}</span>
-                  </div>
-                  {entree.motif && <p className="mt-1 text-gray-600">Motif : {entree.motif}</p>}
-                  {(() => { const changement = changementAffaire(entree); return changement && (
-                    <div className="mt-2 grid gap-2 md:grid-cols-2 text-xs">
-                      <p className="rounded bg-red-50 p-2 text-red-900">Avant : {changement.avant}</p>
-                      <p className="rounded bg-emerald-50 p-2 text-emerald-900">Après : {changement.apres}</p>
-                    </div>
-                  ); })()}
-                  {entree.action === 'CORRECTION' && (
-                    <div className="mt-2 grid gap-2 md:grid-cols-2 text-xs">
-                      <pre className="overflow-auto rounded bg-red-50 p-2 text-red-900">Avant : {instantaneLisible(entree.avant, companyTimezone)}</pre>
-                      <pre className="overflow-auto rounded bg-emerald-50 p-2 text-emerald-900">Après : {instantaneLisible(entree.apres, companyTimezone)}</pre>
-                    </div>
-                  )}
-                  {entree.action === 'CREATION' && entree.apres && (
-                    <pre className="mt-2 overflow-auto rounded bg-emerald-50 p-2 text-xs text-emerald-900">Valeurs enregistrées : {instantaneLisible(entree.apres, companyTimezone)}</pre>
-                  )}
-                  {entree.action === 'ARCHIVAGE' && entree.avant && (
-                    <div className="mt-2 flex flex-wrap items-center gap-2">
-                      <pre className="overflow-auto rounded bg-amber-50 p-2 text-xs text-amber-900">Valeurs archivées : {instantaneLisible(entree.avant, companyTimezone)}</pre>
-                      {peutArchiverTravaux && archivesRestaurables.has(entree.id) && (
-                        <button
-                          type="button"
-                          onClick={() => handleRestore(entree.cible, entree.cibleId)}
-                          disabled={savingAchat || savingPointage}
-                          className="btn border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs text-emerald-800 hover:bg-emerald-100"
-                        >
-                          <RotateCcw size={14} /> Restaurer
-                        </button>
-                      )}
-                    </div>
-                  )}
-                  {entree.action === 'RESTAURATION' && entree.apres && (
-                    <pre className="mt-2 overflow-auto rounded bg-emerald-50 p-2 text-xs text-emerald-900">Valeurs restaurées : {instantaneLisible(entree.apres, companyTimezone)}</pre>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
+        <ChantierJournalAudit
+          journalSaisies={journalSaisies} companyTimezone={companyTimezone} peutArchiverTravaux={peutArchiverTravaux}
+          archivesRestaurables={archivesRestaurables} handleRestore={handleRestore} savingAchat={savingAchat}
+          savingPointage={savingPointage}
+        />
 
       </div>
 
       {/* Modale d'édition du chantier — admins et conducteur responsable (cf. canEditChantier) */}
       {editingChantier && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setEditingChantier(false)}>
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6 sm:p-8" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="text-xl font-bold text-primary-dark m-0">Modifier le chantier</h3>
-              <button type="button" onClick={() => setEditingChantier(false)} className="text-gray-400 hover:text-gray-600">
-                <X size={22} />
-              </button>
-            </div>
-            <form onSubmit={handleChantierSubmit} className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="form-group mb-0">
-                <label className="form-label">Nom du Chantier</label>
-                <input required name="nom" defaultValue={chantier.nom} className="form-input" />
-              </div>
-              <div className="form-group mb-0">
-                <label className="form-label" htmlFor={isAdminRole(userRole) ? 'client-chantier' : undefined}>Client</label>
-                {isAdminRole(userRole) ? (
-                  <SelecteurClient id="client-chantier" name="clientId" label="Client du chantier" required valeur={editClientId} onChange={(client) => setEditClientId(client?.id ?? '')} clientActuel={clientActuel} />
-                ) : <input readOnly value={chantier.client} className="form-input bg-gray-50" />}
-              </div>
-              <div className="form-group mb-0">
-                <label className="form-label">N° de Devis</label>
-                {/* Obligatoire, sauf sur un chantier antérieur créé sans devis : l'exiger
-                    ici interdirait toute autre correction sur sa fiche. */}
-                <input
-                  required={!!chantier.numeroDevis}
-                  name="numeroDevis"
-                  defaultValue={chantier.numeroDevis || ''}
-                  className="form-input"
-                  placeholder="Référence d'affaire (ex : A26-0001)"
-                />
-              </div>
-              <div className="form-group mb-0 md:col-span-2">
-                <label className="form-label">Adresse du site (optionnel)</label>
-                <input ref={editChantierAdresseRef} name="adresse" defaultValue={chantier.adresse || ''} className="form-input" placeholder="Adresse du site" />
-              </div>
-              <div className="form-group mb-0">
-                <label className="form-label">Responsable Chantier</label>
-                <select required name="responsableId" className="form-input" value={editResponsableId} onChange={(e) => setEditResponsableId(e.target.value)}>
-                  <option value="" disabled>Sélectionner un conducteur...</option>
-                  {/* Un titulaire absent de la liste d'attribution (compte désactivé au départ d'un
-                      conducteur, ou titulaire qui n'est pas conducteur) y est rajouté, pour ne pas
-                      forcer une réaffectation à l'occasion d'une correction sans rapport. Choisir
-                      un autre conducteur le remplace. La raison n'est pas connue ici : le libellé
-                      ne la présume pas. */}
-                  {chantier.responsable && !conducteurs.some(c => c.id === chantier.responsable.id) && (
-                    <option value={chantier.responsable.id}>{chantier.responsable.name} (hors des conducteurs actifs)</option>
-                  )}
-                  {conducteurs.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-              </div>
-              <div className="form-group mb-0">
-                <label className="form-label">Commercial rattaché{commerciaux.length > 0 ? '' : ' (aucun disponible)'}</label>
-                <select required={commerciaux.length > 0} name="commercialId" className="form-input" value={editCommercialId} onChange={(e) => setEditCommercialId(e.target.value)}>
-                  <option value="" disabled>Sélectionner un commercial...</option>
-                  {chantier.commercial && !commerciaux.some(c => c.id === chantier.commercial.id) && (
-                    <option value={chantier.commercial.id}>{chantier.commercial.name} (hors des commerciaux actifs)</option>
-                  )}
-                  {commerciaux.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-              </div>
-              <div className="form-group mb-0">
-                <label className="form-label">Date Début</label>
-                {/* Dates lues au jour de la société : non modifiables tant que son fuseau n'est pas lu,
-                    pour ne pas effacer une saisie au moment où le champ se recale. Désactivées, elles
-                    ne partent pas avec la fiche, qui garde alors ses dates. */}
-                <input required type="text" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" placeholder="JJ-MM-AAAA" name="dateDebut" key={`debut-${companyTimezone}`} defaultValue={jourCivilChantier(chantier.dateDebut, companyTimezone)} disabled={!fuseauConnu} className="form-input" />
-              </div>
-              <div className="form-group mb-0">
-                <label className="form-label">Date Fin</label>
-                <input type="text" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" placeholder="JJ-MM-AAAA" name="dateFin" key={`fin-${companyTimezone}`} defaultValue={chantier.dateFin ? jourCivilChantier(chantier.dateFin, companyTimezone) : ''} disabled={!fuseauConnu} className="form-input" />
-              </div>
-              {/* Montant vendu : seulement pour qui le voit (le serveur refuse qu'un autre le
-                  modifie) ; sinon le champ arriverait vide et l'enregistrer l'écraserait. */}
-              {chantier.budgetGlobalVendu != null && (
-                <div className="form-group mb-0">
-                  <label className="form-label font-bold text-primary">Budget Global (€ HT)</label>
-                  <input ref={editChantierBudgetRef} required type="number" min="0" step="0.01" name="budgetGlobalVendu" defaultValue={chantier.budgetGlobalVendu} className="form-input" />
-                </div>
-              )}
-              <div className="form-group mb-0">
-                <label className="form-label">Total Heures Vendues (h)</label>
-                <input required type="number" min="0" step="0.01" name="heuresVendues" defaultValue={chantier.heuresVendues} className="form-input" />
-              </div>
-              {/* Budgets par poste : seulement pour qui les voit (le serveur refuse qu'un technicien les modifie). */}
-              {chantier.budgetMaterielVendu != null && (
-                <div className="form-group mb-0">
-                  <label className="form-label">Dont Matériel (€ HT)</label>
-                  <input required type="number" min="0" step="0.01" name="budgetMaterielVendu" defaultValue={chantier.budgetMaterielVendu} className="form-input" />
-                </div>
-              )}
-              {chantier.budgetMainOeuvreVendu != null && (
-                <div className="form-group mb-0">
-                  <label className="form-label">Dont Main d'Œuvre (€ HT)</label>
-                  <input required type="number" min="0" step="0.01" name="budgetMainOeuvreVendu" defaultValue={chantier.budgetMainOeuvreVendu} className="form-input" />
-                </div>
-              )}
-              <div className="form-group mb-0 md:col-span-2">
-                <label className="form-label">Type(s) de chantier</label>
-                <div className="flex flex-wrap gap-2">
-                  {TYPES_CHANTIER.map((t) => (
-                    <label key={t} className="flex items-center gap-1.5 text-sm font-medium px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors">
-                      <input type="checkbox" name="types" value={t} defaultChecked={chantier.types?.includes(t)} className="w-4 h-4" />
-                      {t}
-                    </label>
-                  ))}
-                </div>
-              </div>
-              <div className="form-group mb-0 md:col-span-2">
-                <label className="flex items-center gap-2 text-sm font-medium px-3 py-1.5 bg-gray-50 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-100 transition-colors w-fit">
-                  <input type="checkbox" name="baremeReduit" value="true" defaultChecked={!!chantier.baremeReduit} className="w-4 h-4" />
-                  {libelleBaremeReduit} (sans effet tant qu'aucun plan commercial n'est attribué)
-                </label>
-              </div>
-              <div className="md:col-span-2 flex gap-2 mt-2">
-                <button type="submit" disabled={savingChantier} className="btn btn-primary px-8">
-                  {savingChantier ? 'Enregistrement...' : 'Enregistrer les modifications'}
-                </button>
-                <button type="button" onClick={() => setEditingChantier(false)} className="btn bg-white border">Annuler</button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <ChantierModaleModification
+          setEditingChantier={setEditingChantier} handleChantierSubmit={handleChantierSubmit} chantier={chantier}
+          userRole={userRole} editClientId={editClientId} setEditClientId={setEditClientId} clientActuel={clientActuel}
+          editChantierAdresseRef={editChantierAdresseRef} editResponsableId={editResponsableId}
+          setEditResponsableId={setEditResponsableId} conducteurs={conducteurs} commerciaux={commerciaux}
+          editCommercialId={editCommercialId} setEditCommercialId={setEditCommercialId}
+          companyTimezone={companyTimezone} fuseauConnu={fuseauConnu} editChantierBudgetRef={editChantierBudgetRef}
+          libelleBaremeReduit={libelleBaremeReduit} savingChantier={savingChantier}
+        />
       )}
     </div>
   );
