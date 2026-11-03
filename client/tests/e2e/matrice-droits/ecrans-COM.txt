@@ -1,0 +1,46 @@
+COM | administration | onglet par défaut | défaut | redirigé vers /
+COM | devis | devis-brouillon | défaut | boutons : Dupliquer, Envoyer le devis <devis-brouillon> version #, Faire signer le client, Marquer envoyé, Modifier, PDF du devis <devis-brouillon> version #
+COM | devis | devis-signe | défaut | boutons : Créer une révision, Dupliquer, Envoyer le devis <devis-signe> version #, Ouvrir le chantier, PDF du devis <devis-signe> version #
+COM | devis | hors lignes | défaut | titre « Devis » ; boutons : Actualiser, Ajouter la ligne au jour ou à la demi-journée (désactivé), Ajouter une ligne, Créer le brouillon
+COM | factures | hors lignes | défaut | redirigé vers /
+COM | fiche chantier | chantier-annule | défaut | titre « Écrans annulé <s> » ; boutons : Rapport interne (PDF), Retour au tableau de bord
+COM | fiche chantier | chantier-en-cours | défaut | titre « Écrans en cours <s> » ; boutons : Rapport interne (PDF), Retour au tableau de bord
+COM | fiche chantier | chantier-termine | défaut | titre « Écrans terminé <s> » ; boutons : Rapport interne (PDF), Retour au tableau de bord
+COM | fiche chantier | chantier-titulaire-dc | défaut | titre « Écrans titulaire DC <s> » ; boutons : Rapport interne (PDF), Retour au tableau de bord
+COM | fiche chantier | chantier-titulaire-tech | défaut | titre « Écrans titulaire TECH <s> » ; boutons : Rapport interne (PDF), Retour au tableau de bord
+COM | fiche intervention | intervention-planifiee | défaut | redirigé vers /
+COM | fiche intervention | intervention-terminee | défaut | redirigé vers /
+COM | liste des chantiers | chantier-annule | défaut | ligne absente
+COM | liste des chantiers | chantier-en-cours | défaut | boutons : aucun
+COM | liste des chantiers | chantier-termine | défaut | boutons : aucun
+COM | liste des chantiers | chantier-titulaire-dc | défaut | boutons : aucun
+COM | liste des chantiers | chantier-titulaire-tech | défaut | boutons : aucun
+COM | liste des chantiers | hors lignes | défaut | titre « Liste des Chantiers » ; boutons : Chantiers Terminés / Archivés# chantier(s), En cours#, Heures dépassées, Main-d’œuvre dépassée, Matériel dépassé, Sans saisie, Tous, À surveiller, À surveiller#
+COM | liste des interventions | hors lignes | défaut | redirigé vers /
+COM | menu | — | défaut | sections : Accueil, Chantiers, Pilotage ; type affiché : Commercial
+COM | planning | hors lignes | défaut | redirigé vers /
+COM | route / | — | défaut | menu « Accueil › Tableau de bord » ; accessible
+COM | route /achats | — | défaut | hors menu ; redirigée vers /
+COM | route /admin | — | défaut | hors menu ; redirigée vers /
+COM | route /administration/api | — | défaut | hors menu ; redirigée vers /
+COM | route /catalogue | — | défaut | hors menu ; redirigée vers /
+COM | route /chantiers | — | défaut | menu « Chantiers › Liste des chantiers » ; accessible
+COM | route /chantiers/:id | chantier-en-cours | défaut | hors menu ; accessible
+COM | route /clients | — | défaut | hors menu ; redirigée vers /
+COM | route /clients/:id | client | défaut | hors menu ; redirigée vers /
+COM | route /commerciaux | — | défaut | hors menu ; redirigée vers /
+COM | route /comptabilite | — | défaut | hors menu ; redirigée vers /
+COM | route /contrats-maintenance | — | défaut | hors menu ; redirigée vers /
+COM | route /devis | — | défaut | menu « Chantiers › Devis » ; accessible
+COM | route /factures | — | défaut | hors menu ; redirigée vers /
+COM | route /heures | — | défaut | hors menu ; redirigée vers /
+COM | route /interventions | — | défaut | hors menu ; redirigée vers /
+COM | route /interventions/:id | intervention-planifiee | défaut | hors menu ; redirigée vers /
+COM | route /mentions-legales | — | défaut | hors menu ; redirigée vers /
+COM | route /performances | — | défaut | hors menu ; redirigée vers /
+COM | route /planning | — | défaut | hors menu ; redirigée vers /
+COM | route /prete-a-facturer | — | défaut | hors menu ; redirigée vers /
+COM | route /reglements | — | défaut | hors menu ; redirigée vers /
+COM | route /resultat-commercial | — | défaut | menu « Pilotage › Résultat commercial » ; accessible
+COM | route /societe | — | défaut | hors menu ; redirigée vers /
+COM | route /statistiques | — | défaut | hors menu ; redirigée vers /

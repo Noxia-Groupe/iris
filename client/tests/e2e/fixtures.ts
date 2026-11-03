@@ -1,5 +1,5 @@
-import { randomInt } from 'node:crypto';
-import { test as base, expect, type APIRequestContext, type Locator, type Page } from '@playwright/test';
+import { createHmac, randomInt } from 'node:crypto';
+import { test as base, expect, type APIRequestContext, type BrowserContext, type BrowserContextOptions, type Locator, type Page } from '@playwright/test';
 
 const api = `http://127.0.0.1:${process.env.E2E_API_PORT || '3001'}/api`;
 const jetonSecours = 'jeton-de-secours-e2e-au-moins-32-caracteres';
@@ -132,11 +132,21 @@ export async function horsDuPassageDeMinuit() {
   await new Promise((resolve) => setTimeout(resolve, attente + 1_000));
 }
 
+// Lot D1a-6 (cadrage version 3 du 03-11-2026, §4.2), début de #244 : jeton d'un compte, signé avec le secret du backend
+// jetable, même valeur que `JWT_SECRET` de `playwright.config.ts` (la configuration n'est pas modifiée). Même signature
+// et même secret que les copies des specs, dont la migration reste à faire (#244).
+const base64url = (valeur: object) => Buffer.from(JSON.stringify(valeur)).toString('base64url');
+export function jetonPour(userId: string) {
+  const corps = `${base64url({ alg: 'HS256', typ: 'JWT' })}.${base64url({ id: userId })}`;
+  return `${corps}.${createHmac('sha256', 'secret-e2e-uniquement').update(corps).digest('base64url')}`;
+}
+
 type Outils = {
   session: Session;
   allerSurPageAdmin: (path: string) => Promise<Page>;
   creerClient: (libelle: string, avecSite?: boolean) => Promise<{ id: string; raisonSociale: string }>;
   apiAdmin: { get: (path: string) => ReturnType<APIRequestContext['get']> };
+  connexion: (compte: { id: string } | 'SA', options?: BrowserContextOptions) => Promise<Page>;
 };
 
 export const test = base.extend<Outils>({
@@ -160,6 +170,28 @@ export const test = base.extend<Outils>({
   },
   apiAdmin: async ({ request, session }, fournir) => {
     await fournir({ get: (path: string) => request.get(`${api}${path}`, { headers: headers(session.token) }) });
+  },
+  // Lot D1a-6 (cadrage version 3 du 03-11-2026, §4.2) : session d'un compte dans un contexte de navigateur à lui ('SA' :
+  // session de l'accès de secours, fixture session). Le compte est relu par GET /api/me avec son jeton, puis mémorisé avec
+  // ses permissions effectives, comme la vraie connexion (domaines/authentification/routes.ts:46 et :100) : la fiche
+  // chantier lit les permissions dans localStorage au rendu (ChantierDetail.tsx:55-62), et useCurrentUser ne les réécrit
+  // qu'après. La page est rendue sans navigation ; les contextes ouverts sont fermés à la fin du test.
+  connexion: async ({ browser, request, session }, fournir) => {
+    const contextes: BrowserContext[] = [];
+    await fournir(async (compte, options = {}) => {
+      const token = compte === 'SA' ? session.token : jetonPour(compte.id);
+      const moi = await request.get(`${api}/me`, { headers: headers(token) });
+      expect(moi.ok(), `GET /api/me : ${moi.status()} ${await moi.text()}`).toBeTruthy();
+      const contexte = await browser.newContext(options);
+      contextes.push(contexte);
+      const page = await contexte.newPage();
+      await page.addInitScript(([jeton, compteRelu]) => {
+        localStorage.setItem('token', jeton as string);
+        localStorage.setItem('user', compteRelu as string);
+      }, [token, JSON.stringify(await moi.json())]);
+      return page;
+    });
+    for (const contexte of contextes) await contexte.close();
   },
 });
 

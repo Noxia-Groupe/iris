@@ -1,0 +1,44 @@
+DIR | administration | onglet par défaut | défaut | redirigé vers /
+DIR | devis | hors lignes | défaut | redirigé vers /
+DIR | factures | hors lignes | défaut | redirigé vers /
+DIR | fiche chantier | chantier-annule | défaut | titre « Écrans annulé <s> » ; boutons : Rapport interne (PDF), Retour au tableau de bord
+DIR | fiche chantier | chantier-en-cours | défaut | titre « Écrans en cours <s> » ; boutons : Rapport interne (PDF), Retour au tableau de bord
+DIR | fiche chantier | chantier-termine | défaut | titre « Écrans terminé <s> » ; boutons : Rapport interne (PDF), Retour au tableau de bord
+DIR | fiche chantier | chantier-titulaire-dc | défaut | titre « Écrans titulaire DC <s> » ; boutons : Rapport interne (PDF), Retour au tableau de bord
+DIR | fiche chantier | chantier-titulaire-tech | défaut | titre « Écrans titulaire TECH <s> » ; boutons : Rapport interne (PDF), Retour au tableau de bord
+DIR | fiche intervention | intervention-planifiee | défaut | redirigé vers /
+DIR | fiche intervention | intervention-terminee | défaut | redirigé vers /
+DIR | liste des chantiers | chantier-annule | défaut | ligne absente
+DIR | liste des chantiers | chantier-en-cours | défaut | boutons : Clôturer
+DIR | liste des chantiers | chantier-termine | défaut | boutons : aucun
+DIR | liste des chantiers | chantier-titulaire-dc | défaut | boutons : Clôturer
+DIR | liste des chantiers | chantier-titulaire-tech | défaut | boutons : Clôturer
+DIR | liste des chantiers | hors lignes | défaut | titre « Liste des Chantiers » ; boutons : Chantiers Terminés / Archivés# chantier(s), En cours#, En perte, En perte#, Heures dépassées, Main-d’œuvre dépassée, Marge faible, Matériel dépassé, Sans saisie, Tous, À surveiller, À surveiller#
+DIR | liste des interventions | hors lignes | défaut | redirigé vers /
+DIR | menu | — | défaut | sections : Accueil, Chantiers ; type affiché : Directeur
+DIR | planning | hors lignes | défaut | redirigé vers /
+DIR | route / | — | défaut | menu « Accueil › Tableau de bord » ; accessible
+DIR | route /achats | — | défaut | hors menu ; redirigée vers /
+DIR | route /admin | — | défaut | hors menu ; redirigée vers /
+DIR | route /administration/api | — | défaut | hors menu ; redirigée vers /
+DIR | route /catalogue | — | défaut | hors menu ; redirigée vers /
+DIR | route /chantiers | — | défaut | menu « Chantiers › Liste des chantiers » ; accessible
+DIR | route /chantiers/:id | chantier-en-cours | défaut | hors menu ; accessible
+DIR | route /clients | — | défaut | hors menu ; redirigée vers /
+DIR | route /clients/:id | client | défaut | hors menu ; redirigée vers /
+DIR | route /commerciaux | — | défaut | hors menu ; redirigée vers /
+DIR | route /comptabilite | — | défaut | hors menu ; redirigée vers /
+DIR | route /contrats-maintenance | — | défaut | hors menu ; redirigée vers /
+DIR | route /devis | — | défaut | hors menu ; redirigée vers /
+DIR | route /factures | — | défaut | hors menu ; redirigée vers /
+DIR | route /heures | — | défaut | hors menu ; redirigée vers /
+DIR | route /interventions | — | défaut | hors menu ; redirigée vers /
+DIR | route /interventions/:id | intervention-planifiee | défaut | hors menu ; redirigée vers /
+DIR | route /mentions-legales | — | défaut | hors menu ; redirigée vers /
+DIR | route /performances | — | défaut | hors menu ; redirigée vers /
+DIR | route /planning | — | défaut | hors menu ; redirigée vers /
+DIR | route /prete-a-facturer | — | défaut | hors menu ; redirigée vers /
+DIR | route /reglements | — | défaut | hors menu ; redirigée vers /
+DIR | route /resultat-commercial | — | défaut | hors menu ; redirigée vers /
+DIR | route /societe | — | défaut | hors menu ; redirigée vers /
+DIR | route /statistiques | — | défaut | hors menu ; redirigée vers /

@@ -156,7 +156,8 @@ const MONTANTS = {
   conversion: { budgetGlobalVendu: 987.09, budgetMaterielVendu: 70.1, budgetMainOeuvreVendu: 916.99, heuresVendues: 16.5, coutMaterielPrevu: 1.06 },
   // Chantier ouvert par la conversion de devis-signe (jeu de données : une ligne de main-d'œuvre libre, 1 × 1 000 HT, sans
   // minutes ni prix d'achat) : montant vendu 1 000 (et non le TTC, 1 200) ; budget matériel 0 ; main-d'œuvre 1 000 ;
-  // 1 heure (60 minutes par unité, et non 0) ; coût matériel prévu 0 (« Zéro », réponse du 30-10-2026), et non null.
+  // 1 heure (60 minutes par unité, et non 0) ; coût matériel prévu 0 (« Zéro », puis « Zéro aussi », réponses du
+  // 30-10-2026), et non null.
   conversionSigne: { budgetGlobalVendu: 1000, budgetMaterielVendu: 0, budgetMainOeuvreVendu: 1000, heuresVendues: 1, coutMaterielPrevu: 0 },
   // Acompte constaté sur devis-signe-prix-achat avant l'instantané : 21,37, distinct du taux d'acompte appliqué au TTC et
   // de null. Une révision le reprend (devis/routes.ts:131-132). Lecture écartée : la révision qui ne le reprend pas.

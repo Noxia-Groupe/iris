@@ -1,0 +1,44 @@
+TECH | administration | onglet par défaut | défaut | redirigé vers /
+TECH | devis | hors lignes | défaut | redirigé vers /
+TECH | factures | hors lignes | défaut | redirigé vers /
+TECH | fiche chantier | chantier-annule | défaut | titre « Chantier introuvable » ; boutons : aucun
+TECH | fiche chantier | chantier-en-cours | défaut | titre « Chantier introuvable » ; boutons : aucun
+TECH | fiche chantier | chantier-termine | défaut | titre « Chantier introuvable » ; boutons : aucun
+TECH | fiche chantier | chantier-titulaire-dc | défaut | titre « Chantier introuvable » ; boutons : aucun
+TECH | fiche chantier | chantier-titulaire-tech | défaut | titre « Écrans titulaire TECH <s> » ; boutons : Rapport interne (PDF), Retour au tableau de bord
+TECH | fiche intervention | intervention-planifiee | défaut | titre « Fiche intervention » ; boutons : Démarrer, Enregistrer mes heures
+TECH | fiche intervention | intervention-terminee | défaut | titre « Fiche intervention » ; boutons : Enregistrer mes heures, Faire signer ce compte rendu
+TECH | liste des chantiers | chantier-annule | défaut | ligne absente
+TECH | liste des chantiers | chantier-en-cours | défaut | ligne absente
+TECH | liste des chantiers | chantier-termine | défaut | ligne absente
+TECH | liste des chantiers | chantier-titulaire-dc | défaut | ligne absente
+TECH | liste des chantiers | chantier-titulaire-tech | défaut | boutons : aucun
+TECH | liste des chantiers | hors lignes | défaut | titre « Liste des Chantiers » ; boutons : Chantiers Terminés / Archivés# chantier(s), Créer une affaire (devis), En cours#, Sans saisie, Tous, À surveiller, À surveiller#
+TECH | liste des interventions | hors lignes | défaut | titre « Mes interventions » ; boutons : aucun
+TECH | menu | — | défaut | sections : Accueil, Chantiers, Interventions, Référentiels ; type affiché : Technicien
+TECH | planning | hors lignes | défaut | titre « Planning d'intervention » ; boutons : Semaine #, Semaine précédente, Semaine suivante
+TECH | route / | — | défaut | menu « Accueil › Ma journée » ; accessible
+TECH | route /achats | — | défaut | hors menu ; redirigée vers /
+TECH | route /admin | — | défaut | hors menu ; redirigée vers /
+TECH | route /administration/api | — | défaut | hors menu ; redirigée vers /
+TECH | route /catalogue | — | défaut | hors menu ; redirigée vers /
+TECH | route /chantiers | — | défaut | menu « Chantiers › Liste des chantiers » ; accessible
+TECH | route /chantiers/:id | chantier-en-cours | défaut | hors menu ; accessible
+TECH | route /clients | — | défaut | menu « Référentiels › Clients » ; accessible
+TECH | route /clients/:id | client | défaut | hors menu ; accessible
+TECH | route /commerciaux | — | défaut | hors menu ; redirigée vers /
+TECH | route /comptabilite | — | défaut | hors menu ; redirigée vers /
+TECH | route /contrats-maintenance | — | défaut | hors menu ; redirigée vers /
+TECH | route /devis | — | défaut | hors menu ; redirigée vers /
+TECH | route /factures | — | défaut | hors menu ; redirigée vers /
+TECH | route /heures | — | défaut | hors menu ; redirigée vers /
+TECH | route /interventions | — | défaut | menu « Interventions › Interventions SAV » ; accessible
+TECH | route /interventions/:id | intervention-planifiee | défaut | hors menu ; accessible
+TECH | route /mentions-legales | — | défaut | hors menu ; redirigée vers /
+TECH | route /performances | — | défaut | hors menu ; redirigée vers /
+TECH | route /planning | — | défaut | menu « Chantiers › Planning » ; accessible
+TECH | route /prete-a-facturer | — | défaut | hors menu ; redirigée vers /
+TECH | route /reglements | — | défaut | hors menu ; redirigée vers /
+TECH | route /resultat-commercial | — | défaut | hors menu ; redirigée vers /
+TECH | route /societe | — | défaut | hors menu ; redirigée vers /
+TECH | route /statistiques | — | défaut | hors menu ; redirigée vers /
