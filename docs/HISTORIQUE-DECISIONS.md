@@ -3093,7 +3093,7 @@ Issues versées ou fermées par la présente documentation : aucune n'est fermé
 
 > La PR C vient après D1a-6, dont les références d'écran protègent les boutons de la fiche chantier pendant son déplacement (choix par défaut, à confirmer) : elle laisse inchangés `client/tests/e2e/matrice-droits/ecrans-*.txt`, en plus du relevé de `comparer:rendu`.
 
-- Section 2, « Chantiers techniques », chantier 2, « Écrans du client : partiel » (cinq lignes) :
+- Section 2, « Chantiers techniques », chantier 2, « Écrans du client : partiel » (quatre lignes ; celles des PR A et B, inchangées, restent dans la passation) :
 
 > - **Écrans du client : partiel.** Proposition [DECOUPAGE-ECRANS-CIBLE.md](DECOUPAGE-ECRANS-CIBLE.md) (#200) : déplacement pur, état laissé dans la page, fichiers à plat dans `components/` ; principe validé par Nelson le 18-10-2026.
 >
@@ -3102,8 +3102,6 @@ Issues versées ou fermées par la présente documentation : aucune n'est fermé
 >      - PR C, fiche chantier : à faire. #208, qui modifiait aussi `ChantierDetail.tsx`, est fusionnée ; l'écran compte 1 488 lignes depuis #397 et reste le seul au-delà de 800. La PR C vient après le lot pilote 6 (implémenté) et la matrice D1a (implémentée, D1a-6 : #471) (ordre retenu par Claude Code le 21-10-2026, section « Ordre de travail » plus haut ; après D1a-6 : choix par défaut, à confirmer) ; elle laisse inchangés `client/tests/e2e/matrice-droits/ecrans-*.txt`, en plus du relevé de `comparer:rendu`.
 >
 >      - Anomalies relevées, une issue chacune (#202 à #206) : à corriger après les trois déplacements, chacune dans sa PR.
->
-> 3. **Droits flexibles et simples à paramétrer** : proposition [`MODELE-DROITS-CIBLE.md`](MODELE-DROITS-CIBLE.md), avec son [inventaire](MODELE-DROITS-INVENTAIRE.md) (permissions élémentaires, périmètres, rôles paramétrables, hiérarchie facultative, modèles « petite équipe » et « équipe avec hiérarchie », migration rôle par rôle à comportement identique). Questions ouvertes arbitrées le 18-10-2026 par délégation de Nelson (section 10 du document). Proposition validée par sa fusion (#182), selon la décision de Nelson du 20-10-2026 (« C’est toi qui fusionne TOUTES les PR »). Parcours de droits : règle 2. Modèle cible (D1 à D4) **prévu**, rien n'en est implémenté. Matrice de non-régression D1a (tests seuls) **implémentée** : onze PR en série, de D1a-1 (#427) à D1a-6 (#471) (section 1). Lot D0 **implémenté**, non validé pour mise en service, une PR par défaut relevé par l'inventaire : #178, #179, #180 et #181 corrigés (#216, #282, #217, #283), avant la fin du pilote comme l'a décidé Nelson le 21-10-2026.
 
 - Section 4, matrice D1a-1, dernière puce de la liste des choix :
 
