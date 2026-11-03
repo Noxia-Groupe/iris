@@ -1,4 +1,5 @@
-// Données du relevé, créées par l'API en super administrateur, avant les deux relevés.
+// Données du relevé, créées par l'API en super administrateur, avant les deux relevés ; seules les heures
+// des interventions du chantier E sont déclarées par le technicien, avec son propre jeton.
 //
 // Les deux clients voient ensuite exactement ces données (mêmes identifiants, mêmes dates) :
 // aucune normalisation n'est nécessaire. Elles rendent les sections que le découpage déplace :
@@ -193,10 +194,23 @@ export async function preparerDonnees(api) {
   await appel('POST', `/heures/${heures[0].id}/restaurer`, { motifRestauration: 'Pointage bien réalisé' });
   await appel('POST', `/factures/${facture.id}/avoirs`, { lignes: [{ designation: 'Remise du relevé', quantite: 1, prixUnitaireHt: 50, tauxTva: 20 }] });
 
+  // Arrondis d'affichage de la fiche (audit des montants de #478). Chantier H : dépenses égales au vendu,
+  // marge exactement nulle (#212). Chantier I : 5,75 h et 0,25 h aux deux taux du relevé (main-d'œuvre au
+  // millième, 253,875 €) et un achat de 901,50 € : heures vendues faites, marge et marge estimée de
+  // −0,375 €, affichées −0,38 € (au centime) et 0 € (à l'euro, moitié vers l'extérieur, sans « -0 »).
+  // Créés en dernier : hors de leurs fiches changent la liste des chantiers, le choix du planning et la
+  // marge estimée de G, au coût horaire moyen de la société, que les heures de I modifient.
+  const chantierH = await ouvrir(await devisSigne('Affaire à marge nulle'), conducteur.id);
+  await appel('POST', '/achats', { chantierId: chantierH.id, fournisseurId: fournisseurs[1].id, categorieId: categories[1].id, date: jourCivil(-4), description: 'Fourniture au prix vendu', montantHT: 1155, numeroFacture: 'F-H' });
+  const chantierI = await ouvrir(await devisSigne('Affaire au millième'), conducteur.id);
+  await heure(chantierI.id, -3, intervenants[0].id, 5.75);
+  await heure(chantierI.id, -3, intervenants[1].id, 0.25);
+  await appel('POST', '/achats', { chantierId: chantierI.id, fournisseurId: fournisseurs[1].id, categorieId: categories[1].id, date: jourCivil(-3), description: 'Matériel au centime', montantHT: 901.5, numeroFacture: 'F-I' });
+
   return {
     comptes: { superAdmin: superAdmin.id, administrateur: administrateur.id, conducteur: conducteur.id, technicien: technicien.id },
     noms: { technicien: technicien.name, conducteur: conducteur.name, fournisseurA: fournisseurs[0].nom, categorieA: categories[0].nom, intervenantA: intervenants[0].nom },
-    chantiers: { A: chantierA.id, B: chantierB.id, C: chantierC.id, D: chantierD.id, E: chantierE.id, F: chantierF.id, G: chantierG.id },
+    chantiers: { A: chantierA.id, B: chantierB.id, C: chantierC.id, D: chantierD.id, E: chantierE.id, F: chantierF.id, G: chantierG.id, H: chantierH.id, I: chantierI.id },
     planning: { depannage: nom('Dépannage'), formation: type.nom, planifiee: planifiee.titre ?? nom('Remplacement détecteur') },
   };
 }

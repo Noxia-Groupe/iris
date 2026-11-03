@@ -91,6 +91,9 @@ export function scenarios({ comptes, noms, chantiers, planning }) {
     { nom: 'chantier-suites-admin', compte: comptes.superAdmin, url: `/chantiers/${chantiers.E}`, actions: [] },
     { nom: 'chantier-annule-admin', compte: comptes.superAdmin, url: `/chantiers/${chantiers.F}`, actions: [] },
     { nom: 'chantier-sans-saisie-admin', compte: comptes.superAdmin, url: `/chantiers/${chantiers.G}`, actions: [] },
+    // Arrondis d'affichage : marge exactement nulle ; marge et marge estimée de −0,375 €, main-d'œuvre au millième.
+    { nom: 'chantier-marge-nulle-admin', compte: comptes.superAdmin, url: `/chantiers/${chantiers.H}`, actions: [] },
+    { nom: 'chantier-millieme-admin', compte: comptes.superAdmin, url: `/chantiers/${chantiers.I}`, actions: [] },
 
     // Planning : grille, file et chaque modale et chaque branche de la modale d'affectation
     // pour l'administration ; consultation pour le conducteur et le technicien.
