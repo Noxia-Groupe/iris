@@ -2,12 +2,12 @@
 
 **Proposition du 18-10-2026.** Le même jour, Nelson en a validé le principe et les fichiers à plat, et il a délégué le traitement des petites anomalies. Les autres choix, dont l'ordre des PR, sont des choix techniques de Claude Code (décisions en fin de document). Chantier technique 2 du 17-10-2026, suite du découpage du serveur (terminé : `server/index.ts` n'est plus que le point d'entrée, voir [server/src/README.md](../server/src/README.md)). Relevé fait sur `main` le 18-10-2026.
 
-Trois écrans dépassaient la règle permanente des 800 lignes ([CLAUDE.md](../CLAUDE.md)). **État au 03-11-2026** : PR A (#213) et PR B (#214) implémentées. PR C à faire, après le lot pilote 6 (implémenté) et la matrice D1a (implémentée, en tests seuls : D1a-6, #471, a ajouté la matrice des écrans) (ordre retenu par Claude Code le 21-10-2026, [passation](ROADMAP-PASSATION.md#ordre-de-travail-proposé-à-confirmer-par-nelson)) ; #208, qui modifiait aussi `ChantierDetail.tsx`, est fusionnée (`b684fae`). Les numéros de ligne de ce document se rapportent au relevé du 18-10-2026 : chaque PR de découpage revérifie ses plages sur son `main`.
+Trois écrans dépassaient la règle permanente des 800 lignes ([CLAUDE.md](../CLAUDE.md)). **État au 03-11-2026** : PR A (#213), PR B (#214) et PR C (#478) implémentées ; les trois écrans sont sous la limite. La PR C est venue après le lot pilote 6 (implémenté) et la matrice D1a (implémentée, en tests seuls : D1a-6, #471, a ajouté la matrice des écrans) (ordre retenu par Claude Code le 21-10-2026, [passation](ROADMAP-PASSATION.md#ordre-de-travail-proposé-à-confirmer-par-nelson)) ; #208, qui modifiait aussi `ChantierDetail.tsx`, est fusionnée (`b684fae`). Les numéros de ligne des PR A et B se rapportent au relevé du 18-10-2026, ceux de la PR C à `main` `bdef300` (03-11-2026) : chaque PR de découpage revérifie ses plages sur son `main`.
 
 | Écran | Lignes | Composants internes déjà séparés |
 |---|---|---|
 | `client/src/pages/Admin.tsx` | 1 477 (684 après #214) | `EditeurBareme`, `ChoixResponsable` |
-| `client/src/pages/ChantierDetail.tsx` | 1 477 | aucun |
+| `client/src/pages/ChantierDetail.tsx` | 1 477 (1 485 sur `bdef300`, 759 après #478) | aucun |
 | `client/src/pages/Planning.tsx` | 873 (406 après #213) | `ContractPlacement`, `EventModal`, `TypesModal` |
 
 ## Principe : déplacer, ne pas réécrire
@@ -36,7 +36,7 @@ Côté client, il n'existe pas d'équivalent de `server/scripts/verifier-deplace
 
    **Livré** : `cd client && npm run comparer:rendu -- --reference <dossier client de main>` ([client/scripts/comparer-rendu/](../client/scripts/comparer-rendu/index.mjs), mode d'emploi dans [CONFIGURATION-ENVIRONNEMENT.md](CONFIGURATION-ENVIRONNEMENT.md#comparaison-du-rendu-découpage-des-écrans)). Il sert les deux clients avec le même serveur et la même base, ce qui évite toute normalisation des identifiants et des dates, et libère les réponses API une à une pour fixer l'ordre des requêtes.
 
-   Couverture (79 étapes) : chaque section que les PR A, B et C déplacent est rendue au moins une fois. Pour PR A : les branches de la modale d'affectation (création, heures précises, événement et nouveau type, modification d'une affectation, d'un événement et d'une affectation issue d'une intervention), les types et leur édition, le placement d'une visite et d'une curative, le partage. Pour PR B : les neuf onglets, l'édition en ligne avec saisie, le choix d'un responsable ouvert (dont un responsable désactivé), les vues de l'administrateur (référentiels compris) et du conducteur. Pour PR C : la modale, les corrections, chaque filtre, le tri, la recherche et la réinitialisation des deux journaux, le commercial en place, le barème réduit, les chantiers terminés en attente d'encaissement et encaissé, les vues du conducteur et du technicien.
+   Couverture (79 étapes, 84 depuis #478) : chaque section que les PR A, B et C déplacent est rendue au moins une fois. Pour PR A : les branches de la modale d'affectation (création, heures précises, événement et nouveau type, modification d'une affectation, d'un événement et d'une affectation issue d'une intervention), les types et leur édition, le placement d'une visite et d'une curative, le partage. Pour PR B : les neuf onglets, l'édition en ligne avec saisie, le choix d'un responsable ouvert (dont un responsable désactivé), les vues de l'administrateur (référentiels compris) et du conducteur. Pour PR C : la modale, les corrections, chaque filtre, le tri, la recherche (dont une recherche sans résultat) et la réinitialisation des deux journaux, le commercial en place, le barème réduit, les chantiers terminés en attente d'encaissement et encaissé, les vues du conducteur et du technicien ; et, ajoutés par #478 avant le déplacement, une restauration au journal d'audit, un avoir dans les factures liées, les coûts de l'intervention issue du devis et des suites SAV avec une marge négative, une affaire annulée et un chantier en cours sans saisie ni commercial.
 
    Limites : aucune action qui écrit (enregistrement, glisser-déposer, suppression) n'est relevée, ni l'état qui suivrait une écriture ; ces parcours restent couverts par les E2E. Les branches de l'onglet Utilisateurs qui affichent le message réservé aux comptes super administrateur ne se rendent pas : le serveur ne renvoie pas ces comptes à un administrateur. L'horloge du serveur n'est pas figée (exécution refusée à cheval sur minuit). L'outil ne compte que les requêtes API parties par `fetch` : une requête partie autrement l'arrêterait au bout de 120 s (code 2). Une PR de découpage qui touche une zone non couverte ajoute d'abord le scénario qui la rend.
 2. `npm run build` (`tsc -b`, dont `noUnusedLocals` et `verbatimModuleSyntax`) et `npm run lint`, avec un nombre d'avertissements égal ou inférieur au départ : Admin 10, ChantierDetail 8, Planning 0. Les directives `eslint-disable-next-line` positionnelles (Planning l.126, 137, 153 ; ChantierDetail l.135) restent attachées à leur ligne.
@@ -79,27 +79,30 @@ Restent dans la page :
 
 L'onglet Utilisateurs recevra une vingtaine de props : c'est le prix d'un déplacement sans changement d'état.
 
-### PR C : fiche chantier (1 477 → environ 750 lignes) — à faire, après le lot pilote 6 (implémenté) et la matrice D1a (implémentée ; #208 fusionnée)
+### PR C : fiche chantier (1 485 → 759 lignes) — implémentée par #478
+
+Plages relevées sur `main` `bdef300` (03-11-2026) ; 112 props au total.
 
 | Nouveau fichier | Contenu déplacé (lignes de `ChantierDetail.tsx`) |
 |---|---|
-| `ChantierJournalAchats.tsx` | journal des achats (1021-1159) : filtres, lignes, correction, sous-total |
-| `ChantierJournalHeures.tsx` | journal des heures (1163-1288) |
-| `ChantierJournalAudit.tsx` | journal d'audit des saisies (1291-1344) |
-| `ChantierModaleModification.tsx` | modale « Modifier le chantier » (1349-1472) |
-| `ChantierEnTete.tsx` | en-tête (titre, statut, client, dates, commercial modifiable en place), alertes et bannière d'encaissement (695-798), avec `STATUT_LABELS` |
-| `ChantierIndicateurs.tsx` | indicateurs clés et factures liées, marge et estimation, barres de progression, répartitions (801-1012), avec `FactureLiee` (exporté : la page l'emploie aussi) |
-| `lib/formatsChantier.ts` | `toDateFrancaise`, `fmtDate`, `fmtEuro` et `fmtHeures` (22-32), tels quels : plusieurs sections les emploient |
+| `ChantierJournalAchats.tsx` | journal des achats (1030-1166) : filtres, lignes, correction, sous-total (26 props) |
+| `ChantierJournalHeures.tsx` | journal des heures (1171-1296, 25 props) |
+| `ChantierJournalAudit.tsx` | journal d'audit des saisies (1299-1352, 7 props) |
+| `ChantierModaleModification.tsx` | contenu de la modale « Modifier le chantier » (1358-1479, 19 props) |
+| `ChantierEnTete.tsx` | en-tête (titre, statut, client, dates, commercial modifiable en place), alertes et bannière d'encaissement (701-804, 16 props), avec `STATUT_LABELS` ; un fragment |
+| `ChantierIndicateurs.tsx` | indicateurs clés et factures liées, marge et estimation, barres de progression, `CoutsSuitesChantier`, répartitions (806-1020, 19 props), avec `FactureLiee` (exporté : la page l'emploie aussi) ; un fragment |
+| `lib/formatsChantier.ts` | `toDateFrancaise`, `fmtDate`, `fmtEuro` et `fmtHeures` (25-35), tels quels : plusieurs sections les emploient |
 
 Restent dans la page, inchangés :
-- tous les hooks (avant les retours anticipés l.595 et 601) et les valeurs dérivées de `metrics` (612-653) ;
-- la barre d'actions (681-693). Son bouton « Modifier » précède toujours dans le DOM celui du commercial, rendu ensuite par `ChantierEnTete` : plusieurs parcours E2E prennent le premier.
+- tous les hooks (avant les retours anticipés, l.596 et 602 sur `bdef300`) et les valeurs dérivées de `metrics` (613-654) ;
+- la note « Consultation seule » du technicien (673-679), et les gardes `montantsVisibles &&` et `editingChantier &&` du journal des achats et de la modale ;
+- la barre d'actions (684-699), avec `RapportClientChantier`. Son bouton « Modifier » précède toujours dans le DOM celui du commercial, rendu ensuite par `ChantierEnTete` : plusieurs parcours E2E prennent le premier.
 
-**Estimation et mise en forme des props.** Les six sections reçoivent environ 120 props au total : en-tête 17, indicateurs 20, journal des achats 28, journal des heures 26, journal d'audit 9, modale 21. La page garde environ 690 lignes avant les points d'appel. Les « environ 750 lignes » supposent des props passées en écriture compacte, plusieurs par ligne. Avec une prop par ligne, la page atteindrait environ 820 à 830 lignes, au-delà de la limite : la forme compacte, plusieurs attributs par ligne, est donc retenue pour les points d'appel de cette page.
+**Estimation et mise en forme des props** (18-10-2026 ; résultat de #478 : 112 props, page de 759 lignes). Les six sections reçoivent environ 120 props au total : en-tête 17, indicateurs 20, journal des achats 28, journal des heures 26, journal d'audit 9, modale 21. La page garde environ 690 lignes avant les points d'appel. Les « environ 750 lignes » supposent des props passées en écriture compacte, plusieurs par ligne. Avec une prop par ligne, la page atteindrait environ 820 à 830 lignes, au-delà de la limite : la forme compacte, plusieurs attributs par ligne, est donc retenue pour les points d'appel de cette page.
 
 La page garde environ 600 lignes de hooks et de gestionnaires. Les regrouper en hooks propres (par exemple les filtres d'un journal), appelés au même rang, serait possible plus tard, mais ce ne serait plus un simple déplacement.
 
-La zone exportée en PDF (`ref={printRef}`, 677-1014) garde le même conteneur. Les composants qu'elle contient rendent les mêmes éléments, donc `html2pdf` lit le même DOM.
+La zone exportée en PDF (`ref={printRef}`, 682-1022 sur `bdef300`) garde le même conteneur. Les composants qu'elle contient rendent les mêmes éléments, donc `html2pdf` lit le même DOM.
 
 ## Ordre et dépendances
 
