@@ -3161,7 +3161,7 @@ Nelson retient l'option 1 (« 2. Masquer ces montants ») : la fiche masque le r
 
 1. D'abord le correctif #483, parce qu'il touche un montant affiché (ordre du 19-10-2026 : « un correctif ne passe avant un lot que s'il est bloquant ou s'il touche un montant »).
 2. Puis le lot des anomalies d'écran, une PR par issue, dans cet ordre :
-   - #202 (Intervenants : branche inaccessible, `colSpan`) ;
+   - #202 (Intervenants : branche inaccessible ; le `colSpan` est déjà corrigé depuis 8b189ff) ;
    - #204 (références jamais lues de la fiche chantier) ;
    - #203 (types de compte dupliqués, libellé unique : choix par défaut proposé dans #475) ;
    - #206 (lecture du compte connecté) ;
