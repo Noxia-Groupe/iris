@@ -3159,7 +3159,7 @@ Nelson retient l'option 1 (« 2. Masquer ces montants ») : la fiche masque le r
 
 ### Point 1 : ordre de travail (choix de mise en œuvre de Claude Code, à confirmer par Nelson)
 
-1. D'abord le correctif #483, parce qu'il touche un montant affiché (ordre du 19-10-2026 : « un correctif ne passe avant un lot que s'il est bloquant ou s'il touche un montant »).
+1. D'abord le correctif #483, parce qu'il touche un montant affiché (ordre du 19-10-2026 : « un correctif ne passe avant un lot que s'il est bloquant ou s'il touche un montant »). Il est mené avant #204, #206 et #205, qui touchent les mêmes fichiers, sans parallélisme avec elles ; #202, dans l'administration, peut avancer en même temps que lui.
 2. Puis le lot des anomalies d'écran, une PR par issue, dans cet ordre :
    - #202 (Intervenants : branche inaccessible ; le `colSpan` est déjà corrigé depuis 8b189ff) ;
    - #204 (références jamais lues de la fiche chantier) ;
@@ -3249,6 +3249,14 @@ Deux PR peuvent avancer en parallèle si elles touchent des domaines indépendan
 >     2. Afficher le reste à facturer **à 0 €**, et la marge sur le seul réel : dépenses engagées, factures et avoirs éventuels.
 >     3. **Laisser** l'affichage tel quel.
 >   - D'ici la réponse, rien ne change (l'affichage actuel est celui de l'option 3). À vérifier lors du correctif : la liste des chantiers et le tableau de bord, qui reprennent peut-être le reste à facturer ou la marge, et le cas d'une affaire annulée après une facture et son avoir.
+
+- Section 1, « Défauts connus », notes du lot du 03-11-2026 (soir), #483 :
+
+> #483, question pour Nelson (section 3, « Fiche d'une affaire annulée »).
+
+- Section 2, « Ordre de travail », PR C et lot suivant :
+
+> et l'ordre de travail ne place aucun lot après elle : le lot suivant attend l'arbitrage de Nelson (section 3, bloc des lots prévus par les décisions du 24-10-2026, « leur place par rapport au premier jour du pilote »).
 
 - Section 4, bloc de D1a-1, puce de documentation :
 
