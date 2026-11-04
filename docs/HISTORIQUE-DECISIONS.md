@@ -2949,6 +2949,8 @@ Le troisième point de N3 de #428 (la marque `validation-avant-droit` est un suf
 - section « [Lot du 01-11-2026 (suite)](#lot-du-01-11-2026-suite) », liste « À documenter » : traitée, sauf D2 et le prix d'achat d'une fiche (« Écarts de documentation de D1a, faits en fin de lot », ci-dessus) ; N6 de #471 s'y ajoute en place ;
 - sections « [Lot du 01-11-2026 (suite)](#lot-du-01-11-2026-suite) » et suivantes, mentions « à la fin de D1a », « prévu » ou « D1a-6 » : D1a-6 est implémenté ; le placement de D1a et son découpage restent des choix par défaut, à confirmer par Nelson.
 
+*Suite, 04-11-2026.* Les deux points « en attente de Nelson » (le prix d'achat d'une fiche écrit par `catalogue:write`, D2) sont tranchés le 04-11-2026, sur délégation de Nelson, et leurs compléments documentaires sont faits ([Décisions du 04-11-2026](#décisions-du-04-11-2026)).
+
 ### Texte de la passation d'avant #471, archivé
 
 *Archivé le 03-11-2026.* La passation disait, avant #471, les textes ci-dessous. Pour garder la passation courte, ils sont déplacés ici sans changement de texte (seuls leurs renvois à l'historique pointent désormais dans ce fichier ; « la présente documentation » y désigne #470). Ils annoncent D1a-6 « prévu », D1a « partiel », la PR documentaire de fin de D1a « prévue », #469 ouverte et la question de durée avec sa phrase « L'attente de la CI ne s'allonge pas », ce qui était exact avant #471 : D1a-6 est **implémenté** depuis, D1a l'est en entier, #469 est fermée par la présente documentation et l'attente de la CI s'allonge d'environ 2,7 minutes (« Durée des tests de #471 », plus haut).
@@ -3107,6 +3109,188 @@ Issues versées ou fermées par la présente documentation : aucune n'est fermé
 
 > - placement de D1a et PR C après D1a-6 (section 2, « Ordre de travail ») ; budget de durée (section 3, « Durée des tests de la matrice des droits »).
 
+
+## Décisions du 04-11-2026
+
+*Rédigé le 04-11-2026.* Réponse de Nelson dans la session de travail du 04-11-2026, à trois points que Claude Code lui avait présentés le 03-11-2026. Les points sont repris sous forme de résumé fidèle (le texte de chaque question est celui de la session de travail) ; la réponse de Nelson est citée mot pour mot, fautes comprises. Les choix a à d ci-dessous sont des **choix de Claude Code sur délégation de Nelson du 04-11-2026**, et non des décisions que Nelson a dites lui-même. Le correctif #483 et l'ordre de travail sont **prévus** : rien n'est codé. Aucune de ces décisions ne vaut validation comptable ni « validé pour mise en service ».
+
+### Questions présentées à Nelson le 03-11-2026 (résumé fidèle)
+
+1. **Le prochain lot**, que l'ordre de travail ne place pas après la PR C. Pistes proposées : les deux lots de droits, les anomalies d'écran #202 à #206, ou un autre lot.
+2. **La question #483**, « Fiche d'une affaire annulée », avec trois options :
+   1. masquer le reste à facturer, la marge et l'alerte de budget, en les remplaçant par « Affaire annulée » ;
+   2. reste à facturer à 0 € et marge sur le seul réel ;
+   3. laisser tel quel.
+3. **Les questions déjà posées et restées sans réponse**, listées ainsi : « le budget de durée des tests » ; « D2 » ; « le prix d'achat d'une fiche du catalogue écrit par une clé d'intégration » ; « la confirmation du découpage de D1a et du placement de la PR C, faits en choix par défaut ».
+
+### Réponse de Nelson (04-11-2026), mot pour mot
+
+> 1. Les anomalies d’ecran
+> 2. Masquer ces montants
+> 3. Fait au Mieux et choisi la meilleur solution sur ces questions restant en suspend
+
+### Lecture retenue du point 3, à corriger par Nelson si besoin
+
+« Ces questions » sont les quatre listées au point 3. Les autres questions de la section 3 de la passation restent ouvertes, notamment « Acompte constaté au-delà du devis », « Taux horaire d'une fiche ramené à 0 », « Chantier encaissé mais encore en cours », et la question complémentaire « prix d'achat d'une fiche du catalogue effacé par une modification qui l'omet », qui reste à poser à Nelson.
+
+### Choix de Claude Code sur délégation de Nelson du 04-11-2026
+
+**a. Durée des tests de la matrice des droits.** Le choix par défaut est confirmé :
+- les matrices restent entières ;
+- l'étape `npm test` du backend reste sous 5 minutes en CI ;
+- la matrice des écrans (D1a-6) ajoute au plus 3 minutes aux parcours dans le navigateur : environ 2,7 minutes constatées.
+
+Plafond pour la suite : une extension des matrices qui dépasserait ces plafonds devra proposer une réduction des cas, en gardant au moins un cas par compte et par route, ou un travail de CI à part. Raison : les droits sont un parcours de la règle 2, à exigence maximale ; les plafonds répondent au souhait de Nelson du 23-10-2026 d'éviter des tests « de plus en olus longtemps » (citation exacte de [`CLAUDE.md`](../CLAUDE.md#méthode-de-travail-décision-de-nelson-du-16-10-2026), règle 3).
+
+**b. D2, matériel SAV lu par le responsable dans le journal de l'intervention.** Le montant reste lisible, ce qui confirme la lecture de #433. Le code ne change pas, et il n'y a pas de correctif. Raison :
+- `MODELE-DROITS-CIBLE.md`, section 4.1, donne au responsable `montants.voir` sur sa branche (« B ») et `interventions.journal` (« D af, B cl ») ;
+- le refus `interventions.couts` (« — ⁸ ») porte sur la route des coûts SAV, « Consulter et gérer les coûts (achats, archivage) », et non sur un montant de matériel lu dans le journal ;
+- le matériel d'une curative est saisi par l'encadrement : administration et conducteur de travaux (`MODELE-DROITS-COMPTES.md`, bloc « Matériel d'une intervention curative »).
+
+Documentation complétée : note 8 de `MODELE-DROITS-CIBLE.md` (section 4.1) et bloc « Matériel d'une intervention curative » de `MODELE-DROITS-COMPTES.md`.
+
+**c. Prix d'achat d'une fiche du catalogue écrit par une clé `catalogue:write`.** L'écriture est gardée, et le code ne change pas. Raison : c'est l'usage visé de l'alimentation du catalogue par une intégration, par exemple depuis les catalogues des fournisseurs (A8) ; l'écriture est vérifiée volontairement par `api.test.mjs` depuis #161, et relue en base par #468. Une clé écrit ce prix, et ne le lit qu'avec `finances:read` (`server/src/domaines/catalogue/metier.ts:103-111`, vérifié : sans ce scope, `ficheCataloguePourLecteur` retire `prixAchatHt` de la réponse). Documentation corrigée : « Catalogue dans les devis » de `MODELE-DROITS-COMPTES.md` et section 8.2 de `MODELE-DROITS-CIBLE.md`. La question de l'effacement de ce prix par une modification qui l'omet **reste ouverte**, à poser à Nelson ; elle n'est pas tranchée ici.
+
+**d. Découpage de D1a en onze PR, placement de D1a puis de la PR C.** Confirmés. Les lots sont faits (#427 à #471, #478).
+
+### Point 2 : #483, « Fiche d'une affaire annulée »
+
+Nelson retient l'option 1 (« 2. Masquer ces montants ») : la fiche masque le reste à facturer, la marge et l'alerte de budget, en les remplaçant par « Affaire annulée ». Le correctif est une PR à venir, « Correctif #483 », que Claude Code cadre en parallèle. Statut : **prévu**, rien n'est codé. Le constat et les points à vérifier lors du correctif sont portés par la passation, section 2, « Lots prévus par les décisions du 04-11-2026 ».
+
+### Point 1 : ordre de travail (choix de mise en œuvre de Claude Code, à confirmer par Nelson)
+
+1. D'abord le correctif #483, parce qu'il touche un montant affiché (ordre du 19-10-2026 : « un correctif ne passe avant un lot que s'il est bloquant ou s'il touche un montant »). Il est mené avant #204, #206 et #205, qui touchent les mêmes fichiers, sans parallélisme avec elles ; #202, dans l'administration, peut avancer en même temps que lui.
+2. Puis le lot des anomalies d'écran, une PR par issue, dans cet ordre :
+   - #202 (Intervenants : branche inaccessible ; le `colSpan` est déjà corrigé depuis 8b189ff) ;
+   - #204 (références jamais lues de la fiche chantier) ;
+   - #203 (types de compte dupliqués, libellé unique : choix par défaut proposé dans #475) ;
+   - #206 (lecture du compte connecté) ;
+   - #205 (utilitaires de format, montants affichés).
+
+Deux PR peuvent avancer en parallèle si elles touchent des domaines indépendants, par exemple l'administration et la fiche chantier, selon la règle « Parallélisme » de `CLAUDE.md`. Statut de chaque anomalie : **prévu**.
+
+### Texte de la passation d'avant la décision du 04-11-2026, archivé
+
+*Archivé le 04-11-2026.* Pour garder la passation courte, les textes ci-dessous sont déplacés ici sans changement de texte (seuls leurs renvois à l'historique pointent désormais dans ce fichier) ; la passation garde l'état courant : les questions encore ouvertes, l'ordre de travail et les choix par défaut en vigueur.
+
+- En-tête, « Ordre qui suit » (premier passage) :
+
+> **Ordre qui suit** : l'ordre de travail (section 2) ne place aucun lot après la PR C ; le lot suivant attend l'arbitrage de Nelson. Les deux lots de droits (le Directeur aligné sur l'administration, l'assistante technique) viennent quand Nelson le voudra, et leur place par rapport au premier jour du pilote est une question ouverte (section 3, bloc des lots prévus par les décisions du 24-10-2026, « leur place par rapport au premier jour du pilote »). Les anomalies #202 à #206, prévues après les trois déplacements, chacune dans sa PR, sont débloquées par la fin du découpage mais restent soumises à l'ordre du 19-10-2026 (« un correctif ne passe avant un lot que s'il est bloquant ou s'il touche un montant ») : la passation ne tranche pas ce qui est bloquant. Deux points de la documentation de D1a attendent la réponse de Nelson : D2 et le prix d'achat d'une fiche du catalogue écrit par une clé ([historique](#écarts-de-documentation-de-d1a-faits-en-fin-de-lot)). Le placement de D1a et son découpage en onze PR sont proposés, à confirmer par Nelson : le découpage de D1a-5d en trois sous-PR (D1a-5 passe de quatre à six sous-PR, D1a de neuf à onze PR) vient du cadrage de D1a-5d, version 3, et non de l'avenant v2 (choix par défaut, signalé à Nelson par Claude Code le 02-11-2026, dans la session de travail ; aucune réponse n'est consignée).
+
+- En-tête, questions ouvertes :
+
+> Douze questions récentes sont ouvertes pour Nelson (section 3) : le budget de durée des tests (marge de 58 s sous 5 minutes après 5d-3, entière après D1a-6, qui n'ajoute aucun test backend ; +2,7 minutes pour l'étape des parcours dans le navigateur ; choix par défaut, à confirmer), le prix d'achat d'une fiche du catalogue écrit par une clé ou effacé par un `PUT` qui l'omet, y compris par une clé (constaté par #468 ; ce second point reste à poser à Nelson), D2, le devis créé pour un client désactivé (#438), l'acompte constaté sans plafond, le taux horaire ramené à 0 (#443), Q1 à Q3 du passage hebdomadaire (#444), le chantier encaissé mais encore en cours, la date de fin saisie avant la clôture et le journal de la clôture d'un chantier et des champs de sa fiche qui pèsent sur un montant ; ces trois dernières restent à lui poser (aucune réponse n'est consignée). Une treizième, née de #478, est posée par l'issue #483 : ce que doit afficher la fiche d'une affaire annulée (section 3, « Fiche d'une affaire annulée » ; aucune réponse n'est consignée).
+
+- Section 2, « Ordre de travail », anomalies #202 à #206 :
+
+> Les anomalies #202 à #206, débloquées par la fin du découpage, restent soumises à l'ordre du 19-10-2026 rappelé plus haut ; la passation ne tranche pas ce qui est bloquant.
+
+- Section 2, « Ordre de travail », placement de D1a, découpage et PR C :
+
+> Le **placement de D1a est proposé, à confirmer par Nelson** : c'est un lot entier placé par Claude Code, après les lots pilotes 4 à 6 (`MODELE-DROITS-CIBLE.md`, section 9), que Claude Code applique sans attendre sa réponse ([historique](#lot-du-01-11-2026-suite)). Le **découpage de D1a en onze PR** l'est aussi : celui de D1a-5d en trois sous-PR (D1a-5 en six sous-PR, D1a en onze PR, et non quatre et neuf) vient du cadrage de D1a-5d, version 3 (commentaire 6582361371 de #427), et non de l'avenant v2 (choix par défaut, à confirmer par Nelson, à qui Claude Code l'a signalé le 02-11-2026, dans la session de travail ; aucune réponse n'est consignée ; [historique](#lot-du-02-11-2026-soir)). La PR C est venue après D1a-6, dont les références d'écran protègent les boutons de la fiche chantier pendant son déplacement ; ce placement est un choix par défaut de Claude Code, à confirmer par Nelson (aucune confirmation n'est consignée). Elle a laissé inchangés `client/tests/e2e/matrice-droits/ecrans-*.txt`, en plus du relevé de `comparer:rendu`.
+
+- Section 2, « Ordre de travail », questions ouvertes :
+
+> Douze questions récentes sont ouvertes pour Nelson (section 3) : le **budget de durée** des matrices (« Durée des tests de la matrice des droits »), l'écriture du prix d'achat d'une fiche du catalogue par une clé, et son effacement par un `PUT` qui l'omet (« Catalogue dans les devis »), **D2** (« Matériel SAV lu par le responsable »), le devis créé pour un client désactivé (« Devis créé pour un client désactivé », #438), l'acompte constaté sans plafond (« Acompte constaté au-delà du devis »), le taux horaire ramené à 0 (« Taux horaire d'une fiche ramené à 0 », #443), Q1 à Q3 du passage hebdomadaire (#444), puis, nées de #449, « Chantier encaissé mais encore en cours » et la question liée, facultative, sur la date de fin saisie avant la clôture, et, née de #456, « Journal de la clôture d'un chantier et des champs de sa fiche qui pèsent sur un montant » ; une treizième, née de #478, « Fiche d'une affaire annulée » (#483).
+
+- Section 1, matrice D1a, phrase sur D2 et le prix d'achat :
+
+> **D2** (montant du matériel SAV lu par le responsable dans le journal de l'intervention) et l'écriture du prix d'achat d'une fiche du catalogue par `catalogue:write` restent posés en question à Nelson (section 3).
+
+- Section 1, matrice D1a, phrase sur le placement et le découpage :
+
+> sont des choix par défaut, à confirmer par Nelson (section 2, « Ordre de travail »).
+
+- Section 1, matrice D1a, documentation de fin de D1a :
+
+> sauf D2 et le prix d'achat d'une fiche, qui attendent Nelson : liste et état
+
+- Section 1, « Défauts connus », suivi de la PR documentaire de fin de D1a :
+
+> sauf D2 et le prix d'achat d'une fiche, qui attendent Nelson ;
+
+- Section 1, « Défauts connus », écrans :
+
+> à corriger chacune dans sa PR, selon l'ordre du 19-10-2026, section 2 « Ordre de travail »)
+
+- Section 2, « Chantiers techniques », anomalies :
+
+> chacune se corrige dans sa PR, selon l'ordre du 19-10-2026 (section 2, « Ordre de travail »), la passation ne tranchant pas ce qui est bloquant.
+
+- Section 2, « Chantiers techniques », PR C :
+
+> Son placement après D1a-6 est un choix par défaut de Claude Code, à confirmer par Nelson.
+
+- Section 3, « Catalogue dans les devis », puce sur l'écriture du prix d'achat par une clé :
+
+>   - (montants) prix d'achat d'une fiche du catalogue écrit par une clé d'intégration (relevé par la matrice des clés, lot D1a-2, #431) : une clé `catalogue:write` écrit ce prix, ce que `api.test.mjs` vérifie volontairement depuis #161 (relu en base par D1a-5d-3 (#468) pour les trois familles en création), alors que [`MODELE-DROITS-COMPTES.md`](MODELE-DROITS-COMPTES.md) (« Catalogue dans les devis ») et [`MODELE-DROITS-CIBLE.md`](MODELE-DROITS-CIBLE.md) (section 8.2) disent qu'une clé ne fait que le lire. Faut-il garder cette écriture, et corriger ces deux textes (la PR documentaire de fin de D1a ne les a pas retouchés, dans l'attente de la réponse), ou la retirer aux clés ? D'ici la réponse, la lecture de #431 vaut choix par défaut, à confirmer (section 4, bloc « Matrice des droits des clés d'intégration ») : écart de documentation, rien ne change dans le code.
+
+- Section 3, « Catalogue dans les devis », puce sur l'effacement du prix d'achat : début de la parenthèse d'avant (le reste est inchangé) :
+
+> (complément de la question précédente ; relevé par N5
+
+- Section 3, « Matériel SAV lu par le responsable dans le journal de l'intervention (D2…) » :
+
+> - **Matériel SAV lu par le responsable dans le journal de l'intervention (D2, montants, relevé par la matrice des données, lot D1a-3, #433)** : le responsable lit le `montantHT` du matériel SAV dans le journal de l'intervention (`intervention-affectee-tech`, rattachée à un chantier de sa branche), alors que les coûts SAV lui répondent 403.
+>   - [`MODELE-DROITS-CIBLE.md`](MODELE-DROITS-CIBLE.md), section 4.1, lui donne `montants.voir` sur sa branche (« B ») et `interventions.journal` (« D af, B cl »), mais lui refuse `interventions.couts` (« — ⁸ » ; note 8 : « Coûts SAV : 403 dans son périmètre »). La table ne tranche donc pas ce montant.
+>   - Aucune décision ne règle sa lecture par le responsable : celles des 28 et 29-10-2026 ([historique](#décision-du-28-10-2026-sur-le-matériel-des-interventions-curatives) ; [réponses du 29-10-2026](#réponses-du-29-10-2026-sur-le-matériel-dune-curative)) portent sur la saisie du matériel, par l'encadrement, et sur sa place dans la marge.
+>   - Question : faut-il garder ce montant dans le journal du responsable, et compléter la note 8 de CIBLE et le bloc « Matériel d'une intervention curative » de [`MODELE-DROITS-COMPTES.md`](MODELE-DROITS-COMPTES.md) ? Ou le lui retirer, ce qui ferait un correctif prioritaire (cadrage de D1a, §7 ; ordre du 19-10-2026 : un correctif passe avant un lot s'il touche un montant) ?
+>   - D'ici la réponse, la lecture de #433 vaut choix par défaut, à confirmer (section 4, bloc « Matrice des données visibles ») : écart de documentation, rien ne change dans le code. D2 reste dans la liste de documentation de fin de D1a ([historique](#lot-du-01-11-2026-suite)).
+
+- Section 3, « Durée des tests de la matrice des droits » :
+
+> - **Durée des tests de la matrice des droits (lot D1a, #427, #431, #433, #435, #437, #440, #456, #460, #465, #468 et #471)** (budget de durée, choix par défaut, à confirmer) : le cadrage de D1a fixait au plus 30 s de plus à l'étape `npm test` de la CI pour l'ensemble des PR backend du lot, et au plus 3 minutes de plus aux parcours dans le navigateur pour D1a-6 ; ce budget découle d'une lecture retenue par Claude Code, à confirmer (« D1a ne doit pas allonger sensiblement la CI »), de la décision de Nelson du 23-10-2026, qui portait sur les boucles d'audit nées de tests manquants. Mesures PR par PR, SHA par SHA : [historique](#lot-du-01-11-2026-suite) (« Durée des tests et question posée à Nelson », jusqu'à #437), [historique](#lot-du-02-11-2026) (#440), [historique](#lot-du-02-11-2026-après-midi) (#456), [historique](#lot-du-02-11-2026-soir) (#460), [historique](#lot-du-02-11-2026-nuit) (#465), [historique](#lot-du-03-11-2026) (#468) et [historique](#lot-du-03-11-2026-après-midi) (#471, « Durée des tests de #471 », avec les durées de chaque test) ; texte de cette question d'avant #471 : [archivé](#texte-de-la-passation-davant-471-archivé). **Tests du backend.** Constat : le budget de 30 s ne tient pas pour la série (étape `npm test` de 133 s après D1a-3, contre 114, 101 et 98 s sur `main` avant D1a-1) ; en CI, l'étape dure de 128 à 242 s selon le passage (176,5 s sur `6a10702` pour D1a-5d-3, 241,8 s sur `main` `9ee8c13`, sans le fichier de 5d-3), et la variation d'un passage à l'autre (62 s entre deux passages de la même suite sur `main`, 57 s entre les deux têtes de 5d-2) dépasse l'allongement de chaque fichier (7,3 s pour 5d-3). L'étape reste sous 5 minutes, et **la marge à retenir est de 58 s** (300 − 242, sur le passage le plus long relevé depuis 5d-2, celui de `main` `9ee8c13`, `main` compris ; elle serait de 124 s sur la seule tête de 5d-3 ; 80 s après 5d-2, 79 s après 5d-1) ; D1a-6 n'ajoute aucun test backend (N3 de #463) : cette marge reste entière ; elle et le budget de 5 minutes sont des choix par défaut, à confirmer. En local, les fichiers de 5b à 5d-3 allongent chacun `npm test` de 8 à 27 s (5b : de 20 à 27 s, au-dessus de l'estimation de l'avenant, de 5 à 15 s par sous-PR ; 5c : de 8 à 14 s ; 5d-1 : de 11 à 18 s ; 5d-2 : de 13 à 20 s ; 5d-3 : de 8,9 à 12,4 s, lanceur : 8,4 à 11,9 s, dans l'estimation du cadrage, environ 14 s ; mesures locales des fichiers précédents dans l'historique). D1a-4 est réduit par des sondes (environ 45 s en local, contre environ 125 s sans elles) ; un cas par compte et par route (T2 de l'audit des droits de #435) coûterait environ +40 à 50 s, non versé. La réduction R1 de l'avenant (environ 9 s) reste possible, non appliquée. **Parcours dans le navigateur (D1a-6, #471).** En CI, les 13 tests de la matrice des écrans durent 129,2 s (`bc6e9dd`, job 125879161434 ; de 104,2 à 118,8 s en local), sous les 180 s du budget ; l'étape « Frontend — parcours utilisateur » dure 1 572 s (26,2 minutes, 284 tests), contre 1 411 s (23,5 minutes, 271 tests) sur `main` `aa5cd3c` et 1 418 s sur `a64bbd5` : +155 à +161 s, dont 129 s pour la matrice ; elle dépasse désormais l'intervalle de 1 056 à 1 443 s des onze derniers passages de `main` relevé par l'étude du cadrage de D1a-6 ; les 14 specs placées après la matrice prennent 15,4 s de plus. **L'attente de la CI s'allonge donc d'environ 2,7 minutes**, dans le budget de 3 minutes ajoutées aux parcours de D1a-6 ; ce que la passation écrivait avant D1a-6, que l'attente de la CI ne s'allongeait pas, ne vaut plus. Suite retenue, choix par défaut, à confirmer par Nelson : garder les matrices entières et réviser le budget. Question : les tests des droits du backend (D1a-1 à D1a-5, D1a-5 en six fichiers) allongent les tests du backend en CI, sans allonger l'attente de la CI, et la matrice des écrans (D1a-6) ajoute environ 2,7 minutes à l'attente de la CI ; est-ce acceptable, ou faut-il réduire les cas ? Si Nelson s'en tient aux 30 s : réduire les cas, en gardant au moins un cas par compte et par route, ou placer les matrices dans un travail de CI à part, ce qui oblige à retoucher les consignes des sous-agents (« cinq contrôles verts »). Aucune réponse n'est consignée.
+
+- Section 3, « Fiche d'une affaire annulée » :
+
+> - **Fiche d'une affaire annulée** (montants affichés, aucune règle consignée ; issue #483, note N4 du contrôle avant la fusion de #478 ; aucune réponse n'est consignée) : sur la fiche d'une affaire **annulée** (étape `chantier-annule-admin` de `comparer:rendu`, budget vendu 1 155 €, rien de facturé ni de dépensé), on lit « Reste à facturer : 1 155 € », « Marge Commerciale 1 155 € » avec « 100.0% du budget vendu », et l'alerte « Dans le budget ». Le serveur refuse pourtant toute facture d'une affaire annulée (`server/src/domaines/factures/routes.ts:210` : « Une affaire annulée ne peut pas être facturée. » ; `server/src/domaines/factures/metier.ts:67-68`), et le reste à facturer est calculé sans regarder le statut (`server/src/domaines/chantiers/routes.ts:177`, `budgetGlobalVendu − totalFactureHt`). La fiche indique donc une étape, facturer le reste, que le serveur ferme. Le défaut est antérieur à #478, qu'un déplacement ne corrige pas.
+>   - Question : que doit afficher la fiche d'une affaire annulée ?
+>     1. **Masquer** le reste à facturer, la marge et l'alerte de budget, en les remplaçant par « Affaire annulée ».
+>     2. Afficher le reste à facturer **à 0 €**, et la marge sur le seul réel : dépenses engagées, factures et avoirs éventuels.
+>     3. **Laisser** l'affichage tel quel.
+>   - D'ici la réponse, rien ne change (l'affichage actuel est celui de l'option 3). À vérifier lors du correctif : la liste des chantiers et le tableau de bord, qui reprennent peut-être le reste à facturer ou la marge, et le cas d'une affaire annulée après une facture et son avoir.
+
+- Section 1, « Défauts connus », notes du lot du 03-11-2026 (soir), #483 :
+
+> #483, question pour Nelson (section 3, « Fiche d'une affaire annulée »).
+
+- Section 2, « Ordre de travail », PR C et lot suivant :
+
+> et l'ordre de travail ne place aucun lot après elle : le lot suivant attend l'arbitrage de Nelson (section 3, bloc des lots prévus par les décisions du 24-10-2026, « leur place par rapport au premier jour du pilote »).
+
+- Section 4, bloc de D1a-1, puce de documentation :
+
+> - documentation : les retouches de `MODELE-DROITS-CIBLE.md` et de `MODELE-DROITS-COMPTES.md` sur les écarts relevés (liste dans l'historique) sont faites à la fin de D1a, et non après chaque PR : **faites** par la PR documentaire de fin de D1a, sauf D2 et le prix d'achat d'une fiche, qui attendent Nelson (historique, « Écarts de documentation de D1a, faits en fin de lot ») ;
+
+- Section 4, bloc de D1a-1, puce du placement :
+
+> - placement de D1a et de la PR C après D1a-6 (section 2, « Ordre de travail ») : choix par défaut de Claude Code, à confirmer par Nelson (aucune confirmation n'est consignée) ; la PR C est faite (#478) ; budget de durée (section 3, « Durée des tests de la matrice des droits »).
+
+- Section 4, bloc de la matrice des clés, puce du prix d'achat :
+
+> - écriture du prix d'achat d'une fiche du catalogue par `catalogue:write` : classée écart de documentation, et non écart plus ouvert ; elle touche un montant et reste une **question à Nelson** (section 3, « Catalogue dans les devis »). [`MODELE-DROITS-CIBLE.md`](MODELE-DROITS-CIBLE.md) (section 8.2) et [`MODELE-DROITS-COMPTES.md`](MODELE-DROITS-COMPTES.md) (« Catalogue dans les devis ») disent qu'une clé ne fait que lire ce prix, alors que la fiche relève de `catalogue.gerer`, que porte `catalogue:write` (CIBLE, sections 3.1 et 4.2) ; `api.test.mjs` vérifie cette écriture depuis #161 ; D1a-5d-3 l'a jouée en écriture réelle ;
+
+- Section 4, bloc de la matrice des données visibles, puce de D2 :
+
+> - classement de D1 (case du commercial de CIBLE §4.1) et de D2 en écarts de documentation ; D2 touche un montant et est posée en question à Nelson (section 3, « Matériel SAV lu par le responsable ») ; l'un et l'autre figurent dans la liste de documentation de fin de D1a (historique) ;
+
+- Section 4, D1a-5, puce du découpage en six sous-PR :
+
+> - D1a-5 découpé en six sous-PR en série (5a, 5b, 5c, 5d-1, 5d-2 et 5d-3), chacune avec son fichier, sa référence, sa base jetable et ses audits : D1a compte onze PR. L'avenant v2 au cadrage, publié sur #427, n'en prévoyait que quatre pour D1a-5 (5a à 5d) et neuf pour D1a ; le découpage de 5d en trois sous-PR vient du cadrage de D1a-5d, version 3 (commentaire 6582361371 de #427), choix par défaut, à confirmer par Nelson ;
+
+- Section 4, D1a-5d, puce du découpage de 5d :
+
+> - découpage de 5d en trois sous-PR en série, 5d-1, 5d-2 et 5d-3 (D1a-5 en six sous-PR, D1a en onze PR) : choix par défaut du cadrage de D1a-5d, version 3 (commentaire 6582361371 de #427), **à confirmer par Nelson** ; il modifie l'avenant v2 sur trois points : ce découpage ; les comptes refusés rejoués avec un corps valide sur les routes des factures, des avoirs et des règlements (choix le plus restrictif, **appliqué** par #460) ; les annotations du test de couverture des 8 groupes de `MONTANTS_MASQUES_ECRITURES` (liste fermée, **appliquée par #465** ; les annotations de G7 et G8, **retirées par #468**) ;
+
+- Section 4, puces « budget de durée » des blocs de D1a (dix occurrences ; quatre phrases remplacées, citées une à une) :
+
+> budget de durée (section 3, « Durée des tests de la matrice des droits »)
+>
+> ramenée à 58 s après 5d-3 (choix par défaut, à confirmer).
+>
+> la marge de 58 s sous 5 minutes après 5d-3, choix par défaut, à confirmer.
+>
+> pour l'étape des parcours dans le navigateur ; la question reste ouverte.
 
 ## En-tête de la passation au 30-10-2026
 
