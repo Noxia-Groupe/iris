@@ -3,6 +3,7 @@ import { BookOpen, Plus, FolderTree, Power } from 'lucide-react';
 import { apiFetch } from '../api';
 import CatalogueMainOeuvre from '../components/CatalogueMainOeuvre';
 import type { MainOeuvre } from '../lib/mainOeuvre';
+import { fmtMontantDocument } from '../lib/formats';
 
 /**
  * Catalogue natif Iris : prestations, articles et équipements.
@@ -235,8 +236,8 @@ const Catalogue = () => {
                     {!f.actif && <span className="ml-2 text-[10px] uppercase bg-gray-100 rounded px-1.5 py-0.5">Désactivée</span>}
                   </td>
                   <td className="px-4 py-3">{f.categorie?.nom || '—'}</td>
-                  <td className="px-4 py-3 text-right">{Number(f.prixVenteHt).toFixed(2)} €</td>
-                  <td className="px-4 py-3 text-right">{f.prixAchatHt == null ? '—' : `${Number(f.prixAchatHt).toFixed(2)} €`}</td>
+                  <td className="px-4 py-3 text-right">{fmtMontantDocument(Number(f.prixVenteHt))}</td>
+                  <td className="px-4 py-3 text-right">{f.prixAchatHt == null ? '—' : fmtMontantDocument(Number(f.prixAchatHt))}</td>
                   <td className="px-4 py-3 text-right">{Number(f.tauxTva).toFixed(2)} %</td>
                   <td className="px-4 py-3 text-right">
                     <button onClick={() => void basculerActif(f)} className="inline-flex items-center gap-1 text-xs text-blue-700">

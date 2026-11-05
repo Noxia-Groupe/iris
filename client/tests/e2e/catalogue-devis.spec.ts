@@ -58,7 +58,8 @@ test('un commercial compose son devis depuis le catalogue : ligne copiée, sans 
   await expect(page.getByRole('textbox', { name: 'Prix d’achat prévu' })).toHaveCount(0);
   await page.getByRole('spinbutton', { name: 'Qté' }).fill('25');
   await page.getByRole('button', { name: 'Créer le brouillon' }).click();
-  await expect(page.getByRole('listitem').filter({ hasText: objet })).toContainText('HT 62.50 €');
+  // #499 : forme des documents, le texte du PDF (virgule, espace ordinaire U+0020 avant « € »), et non plus le point décimal.
+  await expect(page.getByRole('listitem').filter({ hasText: objet })).toContainText(/HT 62,50\u0020€/);
 
   // Côté serveur : référence recopiée de la fiche, prix d'achat de la fiche repris (vu par l'admin).
   const devis = await devisParObjet(request, session.token, objet);
@@ -87,7 +88,8 @@ test('l’administrateur voit le prix d’achat prévu, et la copie reste figée
   await page.getByRole('spinbutton', { name: 'PU HT' }).last().fill('50');
   await page.getByRole('button', { name: 'Créer le brouillon' }).click();
   const ligneDevis = page.getByRole('listitem').filter({ hasText: objet });
-  await expect(ligneDevis).toContainText('HT 230.00 €');
+  // #499 : forme des documents (virgule, espace ordinaire U+0020 avant « € »).
+  await expect(ligneDevis).toContainText(/HT 230,00\u0020€/);
 
   // La fiche change de référence, de prix et de prix d'achat, puis elle est désactivée.
   await envoyer(request, session.token, 'put', `/catalogue/equipements/${fiche.id}`, { reference: `E2E-CAM2-${suffixe}`, nom: 'Caméra renommée', prixVenteHt: '260', tauxTva: '20', prixAchatHt: '150' });
@@ -103,7 +105,7 @@ test('l’administrateur voit le prix d’achat prévu, et la copie reste figée
   // La fiche désactivée n'empêche pas d'enregistrer le brouillon : la ligne garde sa copie.
   await page.getByRole('spinbutton', { name: 'Qté' }).first().fill('2');
   await page.getByRole('button', { name: 'Enregistrer le brouillon' }).click();
-  await expect(ligneDevis).toContainText('HT 410.00 €');
+  await expect(ligneDevis).toContainText(/HT 410,00\u0020€/);
   const devis = await devisParObjet(request, session.token, objet);
   expect(devis.lignes.map((l) => [l.designation, l.reference, l.catalogueId, l.quantite, l.prixUnitaireHt, l.prixAchatUnitaireHt]))
     .toEqual([[fiche.nom, fiche.reference, fiche.id, 2, 180, 115.5], ['Déplacement', null, null, 1, 50, null]]);
@@ -111,4 +113,65 @@ test('l’administrateur voit le prix d’achat prévu, et la copie reste figée
   // La fiche désactivée n'est plus proposée.
   await page.getByRole('searchbox', { name: 'Rechercher dans le catalogue' }).fill(suffixe);
   await expect(page.getByRole('status').filter({ hasText: 'Aucune fiche active trouvée.' })).toBeVisible();
+});
+
+// Correctif #499 (cadrage version 2, « Tests ») : le prix d'une fiche dans la recherche du devis et les totaux de
+// l'historique passent à la forme des documents (fmtMontantDocument), le texte du PDF du même devis ; la liste du
+// catalogue aussi, comme son onglet de la main d'œuvre (formatEuros). Choix par défaut, à confirmer (règle 5). Chaque
+// expression nomme le caractère réel : U+202F entre les milliers, U+0020 avant « € » (et non l'U+00A0 du centime en
+// devise) ; avec une chaîne, Playwright ramènerait toute espace à l'espace ordinaire.
+const echapper = (texte: string) => texte.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+test('#499 : la recherche du catalogue et l’historique du devis écrivent les montants au-delà de 1 000 € au texte du PDF', async ({ page, request, session, creerClient, allerSurPageAdmin }) => {
+  const suffixe = `${Date.now()}`;
+  const client = await creerClient('Montants devis milliers');
+  const fiche = await envoyer(request, session.token, 'post', '/catalogue/articles', { reference: `E2E-MIL-${suffixe}`, nom: `Centrale E2E ${suffixe}`, unite: 'u', prixVenteHt: '1234.50', tauxTva: '20' }) as { id: string; reference: string; nom: string };
+  await allerSurPageAdmin('/devis');
+  await choisirClient(page, client);
+  const objet = `Devis milliers E2E ${suffixe}`;
+  await page.getByRole('textbox', { name: 'Objet' }).fill(objet);
+  await page.getByRole('searchbox', { name: 'Rechercher dans le catalogue' }).fill(suffixe);
+  const proposee = page.getByRole('list', { name: 'Fiches du catalogue' }).getByRole('listitem').filter({ hasText: fiche.nom });
+  // 1 234,50 € HT : écarte le point décimal d'avant #499 (« 1234.50 € HT »), l'espace insécable U+00A0 du centime en
+  // devise, un séparateur des milliers absent ou ordinaire, et l'euro près (« 1 235 € »).
+  await expect(proposee.getByText(/^· Article/)).toHaveText(new RegExp(`^· Article · Réf\\. ${echapper(fiche.reference)} · 1\u202F234,50\u0020€ HT / u$`));
+  await proposee.getByRole('button', { name: `Ajouter ${fiche.nom}` }).click();
+  await page.getByRole('spinbutton', { name: 'Qté' }).fill('5');
+  await page.getByRole('button', { name: 'Créer le brouillon' }).click();
+
+  // 5 × 1 234,50 € = 6 172,50 € HT ; TVA à 20 % : 1 234,50 € ; TTC : 7 407,00 €. Trois montants au-delà de 1 000 €, dont
+  // un TTC aux centimes nuls, que le point décimal écrivait « 7407.00 » et l'euro près « 7 407 € ». L'historique tient en
+  // un seul paragraphe, ancré de la raison sociale aux heures prévues.
+  const ligne = page.getByRole('listitem').filter({ hasText: objet });
+  await expect(ligne.getByText(client.raisonSociale)).toHaveText(new RegExp(`^${echapper(client.raisonSociale)} · HT 6\u202F172,50\u0020€ · TVA 1\u202F234,50\u0020€ · TTC 7\u202F407,00\u0020€ · Heures prévues : 0 h$`));
+  const devis = await devisParObjet(request, session.token, objet) as unknown as { totalHt: number; totalTva: number; totalTtc: number; lignes: Record<string, unknown>[] };
+  expect([devis.totalHt, devis.totalTva, devis.totalTtc]).toEqual([6172.5, 1234.5, 7407]);
+  expect(devis.lignes.map((l) => [l.reference, l.quantite, l.prixUnitaireHt])).toEqual([[fiche.reference, 5, 1234.5]]);
+});
+
+test('#499 : la liste du catalogue écrit le prix de vente et le prix d’achat au texte des documents, et « — » sans prix d’achat', async ({ request, session, allerSurPageAdmin }) => {
+  const suffixe = `${Date.now()}`;
+  const avecAchat = await envoyer(request, session.token, 'post', '/catalogue/articles', { reference: `E2E-PRIX-A-${suffixe}`, nom: `Détecteur E2E ${suffixe}`, unite: 'u', prixVenteHt: '1234.50', tauxTva: '20', prixAchatHt: '1087.25' }) as { id: string; reference: string };
+  const sansAchat = await envoyer(request, session.token, 'post', '/catalogue/articles', { reference: `E2E-PRIX-B-${suffixe}`, nom: `Sirène E2E ${suffixe}`, unite: 'u', prixVenteHt: '3050', tauxTva: '20' }) as { id: string; reference: string };
+  // Achat gratuit : un prix d'achat de 0, distinct d'un prix absent (catalogue/metier.ts, cataloguePrixAchat).
+  const achatNul = await envoyer(request, session.token, 'post', '/catalogue/articles', { reference: `E2E-PRIX-C-${suffixe}`, nom: `Badge E2E ${suffixe}`, unite: 'u', prixVenteHt: '1250', tauxTva: '20', prixAchatHt: '0' }) as { id: string; reference: string };
+  const fiches = await (await request.get(`${api}/catalogue/articles`, { headers: { Authorization: `Bearer ${session.token}` } })).json() as { id: string; prixVenteHt: number; prixAchatHt: number | null }[];
+  expect([avecAchat.id, sansAchat.id, achatNul.id].map((id) => fiches.filter((f) => f.id === id).map((f) => [f.prixVenteHt, f.prixAchatHt]))).toEqual([[[1234.5, 1087.25]], [[3050, null]], [[1250, 0]]]);
+
+  const page = await allerSurPageAdmin('/catalogue');
+  await page.getByRole('button', { name: 'Articles', exact: true }).click();
+  const tableau = page.getByRole('table');
+  await expect(tableau.getByRole('columnheader')).toHaveText(['Référence', 'Désignation', 'Catégorie', 'Prix HT', 'Prix d\'achat HT', 'TVA', 'Actions']);
+  const cellules = (reference: string) => tableau.getByRole('row').filter({ hasText: reference }).getByRole('cell');
+  // 1 234,50 € et 1 087,25 € : deux prix distincts, au-delà de 1 000 €. Écartent un échange des deux colonnes, le point
+  // décimal d'avant #499 (« 1234.50 € »), l'U+00A0 du centime en devise et l'euro près (« 1 235 € », « 1 087 € »).
+  await expect(cellules(avecAchat.reference).nth(3)).toHaveText(/^1\u202F234,50\u0020€$/);
+  await expect(cellules(avecAchat.reference).nth(4)).toHaveText(/^1\u202F087,25\u0020€$/);
+  // Sans prix d'achat : « — », et non « 0,00 € » ; le prix de vente aux centimes nuls garde ses deux décimales.
+  await expect(cellules(sansAchat.reference).nth(3)).toHaveText(/^3\u202F050,00\u0020€$/);
+  await expect(cellules(sansAchat.reference).nth(4)).toHaveText(/^—$/);
+  // Prix d'achat de 0 : « 0,00 € », et non « — » (écarte un test de vérité, `!f.prixAchatHt`, qui confondrait l'achat
+  // gratuit avec le prix absent).
+  await expect(cellules(achatNul.reference).nth(3)).toHaveText(/^1\u202F250,00\u0020€$/);
+  await expect(cellules(achatNul.reference).nth(4)).toHaveText(/^0,00\u0020€$/);
 });

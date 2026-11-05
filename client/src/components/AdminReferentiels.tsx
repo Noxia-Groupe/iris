@@ -1,5 +1,6 @@
 import { ROLE_TECHNICIEN } from '../roles';
 import { libelleMainOeuvre, mainsOeuvreProposees, type MainOeuvreResumee } from '../lib/mainOeuvre';
+import { fmtEuroCentime } from '../lib/formats';
 
 export function AdminReferentiels({ activeTab, isAdmin, users, intervenants, fournisseurs, categories, editRow, setEditRow, handleSubmit, editField, saveEdit, relierCompte, mainsOeuvre, rattacherMainOeuvre, deleteEntity }: {
   activeTab: string;
@@ -97,7 +98,7 @@ export function AdminReferentiels({ activeTab, isAdmin, users, intervenants, fou
                       <td style={{padding: '8px'}}>
                         {isEditing
                           ? <input type="number" step="0.1" className="form-input" value={editRow.tauxHoraireCharge} onChange={e => editField('tauxHoraireCharge', e.target.value)} />
-                          : `${i.tauxHoraireCharge} €`}
+                          : fmtEuroCentime(Number(i.tauxHoraireCharge))}
                       </td>
                       <td style={{padding: '8px', textAlign: 'right', whiteSpace: 'nowrap'}}>
                         {isEditing ? (

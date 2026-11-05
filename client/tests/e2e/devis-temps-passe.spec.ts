@@ -212,7 +212,8 @@ test('un devis au temps passé se compose à l’écran : main d’œuvre et tar
     await page.getByRole('button', { name: 'Créer le brouillon' }).click();
     const item = page.getByRole('listitem').filter({ hasText: objet });
     await expect(item).toContainText('Au temps passé');
-    await expect(item).toContainText('HT 110.00 € · TVA 22.00 € · TTC 132.00 €');
+    // #499 : forme des documents, le texte du PDF (virgule, espace ordinaire U+0020 avant « € »), et non plus le point décimal.
+    await expect(item).toContainText(/HT 110,00\u0020€ · TVA 22,00\u0020€ · TTC 132,00\u0020€/);
     await expect(item.getByTestId('mention-temps-passe')).toHaveText(`${regle('40,00 €', 'sous contrat', '1 h', 30)} Ce devis prévoit 2 h : son total est une estimation, la facture reprenant le temps réellement passé, avec au moins le minimum.`);
     const [enregistre] = await devisDuClient(request, session.token, client.id) as unknown as { id: string; auTempsPasse: boolean; pasTempsPasseMinutes: number; tempsMinimumMinutes: number; lignes: { tempsPasse: boolean; tarifTempsPasse: string; prixUnitaireHt: number; quantite: number }[] }[];
     expect([enregistre.auTempsPasse, enregistre.pasTempsPasseMinutes, enregistre.tempsMinimumMinutes]).toEqual([true, 30, 60]);
@@ -247,7 +248,7 @@ test('un devis au temps passé se compose à l’écran : main d’œuvre et tar
     // 2 h 30 : au pas du devis (une heure, puis 30 minutes), non à celui du jour (deux heures, puis une heure).
     await heuresFigees.fill('2.5');
     await page.getByRole('button', { name: 'Enregistrer le brouillon' }).click();
-    await expect(item).toContainText('HT 130.00 € · TVA 26.00 € · TTC 156.00 €');
+    await expect(item).toContainText(/HT 130,00\u0020€ · TVA 26,00\u0020€ · TTC 156,00\u0020€/);
     await expect(item.getByTestId('mention-temps-passe')).toHaveText(`${regle('40,00 €', 'sous contrat', '1 h', 30)} Ce devis prévoit 2 h 30 min : son total est une estimation, la facture reprenant le temps réellement passé, avec au moins le minimum.`);
 
     // Signé, il se convertit en intervention depuis l'écran : l'intervention porte le marqueur.
@@ -364,7 +365,8 @@ test('nouveau devis : le champ des heures admet un temps minimum réglé sous un
     expect(await heures.evaluate((element) => (element as HTMLInputElement).validity.valid), 'le navigateur admet 0,5 h').toBe(true);
     await page.getByRole('button', { name: 'Créer le brouillon' }).click();
     const item = page.getByRole('listitem').filter({ hasText: objet });
-    await expect(item).toContainText('HT 22.75 € · TVA 4.55 € · TTC 27.30 €');
+    // #499 : forme des documents, le texte du PDF (virgule, espace ordinaire U+0020 avant « € »).
+    await expect(item).toContainText(/HT 22,75\u0020€ · TVA 4,55\u0020€ · TTC 27,30\u0020€/);
     await expect(item.getByTestId('mention-temps-passe')).toHaveText(`${regle('45,50 €', 'hors contrat', '30 min', 15)} Le total de ce devis est un minimum.`);
   } finally {
     await reglerPas(request, session.token, pasAvant);

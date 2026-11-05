@@ -105,3 +105,27 @@ test('un conducteur suit son chantier sans taux ni coût de main-d’œuvre ; l�
     await vueConducteur.context().close();
   }
 });
+
+// Correctif #499 (cadrage version 2, « Tests ») : dans l'onglet Intervenants de l'administration, le coût horaire chargé
+// passe au centime en devise (fmtEuroCentime), la famille des coûts de main-d'œuvre que ce taux valorise
+// (Interventions.tsx) ; il n'est imprimé sur aucun document (choix par défaut, à confirmer). L'expression nomme U+202F
+// (milliers) et U+00A0 (espace insécable d'Intl avant « € ») : avec une chaîne, Playwright ramènerait toute espace à
+// l'espace ordinaire.
+test('#499 : Administration > Intervenants, le coût horaire chargé s’écrit au centime en devise, « 1 234,50 € »', async ({ allerSurPageAdmin, request, session }) => {
+  const headers = { Authorization: `Bearer ${session.token}` };
+  const nom = `Coût horaire E2E ${Date.now()}`;
+  const creation = await request.post(`${api}/intervenants`, { headers, data: { nom, role: 'Technicien', tauxHoraireCharge: 1234.5 } });
+  expect(creation.ok(), await creation.text()).toBeTruthy();
+  const { id } = await creation.json() as { id: string };
+  const intervenants = await (await request.get(`${api}/intervenants`, { headers })).json() as { id: string; tauxHoraireCharge: number }[];
+  expect(intervenants.filter((i) => i.id === id).map((i) => i.tauxHoraireCharge)).toEqual([1234.5]);
+
+  const admin = await allerSurPageAdmin('/admin');
+  await admin.getByRole('button', { name: 'Intervenants', exact: true }).click();
+  const ligne = admin.getByRole('row').filter({ hasText: nom });
+  const tableau = admin.getByRole('table').filter({ has: ligne });
+  await expect(tableau.getByRole('columnheader').nth(4)).toHaveText('Coût Horaire (€/h)');
+  // 1 234,50 € : écarte la valeur brute d'avant #499 (« 1234.5 € »), la forme des documents (U+0020 avant « € »), un
+  // séparateur des milliers absent ou ordinaire, et l'euro près (« 1 235 € »).
+  await expect(ligne.getByRole('cell').nth(4)).toHaveText(/^1\u202F234,50\u00A0€$/);
+});

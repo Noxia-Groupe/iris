@@ -261,13 +261,13 @@ export default function Reglements() {
                 </table>
               </div>
               <p role="status" aria-label="Affectation du règlement" className={`text-sm ${resteAAffecter === 0 && !partInvalide ? 'text-gray-600' : 'text-amber-700'}`}>
-                Affecté : {saisieDeCentimes(affecte)} € sur {saisieDeCentimes(montantCentimes ?? 0)} €
-                {resteAAffecter > 0 && ` — reste à affecter : ${saisieDeCentimes(resteAAffecter)} €`}
-                {resteAAffecter < 0 && ` — affecté en trop : ${saisieDeCentimes(-resteAAffecter)} €`}
+                Affecté : {fmtEuroCentime(affecte / 100)} sur {fmtEuroCentime((montantCentimes ?? 0) / 100)}
+                {resteAAffecter > 0 && ` — reste à affecter : ${fmtEuroCentime(resteAAffecter / 100)}`}
+                {resteAAffecter < 0 && ` — affecté en trop : ${fmtEuroCentime(-resteAAffecter / 100)}`}
                 {partInvalide && ` — montant invalide pour la facture ${partInvalide.facture.numero}`}
               </p>
               {tropPercus.map((part) => (
-                <p key={part.facture.id} className="text-sm text-amber-700">Trop-perçu de {saisieDeCentimes((part.centimes ?? 0) - centimesDe(part.facture.resteDu))} € sur la facture {part.facture.numero} : elle sera réglée, avec un reste dû négatif.</p>
+                <p key={part.facture.id} className="text-sm text-amber-700">Trop-perçu de {fmtEuroCentime(((part.centimes ?? 0) - centimesDe(part.facture.resteDu)) / 100)} sur la facture {part.facture.numero} : elle sera réglée, avec un reste dû négatif.</p>
               ))}
             </section>
           )}

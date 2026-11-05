@@ -41,7 +41,8 @@ test('écran du devis : le total des heures prévues, durée indicative × quant
 
   // 2 × 1 h 30 de mise en service, plus 1,5 h saisie à la main.
   const ligne = page.getByRole('listitem').filter({ hasText: objet });
-  await expect(ligne).toContainText('HT 575.00 €');
+  // #499 : forme des documents, le texte du PDF (virgule, espace ordinaire U+0020 avant « € »), et non plus le point décimal.
+  await expect(ligne).toContainText(/HT 575,00\u0020€/);
   await expect(ligne.getByTestId('heures-prevues-devis')).toHaveText('Heures prévues : 4,5 h');
 
   const liste = await (await request.get(`${api}/devis`, { headers: { Authorization: `Bearer ${session.token}` } })).json() as { id: string; objet: string; heuresPrevues: number }[];

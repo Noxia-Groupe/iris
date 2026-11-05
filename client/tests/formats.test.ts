@@ -361,14 +361,42 @@ const expressionSeule = (noeud: ts.Node | undefined): ts.Node | null => {
   return seule && !autres.length && ts.isReturnStatement(seule) ? seule.expression ?? null : null;
 };
 const estJsx = (noeud: ts.Node): boolean => (ts.isParenthesizedExpression(noeud) ? estJsx(noeud.expression) : ts.isJsxElement(noeud) || ts.isJsxFragment(noeud) || ts.isJsxSelfClosingElement(noeud));
-const enveloppesDeFamille = (fichierArbre: ts.SourceFile) => fichierArbre.statements.flatMap((instruction) => {
-  if (!ts.canHaveModifiers(instruction) || !(ts.getModifiers(instruction) ?? []).some((m) => m.kind === ts.SyntaxKind.ExportKeyword)) return [];
-  const exports: [string, ts.Node | null][] = ts.isVariableStatement(instruction)
-    ? instruction.declarationList.declarations.flatMap((d) => (ts.isIdentifier(d.name) ? [[d.name.text, expressionSeule(d.initializer)] as [string, ts.Node | null]] : []))
-    : ts.isFunctionDeclaration(instruction) && instruction.name ? [[instruction.name.text, expressionSeule(instruction)]] : [];
-  return exports.filter(([, expression]) => expression && !estJsx(expression) && famillesDe(expression).length).map(([nom]) => nom);
-});
-// Famille du texte d'avant #205, fichier par fichier (test « chaque famille garde son texte »).
+const deFamille = (expression: ts.Node | null | undefined) => !!expression && !estJsx(expression) && famillesDe(expression).length > 0;
+const enveloppesDeFamille = (fichierArbre: ts.SourceFile) => {
+  // Déclarations du fichier, pour un « export { x } » d'une constante ou d'une fonction locale (vérification N9 de l'audit).
+  const locales = new Map<string, ts.Node | null>();
+  for (const instruction of fichierArbre.statements) {
+    if (ts.isVariableStatement(instruction)) for (const d of instruction.declarationList.declarations) if (ts.isIdentifier(d.name)) locales.set(d.name.text, expressionSeule(d.initializer));
+    if (ts.isFunctionDeclaration(instruction) && instruction.name) locales.set(instruction.name.text, expressionSeule(instruction));
+  }
+  return fichierArbre.statements.flatMap((instruction) => {
+    // Réexport : « export { fmtMontantDocument as x } from './formats' », ou « export { x } » d'une enveloppe locale.
+    if (ts.isExportDeclaration(instruction) && instruction.exportClause && ts.isNamedExports(instruction.exportClause)) {
+      return instruction.exportClause.elements
+        .filter((element) => { const local = (element.propertyName ?? element.name).text; return local in FAMILLES_MONTANT || (!instruction.moduleSpecifier && deFamille(locales.get(local))); })
+        .map((element) => element.name.text);
+    }
+    // Export par défaut (N3 du contrôle de cohérence de #500, versée à #499) : « export default fmtMontantDocument; », d'une
+    // enveloppe locale (« export default montantPiece; ») ou d'une expression (« export default (m) => fmtEuro(m); »).
+    // Son nom à l'import est libre, et aucun identifiant ne le relie à sa famille : il est rendu sous le nom « default »,
+    // que FAMILLES_MONTANT ne compte pas.
+    if (ts.isExportAssignment(instruction)) {
+      const expression = instruction.expression;
+      const locale = ts.isIdentifier(expression) ? locales.get(expression.text) : undefined;
+      return !instruction.isExportEquals && (deFamille(expressionSeule(expression)) || deFamille(locale)) ? ['default'] : [];
+    }
+    const modificateurs = ts.canHaveModifiers(instruction) ? ts.getModifiers(instruction) ?? [] : [];
+    if (!modificateurs.some((m) => m.kind === ts.SyntaxKind.ExportKeyword)) return [];
+    // « export default function », nommée ou non : rendue elle aussi sous le nom « default ».
+    const parDefaut = modificateurs.some((m) => m.kind === ts.SyntaxKind.DefaultKeyword);
+    const exports: [string, ts.Node | null][] = ts.isVariableStatement(instruction)
+      ? instruction.declarationList.declarations.flatMap((d) => (ts.isIdentifier(d.name) ? [[d.name.text, expressionSeule(d.initializer)] as [string, ts.Node | null]] : []))
+      : ts.isFunctionDeclaration(instruction) && (parDefaut || instruction.name) ? [[parDefaut ? 'default' : instruction.name!.text, expressionSeule(instruction)]] : [];
+    return exports.filter(([, expression]) => deFamille(expression)).map(([nom]) => nom);
+  });
+};
+// Famille du texte d'avant #205, fichier par fichier (test « chaque famille garde son texte ») ; pour les écrans passés au
+// module par #499, la famille choisie par ce correctif.
 const FAMILLE_PAR_FICHIER: [string, string][] = [
   // Inventaire du cadrage.
   ['pages/ListeChantiers.tsx', 'euro près'],
@@ -392,9 +420,21 @@ const FAMILLE_PAR_FICHIER: [string, string][] = [
   ['components/CatalogueMainOeuvre.tsx', 'forme des documents'],
   ['components/DevisTempsPasse.tsx', 'forme des documents'],
   ['components/DevisForfaitMainOeuvre.tsx', 'forme des documents'],
+  // #499 (cadrage du correctif, version 2) : écrans du pilote qui n'employaient aucune famille avant #205, et dont le texte
+  // change (point décimal, coût horaire brut, résumé des règlements sans séparateur des milliers). Famille choisie par
+  // #499, choix par défaut, à confirmer (règle 5) :
+  //  - devis (prix d'une fiche du catalogue, HT, TVA et TTC de l'historique, acompte constaté) : le texte du PDF du même
+  //    devis (devis/document.ts, formatMontantFacture) ;
+  //  - catalogue (prix de vente, prix d'achat) : le texte de l'onglet de la main d'œuvre du même écran (formatEuros) ;
+  //  - administration, Intervenants (coût horaire chargé) : la famille des coûts de main-d'œuvre que ce taux valorise
+  //    (Interventions.tsx) ; il n'est imprimé sur aucun document.
+  // Reglements.tsx, plus haut, reste au centime en devise : #499 y passe les quatre phrases du résumé de la saisie.
+  ['pages/Devis.tsx', 'forme des documents'],
+  ['pages/Catalogue.tsx', 'forme des documents'],
+  ['components/AdminReferentiels.tsx', 'centime en devise'],
 ];
 
-test('famille de montant de chaque fichier : celle de son texte d’avant #205, et elle seule ; tout fichier qui met en forme un montant est lié à la sienne', () => {
+test('famille de montant de chaque fichier : celle de son texte d’avant #205 (ou choisie par #499), et elle seule ; tout fichier qui met en forme un montant est lié à la sienne', () => {
   // Témoins du relevé : un nom se reconnaît seul (fmtEuro n'est pas lu dans fmtEuroCentime), un alias compte pour sa
   // famille, un commentaire, une chaîne ou un texte JSX ne comptent pas.
   assert.deepEqual(famillesEmployees('{fmtEuroCentime(facture.totalTtc)}'), ['centime en devise']);
@@ -417,6 +457,29 @@ test('famille de montant de chaque fichier : celle de son texte d’avant #205, 
     'export const phrase = (m: number) => { const t = fmtEuro(m); return `Total ${t}`; };',
     'export const sansFamille = (m: number) => m;',
   ].join('\n'))), ['a', 'b', 'c']);
+  // Réexports : sous un autre nom depuis le module, ou d'une enveloppe locale ; le nom d'une famille reste une famille.
+  assert.deepEqual(enveloppesDeFamille(arbre([
+    "export { fmtMontantDocument as d } from './formats';",
+    "export { fmtEuro } from './formats';",
+    'const e = fmtEuroCentime;',
+    'const f = (m: number) => m;',
+    'export { e, f };',
+  ].join('\n'))), ['d', 'fmtEuro', 'e']);
+  // Exports par défaut (N3 du contrôle de cohérence de #500) : d'une famille, d'une enveloppe locale, d'une flèche, d'une
+  // fonction anonyme ou nommée, ou par « export { … as default } » ; tous rendus sous le nom « default ». Un composant
+  // exporté par défaut n'en est pas un (21 « export default Composant; » dans client/src).
+  for (const [texte, attendu] of [
+    ['export default fmtMontantDocument;', ['default']],
+    ['const montantPiece = fmtEuroCentime;\nexport default montantPiece;', ['default']],
+    ['export default (m: number) => fmtEuro(m);', ['default']],
+    ['export default function (m: number) {\n  return formatEuros(m);\n}', ['default']],
+    ['export default function montantPiece(m: number) {\n  return fmtEuro(m);\n}', ['default']],
+    ["export { fmtMontantDocument as default } from './formats';", ['default']],
+    ['function Composant() {\n  return (<span>{fmtEuro(1)}</span>);\n}\nexport default Composant;', []],
+    ['const Page = () => {\n  const total = fmtEuro(1);\n  return <p>{total}</p>;\n};\nexport default Page;', []],
+    ['export default function Page() {\n  return (<span>{fmtEuroCentime(1)}</span>);\n}', []],
+    ['const sansFamille = (m: number) => m;\nexport default sansFamille;', []],
+  ] as [string, string[]][]) assert.deepEqual(enveloppesDeFamille(arbre(texte)), attendu, texte);
   for (const [fichier, famille] of FAMILLE_PAR_FICHIER) {
     assert.deepEqual(famillesEmployees(source(fichier), fichier), [famille], `${fichier} : familles de montant employées`);
   }
@@ -430,8 +493,82 @@ test('famille de montant de chaque fichier : celle de son texte d’avant #205, 
     const fichierArbre = arbre(readFileSync(chemin, 'utf8'), chemin);
     if (famillesDe(fichierArbre).length) assert.ok(FAMILLE_PAR_FICHIER.some(([f]) => f === relatif), `${relatif} : met en forme un montant ; sa famille est à fixer dans FAMILLE_PAR_FICHIER`);
     for (const nom of enveloppesDeFamille(fichierArbre)) {
-      assert.ok(nom in FAMILLES_MONTANT, `${relatif} : ${nom} renvoie à une famille de montant ; à compter dans FAMILLES_MONTANT`);
+      // Un export par défaut d'une famille n'a pas de nom que le relevé puisse suivre chez ses importateurs (N3).
+      assert.ok(nom !== 'default', `${relatif} : un export par défaut renvoie à une famille de montant ; à exporter sous un nom compté dans FAMILLES_MONTANT`);
+      assert.ok(Object.hasOwn(FAMILLES_MONTANT, nom), `${relatif} : ${nom} renvoie à une famille de montant ; à compter dans FAMILLES_MONTANT`);
     }
+  }
+});
+
+// --- #499 : montants des écrans du pilote au format français (cadrage du correctif #499, version 2, « Tests ») ---
+// Garde sur les sources : un montant ne s'écrit plus à la main avant « € ». FAMILLE_PAR_FICHIER ne voit qu'une famille
+// employée, et non un montant écrit hors du module à côté d'elle : ces motifs, relevés sur 33013bf (base du correctif),
+// le voient. Le taux de TVA du catalogue (« 20.00 % », Catalogue.tsx) et le corps de la requête des règlements
+// (montant: (…).toFixed(2)) ne sont pas suivis de « € » : ils restent, hors périmètre.
+const ECRANS_499 = ['pages/Devis.tsx', 'pages/Catalogue.tsx', 'components/AdminReferentiels.tsx', 'pages/Reglements.tsx'];
+// toFixed(…), éventuellement suivi d'appels (.replace(…)), puis la fin de l'expression (« } » d'un JSX ou d'un gabarit,
+// ou une concaténation) et « € ».
+const TO_FIXED_EURO = /\.toFixed\([^()]*\)(?:\.\w+\((?:[^()]|\([^()]*\))*\))*\s*(?:\}|\+\s*['"`])\s*€/g;
+// Coût horaire chargé écrit tel que le serveur le rend, avant « € » : « ${i.tauxHoraireCharge} € » (« 45.5 € »).
+const TAUX_HORAIRE_EURO = /\{[^{}]*\btauxHoraireCharge\b[^{}]*\}\s*€/g;
+// saisieDeCentimes(…), texte d'un champ de saisie (« 1234,50 », sans séparateur des milliers), suivi de « € » ; son toFixed
+// est dans lib/reglements.ts, que TO_FIXED_EURO ne voit pas. Deux niveaux de parenthèses dans l'argument.
+const SAISIE_EURO = /\bsaisieDeCentimes\((?:[^()]|\((?:[^()]|\([^()]*\))*\))*\)\s*(?:\}|\+\s*['"`])\s*€/g;
+const occurrences = (texte: string, motif: RegExp) => texte.match(motif) ?? [];
+
+test('#499 : plus aucun montant au point décimal (toFixed suivi de « € ») sur les écrans du devis, du catalogue, des intervenants et des règlements', () => {
+  // Témoins, recopiés de 33013bf : prix d'une fiche du catalogue et totaux de l'historique (Devis.tsx:280 et :287), acompte
+  // constaté (:287), prix de vente et prix d'achat (Catalogue.tsx:238-239).
+  assert.equal(occurrences('· Réf. {fiche.reference} · {fiche.prixVenteHt.toFixed(2)} € HT{fiche.unite ? ` / ${fiche.unite}` : \'\'}', TO_FIXED_EURO).length, 1);
+  assert.equal(occurrences('{d.client.raisonSociale} · HT {d.totalHt.toFixed(2)} € · TVA {d.totalTva.toFixed(2)} € · TTC {d.totalTtc.toFixed(2)} € · <span>', TO_FIXED_EURO).length, 3);
+  assert.equal(occurrences('{d.acompteRecuLe ? `Acompte de ${(d.acompteMontant ?? 0).toFixed(2)} € constaté` : `Acompte de ${d.tauxAcompte ?? 0} % exigé`}', TO_FIXED_EURO).length, 1);
+  assert.equal(occurrences('<td className="px-4 py-3 text-right">{Number(f.prixVenteHt).toFixed(2)} €</td>', TO_FIXED_EURO).length, 1);
+  assert.equal(occurrences("<td>{f.prixAchatHt == null ? '—' : `${Number(f.prixAchatHt).toFixed(2)} €`}</td>", TO_FIXED_EURO).length, 1);
+  // Autres écritures du même défaut : concaténation, point remplacé par une virgule, sans espace.
+  assert.equal(occurrences("const t = prix.toFixed(2) + ' €';", TO_FIXED_EURO).length, 1);
+  assert.equal(occurrences("{prix.toFixed(2).replace('.', ',')} €", TO_FIXED_EURO).length, 1);
+  assert.equal(occurrences('{prix.toFixed(2)}€', TO_FIXED_EURO).length, 1);
+  // Ni un taux, ni le corps d'une requête, ni le module.
+  assert.deepEqual(occurrences('<td className="px-4 py-3 text-right">{Number(f.tauxTva).toFixed(2)} %</td>', TO_FIXED_EURO), []);
+  assert.deepEqual(occurrences("body: JSON.stringify({ montant: (montantCentimes / 100).toFixed(2), moyen })", TO_FIXED_EURO), []);
+  assert.deepEqual(occurrences('{fmtMontantDocument(fiche.prixVenteHt)} HT', TO_FIXED_EURO), []);
+  for (const fichier of ECRANS_499) {
+    const restants = occurrences(source(fichier), TO_FIXED_EURO);
+    assert.deepEqual(restants, [], `${fichier} : montant au point décimal avant « € » (${restants.length})`);
+  }
+});
+
+test('#499 : plus aucun coût horaire chargé écrit brut avant « € », dans aucun fichier du client', () => {
+  // Témoin, recopié de 33013bf (AdminReferentiels.tsx:100), et d'autres écritures du même défaut.
+  assert.equal(occurrences('                          : `${i.tauxHoraireCharge} €`}', TAUX_HORAIRE_EURO).length, 1);
+  assert.equal(occurrences('<td>{i.tauxHoraireCharge} €</td>', TAUX_HORAIRE_EURO).length, 1);
+  assert.equal(occurrences('<td>{Number(i.tauxHoraireCharge).toFixed(2)} €</td>', TAUX_HORAIRE_EURO).length, 1);
+  // Ni la valeur d'un champ de saisie, ni l'en-tête de la colonne, ni le module.
+  assert.deepEqual(occurrences('<input type="number" value={editRow.tauxHoraireCharge} onChange={e => editField(\'tauxHoraireCharge\', e.target.value)} />', TAUX_HORAIRE_EURO), []);
+  assert.deepEqual(occurrences("<th style={{padding: '8px'}}>Coût Horaire (€/h)</th>", TAUX_HORAIRE_EURO), []);
+  assert.deepEqual(occurrences(': fmtEuroCentime(Number(i.tauxHoraireCharge))}', TAUX_HORAIRE_EURO), []);
+  const sources = path.join(racineClient, 'src');
+  for (const chemin of fichiersSources(sources)) {
+    const restants = occurrences(readFileSync(chemin, 'utf8'), TAUX_HORAIRE_EURO);
+    assert.deepEqual(restants, [], `${path.relative(sources, chemin)} : coût horaire chargé écrit brut avant « € »`);
+  }
+});
+
+test('#499 : le résumé de la saisie d’un règlement n’écrit plus saisieDeCentimes(…) suivi de « € » ; les champs de saisie le gardent', () => {
+  // Témoins, recopiés de 33013bf : les quatre phrases du résumé (Reglements.tsx:264, :265, :266 et :270).
+  assert.equal(occurrences('Affecté : {saisieDeCentimes(affecte)} € sur {saisieDeCentimes(montantCentimes ?? 0)} €', SAISIE_EURO).length, 2);
+  assert.equal(occurrences('{resteAAffecter > 0 && ` — reste à affecter : ${saisieDeCentimes(resteAAffecter)} €`}', SAISIE_EURO).length, 1);
+  assert.equal(occurrences('{resteAAffecter < 0 && ` — affecté en trop : ${saisieDeCentimes(-resteAAffecter)} €`}', SAISIE_EURO).length, 1);
+  assert.equal(occurrences('Trop-perçu de {saisieDeCentimes((part.centimes ?? 0) - centimesDe(part.facture.resteDu))} € sur la facture {part.facture.numero}', SAISIE_EURO).length, 1);
+  // Les champs de saisie gardent saisieDeCentimes, sans « € » (Reglements.tsx:105, :108 et :139 de 33013bf).
+  assert.deepEqual(occurrences("setMontant(facture ? saisieDeCentimes(centimesDe(facture.resteDu)) : '');", SAISIE_EURO), []);
+  assert.deepEqual(occurrences("[id, centimes ? saisieDeCentimes(centimes) : '']", SAISIE_EURO), []);
+  const reglements = source('pages/Reglements.tsx');
+  assert.ok((reglements.match(/\bsaisieDeCentimes\(/g) ?? []).length >= 3, 'témoin : les champs de saisie emploient encore saisieDeCentimes');
+  const sources = path.join(racineClient, 'src');
+  for (const chemin of fichiersSources(sources)) {
+    const restants = occurrences(readFileSync(chemin, 'utf8'), SAISIE_EURO);
+    assert.deepEqual(restants, [], `${path.relative(sources, chemin)} : saisieDeCentimes(…) suivi de « € » (${restants.length})`);
   }
 });
 

@@ -110,7 +110,8 @@ test('fiche de main d’œuvre avec ses prix de la demi-journée, puis devis com
 
   // 2 × 300 € + 150,50 € ; 2 × 7,5 h + 3,75 h.
   const ligne = page.getByRole('listitem').filter({ hasText: objet });
-  await expect(ligne).toContainText('HT 750.50 €');
+  // #499 : forme des documents, le texte du PDF (virgule, espace ordinaire U+0020 avant « € »), et non plus le point décimal.
+  await expect(ligne).toContainText(/HT 750,50\u0020€/);
   await expect(ligne.getByTestId('heures-prevues-devis')).toHaveText('Heures prévues : 18,75 h');
   const devis = await lireDevis(request, session.token, objet);
   expect(devis.lignes.map((l) => [l.forfaitMainOeuvre, l.tarifForfait, l.prixUnitaireHt, l.unite, l.minutesPrevuesUnite, l.quantite])).toEqual([
@@ -124,7 +125,7 @@ test('fiche de main d’œuvre avec ses prix de la demi-journée, puis devis com
   await expect(lignes.nth(0).getByTestId('prix-forfait')).toHaveText('300,00 € HT');
   await lignes.nth(1).getByRole('spinbutton', { name: 'Demi-journées' }).fill('2');
   await page.getByRole('button', { name: 'Enregistrer le brouillon' }).click();
-  await expect(ligne).toContainText('HT 901.00 €');
+  await expect(ligne).toContainText(/HT 901,00\u0020€/);
   await expect(ligne.getByTestId('heures-prevues-devis')).toHaveText('Heures prévues : 22,5 h');
   expect((await lireDevis(request, session.token, objet)).heuresPrevues).toBe(22.5);
 });

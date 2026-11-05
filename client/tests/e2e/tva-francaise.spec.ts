@@ -56,6 +56,7 @@ test('devis : un taux de 19,6 % est refusé à l’écran sans rien créer ; à 
 
   await page.getByRole('spinbutton', { name: 'TVA %' }).fill('10');
   await page.getByRole('button', { name: 'Créer le brouillon' }).click();
-  await expect(page.getByRole('listitem').filter({ hasText: objet })).toContainText('HT 100.00 €');
+  // #499 : forme des documents, le texte du PDF (virgule, espace ordinaire U+0020 avant « € »), et non plus le point décimal.
+  await expect(page.getByRole('listitem').filter({ hasText: objet })).toContainText(/HT 100,00\u0020€/);
   expect((await devis()).map((d) => [d.lignes.map((l) => l.tauxTva), d.totalHt, d.totalTva, d.totalTtc])).toEqual([[[10], 100, 10, 110]]);
 });
