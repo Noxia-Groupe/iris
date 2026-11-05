@@ -17,7 +17,7 @@ CT | liste des chantiers | chantier-titulaire-dc | défaut | ligne absente
 CT | liste des chantiers | chantier-titulaire-tech | défaut | ligne absente
 CT | liste des chantiers | hors lignes | défaut | titre « Liste des Chantiers » ; boutons : Chantiers Terminés / Archivés# chantier(s), Créer une affaire (devis), En cours#, En perte, En perte#, Heures dépassées, Main-d’œuvre dépassée, Marge faible, Matériel dépassé, Sans saisie, Tous, À surveiller, À surveiller#
 CT | liste des interventions | hors lignes | défaut | titre « Interventions SAV » ; boutons : Nouvelle intervention
-CT | menu | — | défaut | sections : Accueil, Chantiers, Interventions, Pilotage, Référentiels, Réglages ; type affiché : Conducteur
+CT | menu | — | défaut | sections : Accueil, Chantiers, Interventions, Pilotage, Référentiels, Réglages ; type affiché : Conducteur de travaux
 CT | planning | hors lignes | défaut | titre « Planning d'intervention » ; boutons : Affectation, Semaine #, Semaine précédente, Semaine suivante, Types d'événements
 CT | route / | — | défaut | menu « Accueil › Tableau de bord » ; accessible
 CT | route /achats | — | défaut | menu « Chantiers › Journal des achats » ; accessible

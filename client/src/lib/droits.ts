@@ -26,19 +26,33 @@ export function isSuperAdminRole(role?: string | null): boolean {
   return role === ROLE_SUPERADMIN;
 }
 
+/**
+ * Types de compte, dans l'ordre des listes de l'administration, avec le libellé unique de chacun
+ * (#203 ; point 1 de #475 : un seul libellé par type, le plus explicite, en casse de phrase ;
+ * choix par défaut, à confirmer). Le menu, « Connecté en tant que », le journal d'administration
+ * et les deux listes de l'administration lisent tous cette table.
+ */
+export const TYPES_COMPTE: ReadonlyArray<{ valeur: string; libelle: string }> = [
+  { valeur: ROLE_CONDUCTEUR, libelle: 'Conducteur de travaux' },
+  { valeur: ROLE_COMMERCIAL, libelle: 'Commercial' },
+  { valeur: ROLE_ASSISTANTE_COMMERCIALE, libelle: 'Assistante commerciale' },
+  { valeur: ROLE_TECHNICIEN, libelle: 'Technicien' },
+  { valeur: ROLE_COMPTABLE, libelle: 'Comptable' },
+  { valeur: ROLE_DIRECTEUR_COMMERCIAL, libelle: 'Directeur commercial' },
+  { valeur: ROLE_RESPONSABLE, libelle: 'Responsable' },
+  { valeur: ROLE_DIRECTEUR, libelle: 'Directeur' },
+  { valeur: ROLE_ADMIN, libelle: 'Administrateur' },
+  { valeur: ROLE_SUPERADMIN, libelle: 'Super administrateur' },
+];
+
+/** Types qu'un compte peut attribuer : seul un super administrateur peut en désigner un autre. */
+export function typesCompteProposes(estSuperAdmin: boolean): ReadonlyArray<{ valeur: string; libelle: string }> {
+  return TYPES_COMPTE.filter((type) => estSuperAdmin || type.valeur !== ROLE_SUPERADMIN);
+}
+
 export function roleLabel(role?: string | null): string {
-  switch (role) {
-    case ROLE_SUPERADMIN: return 'Super Admin';
-    case ROLE_ADMIN: return 'Admin';
-    case ROLE_COMMERCIAL: return 'Commercial';
-    case ROLE_ASSISTANTE_COMMERCIALE: return 'Assistante commerciale';
-    case ROLE_TECHNICIEN: return 'Technicien';
-    case ROLE_COMPTABLE: return 'Comptable';
-    case ROLE_DIRECTEUR_COMMERCIAL: return 'Directeur commercial';
-    case ROLE_RESPONSABLE: return 'Responsable';
-    case ROLE_DIRECTEUR: return 'Directeur';
-    default: return 'Conducteur';
-  }
+  // Repli d'un rôle absent ou inconnu inchangé ici (#203) ; la PR A4 du lot (#206) le fixe.
+  return TYPES_COMPTE.find((type) => type.valeur === role)?.libelle ?? 'Conducteur';
 }
 
 export interface CurrentUser {
