@@ -520,7 +520,7 @@ La numérotation reprend celle des anciennes questions ; les sections précéden
    - **Jamais par la correspondance des clés.** Un droit individuel ne passe jamais par la table de correspondance des clés d'intégration (section 4.2). Par elle, `finances:read` deviendrait `rentabilite.voir` et `prixAchat.voir`, et ouvrirait les marges et les prix d'achat.
    - Un test de la migration le garantit (section 8.1) : aucune case ni aucun droit individuel ne gagne d'effet à la migration.
    - **Seul le super administrateur fait un ajout**, comme aujourd'hui : `PUT /api/users/:id/permissions` et `PATCH /api/users/:id/acces-finance` lui sont réservés. Si un lot ouvrait un jour les ajouts à l'administrateur, il suivrait la règle « pas d'élévation » (on n'ajoute qu'une permission que l'on a soi-même, sur un périmètre au plus égal) et exclurait toujours la liste des montants (décision 5).
-   - Un ajout est journalisé dans la même transaction. La liste des comptes et l'aperçu « ce que voit ce compte » le montrent (« Conducteur + 1 ajout »).
+   - Un ajout est journalisé dans la même transaction. La liste des comptes et l'aperçu « ce que voit ce compte » le montrent (« Conducteur de travaux + 1 ajout »).
 3. **Qui modifie les rôles : le super administrateur seul.** L'administrateur attribue les rôles inclus dans le sien, sauf celui de super administrateur. Il ne règle plus les destinataires de la rentabilité quand ce réglage passe dans les rôles (D2) : qui voit les marges est une décision de dirigeant. C'est un changement assumé, annoncé dans la PR qui le fait.
 4. **Technicien : un garde-fou dans le code, désactivable explicitement.**
    - Chaque rôle porte un attribut « sans montants », coché sur le rôle prédéfini Technicien.
