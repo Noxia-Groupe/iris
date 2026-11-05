@@ -173,7 +173,21 @@ async function parcourir(cle: string, contexte: string, jeu: JeuDeDonnees, conne
   const fenetres: string[] = [];
   page.on('dialog', (fenetre) => { fenetres.push(`${fenetre.type()} « ${fenetre.message()} »`); void fenetre.dismiss(); });
   const etat = suivreReseau(page);
-  await page.goto('/', { waitUntil: 'networkidle' });
+  // Menu relu sur l'état frais des modules (#485). Dans ce contexte neuf, sans cache, la barre latérale part du défaut
+  // « Planning actif » (client/src/modules.ts, useModules) et ne le corrige qu'au retour de GET /api/modules, lancé après
+  // son premier rendu. Sur une machine chargée, l'évaluation du JavaScript laisse plus de 500 ms sans requête :
+  // `networkidle` survient avant ce lancement, et le menu se lisait avec le défaut (reproduit en ralentissant le
+  // processeur de la page). L'attente de la réponse est donc enregistrée avant la navigation ; la réponse doit être
+  // `ok` ; puis le réseau doit être au calme, le temps que React applique l'état (en développement, StrictMode fait
+  // l'appel deux fois). Dans tous les contextes : le menu de chaque compte en dépend. On n'attend pas la disparition de
+  // l'entrée « Planning » : ce serait attendre le résultat même que la matrice vérifie.
+  const [modules] = await Promise.all([
+    page.waitForResponse((reponse) => new URL(reponse.url()).pathname === '/api/modules' && reponse.request().method() === 'GET', { timeout: 15_000 })
+      .catch((erreur: Error) => { throw new Error(`${cle} : aucune réponse à GET /api/modules après le chargement de /, le menu se lirait avec l’état par défaut des modules (#485). ${erreur.message}`); }),
+    page.goto('/', { waitUntil: 'networkidle' }),
+  ]);
+  expect(modules.ok(), `${cle} : GET /api/modules a répondu ${modules.status()}, le menu se lirait avec l’état par défaut des modules (#485)`).toBeTruthy();
+  await auCalme(page, etat);
 
   // Menu : sections, type affiché ; chaque entrée, relue par son chemin, est portée par la ligne de sa route.
   const menu = await page.evaluate(() => {
