@@ -5,7 +5,7 @@ import { ArrowLeft, FileDown, Pencil } from 'lucide-react';
 import { apiFetch } from '../api';
 import type { ClientActuel } from '../components/SelecteurClient';
 import type { BreakdownRow } from '../components/BarBreakdown';
-import { isAdminRole, ROLE_TECHNICIEN } from '../roles';
+import { isAdminRole, roleDuCompte, ROLE_TECHNICIEN, useCurrentUser } from '../roles';
 import { useModules } from '../modules';
 import { useCompanyTimezone, useFuseauSocieteConnu } from '../companyTimezoneContext';
 import { jourCivilChantierIso, jourCivilEntrepriseIso, joursCivilsEntre } from '../lib/dateFormatting';
@@ -27,9 +27,9 @@ const ChantierDetail = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
-  const userStr = localStorage.getItem('user');
-  const currentUser = userStr ? JSON.parse(userStr) : null;
-  const userRole = currentUser?.role || 'CONDUCTEUR_TRAVAUX';
+  // Compte et permissions relus auprès de /api/me ; aucun repli sur le conducteur (#206).
+  const currentUser = useCurrentUser();
+  const userRole = roleDuCompte(currentUser);
   const permissions = currentUser?.permissions || [];
   // L'API calcule les droits effectifs (rôle + délégations individuelles) à la connexion.
   // L'interface ne recopie donc pas de matrice de rôles pour les actions sensibles.

@@ -49,9 +49,10 @@ export const CHAMPS_JOURNAL: Record<string, string> = {
 };
 
 // Valeur lisible d'un champ journalisé. Le type de compte et le mode d'envoi s'affichent par leur
-// libellé (« Microsoft 365 », « Messagerie seule »), et non par leur code ; un code inconnu reste tel quel.
+// libellé (« Microsoft 365 », « Messagerie seule »), et non par leur code ; un code inconnu reste tel quel,
+// et un type de compte vide s'affiche « — » comme toute valeur vide (#206, choix par défaut, à confirmer).
 export function lisible(valeur: unknown, champ?: string): string {
-  if (champ === 'role' && typeof valeur === 'string') return roleLabel(valeur);
+  if (champ === 'role' && typeof valeur === 'string' && valeur !== '') return roleLabel(valeur) || valeur;
   if (valeur === null || valeur === undefined || valeur === '') return '—';
   if (champ === 'modeEnvoi' && typeof valeur === 'string') return Object.hasOwn(LIBELLES_MODE_ENVOI, valeur) ? LIBELLES_MODE_ENVOI[valeur] : valeur;
   if (typeof valeur === 'boolean') return valeur ? 'oui' : 'non';

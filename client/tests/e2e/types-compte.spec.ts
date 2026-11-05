@@ -38,11 +38,13 @@ async function verifierTypesProposes(liste: Locator, attendus: ReadonlyArray<rea
 }
 
 // Type affiché du compte connecté : dans le menu (Sidebar.tsx:78) et dans « Connecté en tant que », sur chacune des quatre
-// pages qui l'affichent (Dashboard.tsx:135, ListeChantiers.tsx:336, Statistiques.tsx:336, Admin.tsx:546). La page finit
+// pages qui l'affichent (Dashboard.tsx:133, ListeChantiers.tsx:334, Statistiques.tsx:335, Admin.tsx:546). La page finit
 // sur l'administration.
 async function verifierTypeAffiche(page: Page, libelle: string) {
   for (const chemin of ['/', '/chantiers', '/statistiques', '/admin']) {
     await page.goto(chemin, { waitUntil: 'networkidle' });
+    // La page visée elle-même, et non celle d'une redirection (le tableau de bord affiche aussi le type).
+    await expect.poll(() => new URL(page.url()).pathname, `adresse, ${chemin}`).toBe(chemin);
     await expect(page.locator('.sidebar-compte-role'), `menu, ${chemin}`).toHaveText(libelle);
     await expect(page.locator('span', { hasText: 'Connecté en tant que' }).locator('strong'), `« Connecté en tant que », ${chemin}`).toHaveText(libelle);
   }

@@ -18,7 +18,7 @@ test('le mode d’envoi des documents se lit en clair dans le journal d’admini
   assert.equal(CHAMPS_JOURNAL.planningActif, 'Planning');
 });
 
-test('les autres champs du journal se lisent comme avant le déplacement de lisible()', () => {
+test('les autres champs du journal se lisent en clair, le type de compte sous son libellé unique (#203)', () => {
   assert.equal(lisible('ADMIN', 'role'), 'Administrateur');
   assert.equal(lisible('SUPERADMIN', 'role'), 'Super administrateur');
   assert.equal(lisible(true, 'planningActif'), 'oui');
@@ -35,4 +35,24 @@ test('les autres champs du journal se lisent comme avant le déplacement de lisi
   assert.equal(CHAMPS_JOURNAL.role, 'Type de compte');
   assert.equal(CHAMPS_JOURNAL.joursSansSaisie, 'Jours sans saisie');
   assert.equal(CHAMPS_JOURNAL.prixVenteHt, 'Prix de vente HT à l’heure, hors contrat');
+});
+
+// PR A4 du lot « anomalies d'écran », #206 ; N4 du contrôle de #491 (A3). Choix par défaut, à confirmer : depuis que
+// roleLabel rend '' pour un rôle absent ou inconnu (menu et « Connecté en tant que » n'affichent rien), le journal
+// d'administration garde sa propre lecture, celle de son commentaire : un code connu sous son libellé, un code inconnu tel
+// quel, une valeur vide « — », comme toute valeur vide du journal.
+test('au journal, le type de compte se lit sous son libellé ; un code inconnu reste tel quel, et un type vide s’affiche « — » (#206)', () => {
+  // Code connu : son libellé, et non son code.
+  assert.equal(lisible('CONDUCTEUR_TRAVAUX', 'role'), 'Conducteur de travaux');
+  assert.equal(lisible('TECHNICIEN', 'role'), 'Technicien');
+  // Code inconnu : tel quel. Lectures écartées : '' (une cellule vide, roleLabel seul) et « Conducteur » (ancien repli).
+  for (const code of ['INCONNU', 'superadmin', 'Administrateur', 'constructor', 'toString']) {
+    assert.equal(lisible(code, 'role'), code, code);
+  }
+  // Type vide ou absent : « — ». Lectures écartées : '' (cellule vide) et « Conducteur » (ancien repli).
+  for (const vide of ['', null, undefined]) {
+    assert.equal(lisible(vide, 'role'), '—', JSON.stringify(vide) ?? 'undefined');
+  }
+  // Même tiret que les autres champs vides : une seule convention dans le journal.
+  assert.equal(lisible('', 'role'), lisible('', 'nom'));
 });

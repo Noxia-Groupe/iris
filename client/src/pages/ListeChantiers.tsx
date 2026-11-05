@@ -5,7 +5,7 @@ import { apiFetch } from '../api';
 import { SectionRepliable } from '../components/SectionRepliable';
 import { ProgressMeter } from '../components/ProgressMeter';
 import { AlertesChantier } from '../components/AlertesChantier';
-import { estExcluDesOperations, isAdminRole, roleLabel, ROLE_TECHNICIEN } from '../roles';
+import { estExcluDesOperations, isAdminRole, roleDuCompte, roleLabel, ROLE_TECHNICIEN, useCurrentUser } from '../roles';
 import {
   alertesDuChantier, ancienneteSaisie, estASurveiller, filtrerChantiers, trierChantiers,
   type ChantierSuivi, type FiltreChantiers, type TriChantiers,
@@ -63,10 +63,8 @@ const ListeChantiers = () => {
   const filtreDemande = (parametres.get('filtre') ?? 'TOUS') as FiltreChantiers;
   const triDemande = (parametres.get('tri') ?? 'PRIORITE') as TriChantiers;
 
-  // Rôle réel
-  const userStr = localStorage.getItem('user');
-  const user = userStr ? JSON.parse(userStr) : null;
-  const userRole = user?.role || 'CONDUCTEUR_TRAVAUX';
+  // Rôle réel, relu auprès de /api/me ; aucun repli sur le conducteur (#206).
+  const userRole = roleDuCompte(useCurrentUser());
 
   useEffect(() => {
     fetchChantiers();

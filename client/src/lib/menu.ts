@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import {
   isAdminRole, isSuperAdminRole, peutAccederAuxDevis, peutConsulterAnnuaire, peutConsulterPlanning, peutOuvrirAdministration, peutVoirStatistiques,
-  ROLE_COMMERCIAL, ROLE_CONDUCTEUR, ROLE_RESPONSABLE, ROLE_TECHNICIEN, type CurrentUser,
+  roleDuCompte, ROLE_COMMERCIAL, ROLE_CONDUCTEUR, ROLE_RESPONSABLE, ROLE_TECHNICIEN, type CurrentUser,
 } from './droits';
 
 export interface EntreeMenu {
@@ -28,7 +28,8 @@ export interface SectionMenu {
 }
 
 export function sectionsMenu(user: CurrentUser | null | undefined, planningActif: boolean): SectionMenu[] {
-  const role = user?.role || ROLE_CONDUCTEUR;
+  // Sans compte connu, aucun rôle : le menu ne reprend plus celui d'un conducteur (#206).
+  const role = roleDuCompte(user);
   const isCommercial = role === ROLE_COMMERCIAL;
   const isAdmin = isAdminRole(role);
   const peutVoirInterventions = isAdmin || role === ROLE_CONDUCTEUR || role === ROLE_RESPONSABLE || role === ROLE_TECHNICIEN;
