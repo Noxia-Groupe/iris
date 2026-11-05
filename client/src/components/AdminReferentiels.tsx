@@ -20,32 +20,25 @@ export function AdminReferentiels({ activeTab, isAdmin, users, intervenants, fou
 }) {
   return (
     <>
+      {/* Onglet réservé aux administrateurs : son contenu n'a pas de variante pour un autre compte (#202). */}
       {activeTab === 'intervenants' && isAdmin && (
         <div className="card">
-          {isAdmin ? (
-            <>
-              <h2 className="mb-4">Ajouter un intervenant</h2>
-              <form onSubmit={(e) => handleSubmit(e, 'intervenants')} className="flex flex-col sm:flex-row gap-4 items-end mb-8">
-                <div className="form-group mb-0 flex-1 w-full">
-                  <label className="form-label">Nom complet</label>
-                  <input required name="nom" className="form-input" />
-                </div>
-                <div className="form-group mb-0 flex-1 w-full">
-                  <label className="form-label">Rôle / Fonction</label>
-                  <input required name="role" className="form-input" />
-                </div>
-                <div className="form-group mb-0 flex-1 w-full">
-                  <label className="form-label">Taux Horaire Chargé (€/h)</label>
-                  <input required type="number" step="0.1" name="tauxHoraireCharge" className="form-input" />
-                </div>
-                <button className="btn btn-primary w-full sm:w-auto">Enregistrer</button>
-              </form>
-            </>
-          ) : (
-            <div className="mb-8 p-4 bg-yellow-50 text-yellow-800 rounded">
-              <p>La création et la modification des intervenants et de leurs taux horaires sont réservées à la Direction.</p>
+          <h2 className="mb-4">Ajouter un intervenant</h2>
+          <form onSubmit={(e) => handleSubmit(e, 'intervenants')} className="flex flex-col sm:flex-row gap-4 items-end mb-8">
+            <div className="form-group mb-0 flex-1 w-full">
+              <label className="form-label">Nom complet</label>
+              <input required name="nom" className="form-input" />
             </div>
-          )}
+            <div className="form-group mb-0 flex-1 w-full">
+              <label className="form-label">Rôle / Fonction</label>
+              <input required name="role" className="form-input" />
+            </div>
+            <div className="form-group mb-0 flex-1 w-full">
+              <label className="form-label">Taux Horaire Chargé (€/h)</label>
+              <input required type="number" step="0.1" name="tauxHoraireCharge" className="form-input" />
+            </div>
+            <button className="btn btn-primary w-full sm:w-auto">Enregistrer</button>
+          </form>
 
           <h3 className="mb-4">Liste des Intervenants</h3>
           <div className="overflow-x-auto">
@@ -54,10 +47,10 @@ export function AdminReferentiels({ activeTab, isAdmin, users, intervenants, fou
                 <tr style={{borderBottom: '1px solid var(--color-border)'}}>
                   <th style={{padding: '8px'}}>Nom</th>
                   <th style={{padding: '8px'}}>Rôle / Fonction</th>
-                  {isAdmin && <th style={{padding: '8px'}}>Compte technicien</th>}
-                  {isAdmin && <th style={{padding: '8px'}}>Main d’œuvre (prix de vente)</th>}
-                  {isAdmin && <th style={{padding: '8px'}}>Coût Horaire (€/h)</th>}
-                  {isAdmin && <th style={{padding: '8px', textAlign: 'right'}}>Actions</th>}
+                  <th style={{padding: '8px'}}>Compte technicien</th>
+                  <th style={{padding: '8px'}}>Main d’œuvre (prix de vente)</th>
+                  <th style={{padding: '8px'}}>Coût Horaire (€/h)</th>
+                  <th style={{padding: '8px', textAlign: 'right'}}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -75,58 +68,50 @@ export function AdminReferentiels({ activeTab, isAdmin, users, intervenants, fou
                           ? <input className="form-input" value={editRow.role} onChange={e => editField('role', e.target.value)} />
                           : i.role}
                       </td>
-                      {isAdmin && (
-                        <td style={{padding: '8px'}}>
-                          {/* Comptes proposés : techniciens actifs reliés à aucune autre fiche, plus le
-                              compte déjà relié (même s'il a changé de type ou été désactivé depuis). */}
-                          {/* Compte relié absent de la liste des comptes (que le serveur cache à ce demandeur) :
-                              non modifiable ici, et le serveur le refuse aussi. Libellé neutre. */}
-                          <select aria-label={`Compte technicien de ${i.nom}`} className="form-input" value={i.userId || ''}
-                            disabled={!!i.userId && !users.some(u => u.id === i.userId)}
-                            onChange={e => relierCompte(i.id, e.target.value)}>
-                            <option value="">Aucun</option>
-                            {i.userId && !users.some(u => u.id === i.userId) && <option value={i.userId}>Compte non modifiable ici</option>}
-                            {users.filter(u => u.id === i.userId || (u.role === ROLE_TECHNICIEN && u.actif !== false && !intervenants.some(autre => autre.id !== i.id && autre.userId === u.id)))
-                              .map(u => <option key={u.id} value={u.id}>{u.name}{u.id === i.userId && (u.role !== ROLE_TECHNICIEN || u.actif === false) ? ' (n’est plus technicien actif)' : ''}</option>)}
-                          </select>
-                        </td>
-                      )}
-                      {isAdmin && (
-                        <td style={{padding: '8px'}}>
-                          {/* Main d'œuvre du catalogue qui valorise ses heures hors contrat (prix de vente figé à la saisie).
-                              Proposées : les actives ; la sienne reste affichée si elle a été désactivée
-                              depuis (rattachement gardé), sans pouvoir être choisie à nouveau. */}
-                          <select aria-label={`Main d’œuvre de ${i.nom}`} className="form-input" value={i.mainOeuvreId || ''}
-                            onChange={e => rattacherMainOeuvre(i.id, e.target.value)}>
-                            <option value="">Aucune</option>
-                            {mainsOeuvreProposees(mainsOeuvre, i.mainOeuvre ?? null).map(m => (
-                              <option key={m.id} value={m.id} disabled={!m.actif}>{libelleMainOeuvre(m)}</option>
-                            ))}
-                          </select>
-                        </td>
-                      )}
-                      {isAdmin && (
-                        <td style={{padding: '8px'}}>
-                          {isEditing
-                            ? <input type="number" step="0.1" className="form-input" value={editRow.tauxHoraireCharge} onChange={e => editField('tauxHoraireCharge', e.target.value)} />
-                            : `${i.tauxHoraireCharge} €`}
-                        </td>
-                      )}
-                      {isAdmin && (
-                        <td style={{padding: '8px', textAlign: 'right', whiteSpace: 'nowrap'}}>
-                          {isEditing ? (
-                            <>
-                              <button type="button" onClick={saveEdit} className="text-sm px-3 py-1 bg-primary text-white font-semibold rounded">Enregistrer</button>
-                              <button type="button" onClick={() => setEditRow(null)} className="ml-2 text-sm px-3 py-1 bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold rounded">Annuler</button>
-                            </>
-                          ) : (
-                            <>
-                              <button type="button" onClick={() => setEditRow({ type: 'intervenant', id: i.id, nom: i.nom, role: i.role, tauxHoraireCharge: i.tauxHoraireCharge })} className="text-sm px-3 py-1 bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold rounded">Modifier</button>
-                              <button type="button" onClick={() => deleteEntity('intervenant', i.id, i.nom)} className="ml-2 text-sm px-3 py-1 bg-red-100 hover:bg-red-200 text-red-700 font-semibold rounded">Supprimer</button>
-                            </>
-                          )}
-                        </td>
-                      )}
+                      <td style={{padding: '8px'}}>
+                        {/* Comptes proposés : techniciens actifs reliés à aucune autre fiche, plus le
+                            compte déjà relié (même s'il a changé de type ou été désactivé depuis). */}
+                        {/* Compte relié absent de la liste des comptes (que le serveur cache à ce demandeur) :
+                            non modifiable ici, et le serveur le refuse aussi. Libellé neutre. */}
+                        <select aria-label={`Compte technicien de ${i.nom}`} className="form-input" value={i.userId || ''}
+                          disabled={!!i.userId && !users.some(u => u.id === i.userId)}
+                          onChange={e => relierCompte(i.id, e.target.value)}>
+                          <option value="">Aucun</option>
+                          {i.userId && !users.some(u => u.id === i.userId) && <option value={i.userId}>Compte non modifiable ici</option>}
+                          {users.filter(u => u.id === i.userId || (u.role === ROLE_TECHNICIEN && u.actif !== false && !intervenants.some(autre => autre.id !== i.id && autre.userId === u.id)))
+                            .map(u => <option key={u.id} value={u.id}>{u.name}{u.id === i.userId && (u.role !== ROLE_TECHNICIEN || u.actif === false) ? ' (n’est plus technicien actif)' : ''}</option>)}
+                        </select>
+                      </td>
+                      <td style={{padding: '8px'}}>
+                        {/* Main d'œuvre du catalogue qui valorise ses heures hors contrat (prix de vente figé à la saisie).
+                            Proposées : les actives ; la sienne reste affichée si elle a été désactivée
+                            depuis (rattachement gardé), sans pouvoir être choisie à nouveau. */}
+                        <select aria-label={`Main d’œuvre de ${i.nom}`} className="form-input" value={i.mainOeuvreId || ''}
+                          onChange={e => rattacherMainOeuvre(i.id, e.target.value)}>
+                          <option value="">Aucune</option>
+                          {mainsOeuvreProposees(mainsOeuvre, i.mainOeuvre ?? null).map(m => (
+                            <option key={m.id} value={m.id} disabled={!m.actif}>{libelleMainOeuvre(m)}</option>
+                          ))}
+                        </select>
+                      </td>
+                      <td style={{padding: '8px'}}>
+                        {isEditing
+                          ? <input type="number" step="0.1" className="form-input" value={editRow.tauxHoraireCharge} onChange={e => editField('tauxHoraireCharge', e.target.value)} />
+                          : `${i.tauxHoraireCharge} €`}
+                      </td>
+                      <td style={{padding: '8px', textAlign: 'right', whiteSpace: 'nowrap'}}>
+                        {isEditing ? (
+                          <>
+                            <button type="button" onClick={saveEdit} className="text-sm px-3 py-1 bg-primary text-white font-semibold rounded">Enregistrer</button>
+                            <button type="button" onClick={() => setEditRow(null)} className="ml-2 text-sm px-3 py-1 bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold rounded">Annuler</button>
+                          </>
+                        ) : (
+                          <>
+                            <button type="button" onClick={() => setEditRow({ type: 'intervenant', id: i.id, nom: i.nom, role: i.role, tauxHoraireCharge: i.tauxHoraireCharge })} className="text-sm px-3 py-1 bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold rounded">Modifier</button>
+                            <button type="button" onClick={() => deleteEntity('intervenant', i.id, i.nom)} className="ml-2 text-sm px-3 py-1 bg-red-100 hover:bg-red-200 text-red-700 font-semibold rounded">Supprimer</button>
+                          </>
+                        )}
+                      </td>
                     </tr>
                   );
                 })}
