@@ -106,7 +106,14 @@ export function ChantierEnTete({ chantier, isTermine, libelleBaremeReduit, userR
 
           {/* Alertes de suivi, calculées par le serveur : une fiche saine le dit aussi. */}
           <div className="-mt-4 mb-6" data-alertes-fiche>
-            <AlertesChantier chantier={chantier} afficherSiSain />
+            {/* Affaire annulée (#483) : ni « Dans le budget » ni alerte, mais « Affaire annulée ». */}
+            {chantier.statut === 'ANNULE' ? (
+              <span className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600">
+                Affaire annulée
+              </span>
+            ) : (
+              <AlertesChantier chantier={chantier} afficherSiSain />
+            )}
           </div>
 
           {/* Bannière de rappel : un chantier Terminé mais Non encaissé ne compte pas dans
