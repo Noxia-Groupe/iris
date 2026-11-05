@@ -2,6 +2,7 @@
 // main d'œuvre, avec quatre PRIX DE VENTE (jamais des coûts : le coût reste le taux horaire chargé
 // de l'intervenant) et son nombre d'heures par jour. Le prix de vente de la fiche est son prix à
 // l'heure hors contrat (choix par défaut, à confirmer).
+import { fmtMontantDocument } from './formats';
 
 export type ChampPrixMainOeuvre = 'prixVenteHt' | 'prixJourHorsContratHt' | 'prixHeureSousContratHt' | 'prixJourSousContratHt';
 
@@ -46,8 +47,8 @@ export type MainOeuvre = {
 // Résumé joint à une fiche intervenant (administration seulement).
 export type MainOeuvreResumee = { id: string; reference: string; nom: string; actif: boolean };
 
-// Montant au centime, virgule décimale : « 45,50 € ».
-export const formatEuros = (montant: number) => `${Number(montant).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
+// Montant au centime, virgule décimale : « 45,50 € », sous la forme des documents (#205).
+export const formatEuros = fmtMontantDocument;
 
 // Prix facultatif (demi-journée) : le montant, ou « Non réglé ».
 export const formatPrixFacultatif = (montant: number | null | undefined) => (montant == null ? 'Non réglé' : formatEuros(montant));

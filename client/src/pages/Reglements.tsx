@@ -4,6 +4,7 @@ import { HandCoins, RefreshCw, Undo2 } from 'lucide-react';
 import { apiFetch } from '../api';
 import { companyDateInputValue, formatCompanyDateTime, formatDateOnly } from '../lib/dateFormatting';
 import { MOYENS_REGLEMENT, centimesDe, centimesSaisis, libelleMoyen, repartirReglement, saisieDeCentimes } from '../lib/reglements';
+import { fmtEuroCentime } from '../lib/formats';
 
 type ClientResume = { id: string; raisonSociale: string; actif?: boolean };
 type FactureARegler = { id: string; numero: string; dateEmission: string; dateEcheance: string; totalTtc: number; resteDu: number; montantRegle: number; montantAvoirs: number; client: ClientResume };
@@ -22,7 +23,6 @@ type Reglement = {
   contrepassePar: { id: string; name: string } | null;
 };
 
-const formatMontant = (montant: number) => montant.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' });
 const taillePage = 25;
 
 // Règlements clients (décision A3 du 16-10-2026) : saisie manuelle des encaissements, affectés
@@ -155,7 +155,7 @@ export default function Reglements() {
         return setErreur(donnees?.error || 'Enregistrement du règlement impossible.');
       }
       setOuvert(false);
-      setSucces(`Règlement de ${formatMontant(donnees.montant)} enregistré pour ${donnees.client.raisonSociale}.`);
+      setSucces(`Règlement de ${fmtEuroCentime(donnees.montant)} enregistré pour ${donnees.client.raisonSociale}.`);
       setPage(1);
       await charger(1);
     } finally {
@@ -210,7 +210,7 @@ export default function Reglements() {
               <select required aria-label="Client du règlement" className="form-input w-full" value={clientId} onChange={(e) => choisirClient(e.target.value)}>
                 <option value="">Client…</option>
                 {clients.map(({ client, factures }) => (
-                  <option key={client.id} value={client.id}>{client.raisonSociale}{client.actif === false ? ' (désactivé)' : ''} — {factures.length} facture(s), {formatMontant(factures.reduce((somme, facture) => somme + facture.resteDu, 0))} dus</option>
+                  <option key={client.id} value={client.id}>{client.raisonSociale}{client.actif === false ? ' (désactivé)' : ''} — {factures.length} facture(s), {fmtEuroCentime(factures.reduce((somme, facture) => somme + facture.resteDu, 0))} dus</option>
                 ))}
               </select>
             </label>
@@ -250,8 +250,8 @@ export default function Reglements() {
                       <tr key={facture.id} className="border-t">
                         <td className="p-2">{facture.numero}<span className="block text-xs text-gray-500">émise le {formatDateOnly(facture.dateEmission)}</span></td>
                         <td className="p-2">{formatDateOnly(facture.dateEcheance)}</td>
-                        <td className="p-2">{formatMontant(facture.totalTtc)}</td>
-                        <td className="p-2">{formatMontant(facture.resteDu)}</td>
+                        <td className="p-2">{fmtEuroCentime(facture.totalTtc)}</td>
+                        <td className="p-2">{fmtEuroCentime(facture.resteDu)}</td>
                         <td className="p-2">
                           <input inputMode="decimal" aria-label={`Montant affecté à la facture ${facture.numero}`} className="form-input w-32" value={parts[facture.id] ?? ''} onChange={(e) => setParts((actuelles) => ({ ...actuelles, [facture.id]: e.target.value }))} placeholder="0,00" />
                         </td>
@@ -286,10 +286,10 @@ export default function Reglements() {
               <tr key={reglement.id} className="border-t align-top">
                 <td className="p-3">{formatDateOnly(reglement.dateReglement)}</td>
                 <td className="p-3">{reglement.client.raisonSociale}</td>
-                <td className="p-3">{formatMontant(reglement.montant)}</td>
+                <td className="p-3">{fmtEuroCentime(reglement.montant)}</td>
                 <td className="p-3">{libelleMoyen(reglement.moyen)}{reglement.reference && <span className="block text-xs text-gray-500">Réf. {reglement.reference}</span>}</td>
                 <td className="p-3">
-                  <ul>{reglement.affectations.map((affectation) => <li key={affectation.id}>{affectation.facture.numero} : {formatMontant(affectation.montant)}</li>)}</ul>
+                  <ul>{reglement.affectations.map((affectation) => <li key={affectation.id}>{affectation.facture.numero} : {fmtEuroCentime(affectation.montant)}</li>)}</ul>
                 </td>
                 <td className="p-3">
                   {reglement.statut === 'ENREGISTRE' ? 'Enregistré' : (
@@ -301,7 +301,7 @@ export default function Reglements() {
                 </td>
                 <td className="p-3">
                   {reglement.statut === 'ENREGISTRE' && (aContrepasser === reglement.id ? (
-                    <form aria-label={`Contre-passation du règlement de ${formatMontant(reglement.montant)}`} className="space-y-2" onSubmit={(event) => { event.preventDefault(); void confirmerContrepassation(reglement); }}>
+                    <form aria-label={`Contre-passation du règlement de ${fmtEuroCentime(reglement.montant)}`} className="space-y-2" onSubmit={(event) => { event.preventDefault(); void confirmerContrepassation(reglement); }}>
                       <input required minLength={3} maxLength={500} aria-label="Motif de la contre-passation" className="form-input w-56" value={motif} onChange={(e) => setMotif(e.target.value)} placeholder="Motif (chèque refusé, erreur de saisie…)" />
                       <div className="flex flex-wrap gap-2">
                         <button type="submit" className="btn btn-primary">Confirmer la contre-passation</button>

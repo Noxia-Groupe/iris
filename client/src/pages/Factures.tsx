@@ -10,6 +10,7 @@ import { nombreFr, totauxApercuAvoir, type AvoirPrecedent } from '../lib/apercuA
 import FactureTempsPasse from '../components/FactureTempsPasse';
 import { corpsFactureTempsPasse, type ApercuFactureTempsPasse } from '../lib/factureTempsPasse';
 import { sourcesFacturables } from '../lib/sourcesFacture';
+import { fmtEuroCentime } from '../lib/formats';
 
 type Client = { id: string; raisonSociale: string };
 type Origine = 'CHANTIER' | 'INTERVENTION' | 'CONTRAT' | 'HORS_AFFAIRE';
@@ -57,7 +58,6 @@ type Facture = {
 
 const nouvelleLigne = (): Ligne => ({ designation: '', nature: 'PRESTATION', quantite: '1', prixUnitaireHt: '', tauxTva: '20' });
 const formatDate = (date: string) => formatDateOnly(date);
-const formatMontant = (montant: number) => montant.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' });
 const avoirsPartiels = (facture: Facture) => (facture.avoirs || []).filter((avoir) => !avoir.estAvoirAnnulation);
 
 export default function Factures() {
@@ -284,7 +284,7 @@ export default function Factures() {
   const totauxAvoir = totauxApercuAvoir(lignesAvoir, factureAvoir?.avoirs ?? []);
   // Tant que la liste n'a pas été relue, la facture affichée peut ignorer un avoir déjà émis : l'aperçu
   // ne donne aucun montant qu'il ne peut garantir.
-  const montantApercu = (montant: number) => (relectureRequise ? '—' : formatMontant(montant));
+  const montantApercu = (montant: number) => (relectureRequise ? '—' : fmtEuroCentime(montant));
 
   const creerAvoirPartiel = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -605,9 +605,9 @@ export default function Factures() {
                 <td className="p-3">{facture.client.raisonSociale}</td>
                 <td className="p-3">{formatDate(facture.dateEmission)}</td>
                 <td className="p-3">{facture.origine === 'HORS_AFFAIRE' ? `Hors affaire — ${facture.motifHorsAffaire || ''}` : facture.origine}{facture.tempsPasse && <span className="block text-xs text-gray-600">Au temps passé</span>}</td>
-                <td className="p-3">{formatMontant(facture.totalTtc)}</td>
-                <td className="p-3">{facture.resteDu === null || facture.resteDu === undefined ? '—' : formatMontant(facture.resteDu)}</td>
-                <td className="p-3">{facture.statut}{situationReglement(facture, formatMontant) && <span className="block text-xs text-gray-600">{situationReglement(facture, formatMontant)}</span>}</td>
+                <td className="p-3">{fmtEuroCentime(facture.totalTtc)}</td>
+                <td className="p-3">{facture.resteDu === null || facture.resteDu === undefined ? '—' : fmtEuroCentime(facture.resteDu)}</td>
+                <td className="p-3">{facture.statut}{situationReglement(facture, fmtEuroCentime) && <span className="block text-xs text-gray-600">{situationReglement(facture, fmtEuroCentime)}</span>}</td>
                 <td className="p-3"><div className="flex flex-wrap gap-2">
                   <button className="btn btn-secondary" aria-expanded={factureTraceId === facture.id} aria-controls="origine-facture" onClick={() => factureTraceId === facture.id ? fermerTrace() : void chargerTrace(facture.id)}>Voir l’origine</button>
                   {facture.type === 'FACTURE' && facture.statut === 'BROUILLON' && (emissionImpossible(facture)

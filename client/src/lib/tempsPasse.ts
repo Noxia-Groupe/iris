@@ -5,6 +5,7 @@
 // minimum, puis des multiples du pas (un devis antérieur garde une heure au moins, au millième). Le serveur fixe le prix et refuse tout autre prix : l'écran envoie le
 // prix qu'il affiche, si bien que ce qui est enregistré est ce que l'utilisateur a vu.
 import type { FicheCatalogueDevis, LigneDevisSaisie } from './catalogueDevis';
+import { fmtMontantDocument, fmtNombreHeures } from './formats';
 
 export type TarifTempsPasse = 'HORS_CONTRAT' | 'SOUS_CONTRAT';
 export const TARIFS_TEMPS_PASSE: readonly TarifTempsPasse[] = ['HORS_CONTRAT', 'SOUS_CONTRAT'];
@@ -22,8 +23,8 @@ export const REFUS_QUANTITE = 'La ligne au temps passé compte au moins une heur
 export const REFUS_QUANTITE_POSITIVE = 'La quantité de la ligne au temps passé, en heures, est positive.';
 export const REFUS_SANS_LIGNE = 'Choisissez la main d’œuvre et le tarif de la ligne au temps passé.';
 
-// Montant au centime, comme le PDF : « 45,50 € », « 1 234,50 € ».
-export const formatPrix = (montant: number) => `${Number(montant).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €`;
+// Montant au centime, comme le PDF : « 45,50 € », « 1 234,50 € » (forme des documents, #205).
+export const formatPrix = fmtMontantDocument;
 
 // Prix de l'heure d'une main d'œuvre selon le tarif : son prix de vente à l'heure hors contrat, ou son prix
 // à l'heure sous contrat. Null si la fiche n'est pas une main d'œuvre.
@@ -58,8 +59,6 @@ export function dureeTempsPasse(minutes: number): string {
   return reste === 0 ? `${heures} h` : `${heures} h ${reste} min`;
 }
 
-const quantiteFr = (heures: number) => heures.toLocaleString('fr-FR', { maximumFractionDigits: 3 });
-
 // Refus de la quantité de la ligne au temps passé, ou null : la règle du serveur quand les réglages du devis
 // sont connus ; sinon une quantité positive, le serveur contrôlant le reste.
 export function refusQuantiteTempsPasse(quantite: number, reglages: ReglagesTempsPasse | null): string | null {
@@ -69,7 +68,7 @@ export function refusQuantiteTempsPasse(quantite: number, reglages: ReglagesTemp
   if (minimum === null || pas === null) return quantite >= 1 ? null : REFUS_QUANTITE;
   const minutes = (Math.round(quantite * 1000) * 60) / 1000;
   if (Number.isInteger(minutes) && minutes >= minimum && (minutes - minimum) % pas === 0) return null;
-  const exemples = [0, 1, 2].map((rang) => quantiteFr((minimum + rang * pas) / 60)).join(' ; ');
+  const exemples = [0, 1, 2].map((rang) => fmtNombreHeures((minimum + rang * pas) / 60, 3)).join(' ; ');
   return `La ligne au temps passé vaut le temps minimum facturé du devis (${dureeTempsPasse(minimum)}), puis des tranches de ${pas} minutes : en heures, ${exemples}…`;
 }
 
@@ -87,7 +86,7 @@ export function heuresMinimum(quantite: number): string {
   const heures = Number(quantite);
   if (heures === 1) return 'une heure minimum facturée';
   const pluriel = heures >= 2 ? 's' : '';
-  return `${heures.toLocaleString('fr-FR', { maximumFractionDigits: 3 })} heure${pluriel} minimum facturée${pluriel}`;
+  return `${fmtNombreHeures(heures, 3)} heure${pluriel} minimum facturée${pluriel}`;
 }
 
 // Mention du devis au temps passé, tirée de ses seules données figées : la quantité, le prix et le tarif de

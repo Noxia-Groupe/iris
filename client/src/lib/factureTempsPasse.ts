@@ -2,6 +2,7 @@
 // de la nuit du 26 au 27-10-2026, points 3 et 8 à 12, et du 28-10-2026) : le serveur calcule l'aperçu, que
 // l'écran affiche tel quel ; la création renvoie le total HT lu, si bien qu'une heure saisie entre-temps
 // refuse la facture au lieu de la changer en silence.
+import { fmtHeures } from './formats';
 import { dureeTempsPasse } from './tempsPasse';
 
 export type LigneFactureTempsPasse = {
@@ -23,7 +24,8 @@ export type ApercuFactureTempsPasse = {
   totalHt: number; totalTva: number; totalTtc: number;
 };
 
-export const heuresFr = (heures: number) => `${heures.toLocaleString('fr-FR', { maximumFractionDigits: 3 })} h`;
+// Heures au millième : « 1,25 h » (#205).
+export const heuresFr = (heures: number) => fmtHeures(heures, 3);
 // Une durée en minutes entières s'écrit comme sur le devis (« 1 h 15 min ») ; sinon, en heures au millième
 // (plancher d'un devis antérieur dont la ligne est au millième).
 export const dureeFacture = (minutes: number) => Number.isInteger(minutes) ? dureeTempsPasse(minutes) : heuresFr(minutes / 60);

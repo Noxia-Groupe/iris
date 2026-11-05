@@ -1,3 +1,5 @@
+import { fmtHeures } from './formats';
+
 /** Totaux des coûts d'une intervention SAV, tels que GET /api/interventions/:id/couts les envoie. */
 export type TotauxCoutsIntervention = { totalCoutsHT?: number | null; totalMaterielHT?: number | null };
 
@@ -40,12 +42,10 @@ export type MargeSavHorsContrat = {
   heuresNonValorisees: number; intervenantsNonValorises: string[]; heuresSuitesAnnulees: number;
 };
 
-const heuresFr = (heures: number) => `${heures.toLocaleString('fr-FR', { maximumFractionDigits: 2 })} h`;
-
 /** Détail de la marge à l'heure, en une phrase ; les montants passent par le format de l'écran. */
 export function detailMargeSav(marge: MargeSavHorsContrat, montant: (valeur: number) => string): string {
   const portee = marge.nombreSuites === 0 ? 'de l’intervention' : `de l’intervention et de ${marge.nombreSuites > 1 ? `ses ${marge.nombreSuites} suites` : 'sa suite'}`;
-  const annulees = marge.heuresSuitesAnnulees > 0 ? ` Les heures des suites annulées (${heuresFr(marge.heuresSuitesAnnulees)}) comptent dans le coût, sans être vendues.` : '';
+  const annulees = marge.heuresSuitesAnnulees > 0 ? ` Les heures des suites annulées (${fmtHeures(marge.heuresSuitesAnnulees)}) comptent dans le coût, sans être vendues.` : '';
   const materiel = marge.materielHT > 0 ? ` et le matériel, à son coût de ${montant(marge.materielHT)} HT` : '';
   return `Heures ${portee} vendues ${montant(marge.ventesHT)} HT au prix des mains d’œuvre, moins leur coût de ${montant(marge.coutsHT)} HT${materiel}.${annulees}`;
 }
@@ -53,5 +53,5 @@ export function detailMargeSav(marge: MargeSavHorsContrat, montant: (valeur: num
 /** Signalement d'une marge incomplète : des heures sans prix de vente figé, dont le coût reste compté. */
 export function alerteMargeSav(marge: MargeSavHorsContrat): string | null {
   if (marge.intervenantsNonValorises.length === 0) return null;
-  return `Marge incomplète : ${heuresFr(marge.heuresNonValorisees)} sans prix de vente (${marge.intervenantsNonValorises.join(', ')}). Un intervenant sans main d’œuvre le jour de la saisie ne valorise pas ses heures ; leur coût reste compté.`;
+  return `Marge incomplète : ${fmtHeures(marge.heuresNonValorisees)} sans prix de vente (${marge.intervenantsNonValorises.join(', ')}). Un intervenant sans main d’œuvre le jour de la saisie ne valorise pas ses heures ; leur coût reste compté.`;
 }
