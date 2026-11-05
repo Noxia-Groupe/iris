@@ -88,7 +88,7 @@ Plages relevées sur `main` `bdef300` (03-11-2026) ; 112 props au total.
 | `ChantierJournalAchats.tsx` | journal des achats (1030-1166) : filtres, lignes, correction, sous-total (26 props) |
 | `ChantierJournalHeures.tsx` | journal des heures (1171-1296, 25 props) |
 | `ChantierJournalAudit.tsx` | journal d'audit des saisies (1299-1352, 7 props) |
-| `ChantierModaleModification.tsx` | contenu de la modale « Modifier le chantier » (1358-1479, 19 props) |
+| `ChantierModaleModification.tsx` | contenu de la modale « Modifier le chantier » (1358-1479, 19 props, 17 après #493) |
 | `ChantierEnTete.tsx` | en-tête (titre, statut, client, dates, commercial modifiable en place), alertes et bannière d'encaissement (701-804, 16 props), avec `STATUT_LABELS` ; un fragment |
 | `ChantierIndicateurs.tsx` | indicateurs clés et factures liées, marge et estimation, barres de progression, `CoutsSuitesChantier`, répartitions (806-1020, 19 props), avec `FactureLiee` (exporté : la page l'emploie aussi) ; un fragment |
 | `lib/formatsChantier.ts` | `toDateFrancaise`, `fmtDate`, `fmtEuro` et `fmtHeures` (25-35), tels quels : plusieurs sections les emploient |
@@ -117,9 +117,9 @@ Une PR à la fois, chacune depuis `main` à jour, avec le même contrat que pour
 
 - **Déplacer l'état dans les composants** : par exemple, que chaque onglet d'Admin charge ses données comme ceux de `Statistiques.tsx`, ou que les filtres des journaux du chantier vivent dans leur composant. Ce serait plus lisible, mais cela changerait la séquence des chargements, que des parcours E2E vérifient, ou le moment où un état se réinitialise. C'est un changement de comportement, donc un lot à part.
 - **Petites anomalies relevées pendant le relevé**, à corriger chacune dans sa PR, avec un test :
-  - Admin, onglet Intervenants : une branche inaccessible (l.738 et 757-761), `colSpan={4}` pour 5 colonnes (l.832) : #202 ;
-  - Admin, onglet Utilisateurs : les options de rôle dupliquées entre le formulaire (l.1194-1204) et le tableau (l.1290-1299) : #203 ;
-  - fiche chantier : deux références jamais lues (`editChantierBudgetRef`, `editChantierAdresseRef`, l.97-98), alors que le commentaire l.94-96 annonce un préremplissage qui n'existe pas : #204 ;
+  - Admin, onglet Intervenants : une branche inaccessible (l.738 et 757-761), `colSpan={4}` pour 5 colonnes (l.832) : #202, **réglée par #487** (branche inaccessible retirée ; le `colSpan` était déjà corrigé depuis `8b189ff`, et les renvois de lignes ci-dessus datent d'avant le déplacement) ;
+  - Admin, onglet Utilisateurs : les options de rôle dupliquées entre le formulaire (l.1194-1204) et le tableau (l.1290-1299) : #203, **réglée par #491** (une seule liste et un seul libellé par type de compte) ;
+  - fiche chantier : deux références jamais lues (`editChantierBudgetRef`, `editChantierAdresseRef`, l.97-98), alors que le commentaire l.94-96 annonce un préremplissage qui n'existe pas : #204, **réglée par #493** ;
   - utilitaires de format dupliqués entre écrans (`fmtEuro`, `fmtHeures`, `toDateFrancaise`, alors que `jourFrancais` existe dans `lib/dateFormatting.ts`) : #205 ;
   - lecture du rôle : Planning et la fiche chantier lisent `localStorage.user` directement, quand Admin passe par `getCurrentUser` et `useCurrentRole` : #206.
 
@@ -129,4 +129,4 @@ Réponse de Nelson aux trois questions de la proposition : « 1. Oui je valide l
 
 1. **Principe validé par Nelson** : déplacement pur, état laissé dans la page. **Ordre retenu par Claude Code**, Nelson ne s'étant pas prononcé sur ce point de la question : outil de comparaison du rendu, puis Planning, Admin et fiche chantier.
 2. **Fichiers dans `components/`, à plat**, comme aujourd'hui (décision de Nelson).
-3. **Petites anomalies** : le seul point délégué par Nelson. Chacune a son issue : #202, #203, #204, #205 et #206. Sa correction vient **après** les trois PR de déplacement, dans sa propre PR avec un test. Corriger pendant un déplacement fausserait la preuve d'un rendu identique.
+3. **Petites anomalies** : le seul point délégué par Nelson. Chacune a son issue : #202, #203, #204, #205 et #206. Sa correction vient **après** les trois PR de déplacement, dans sa propre PR avec un test. Corriger pendant un déplacement fausserait la preuve d'un rendu identique. Depuis la décision de Nelson du 23-10-2026, un test manquant seul, hors montants, ne retarde plus la fusion : pour #202, la correction est fusionnée (#487) et son test est versé à #489 ; pour #204, le test manquant du budget et de l'adresse est versé dans sa PR (#493).
