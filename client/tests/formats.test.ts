@@ -319,6 +319,77 @@ test('liste fermée de l’inventaire : aucune fonction de format locale ni mont
   }
 });
 
+// Famille de montant de chaque fichier (C1 de l'audit des montants de #500). Le centime en devise et la forme des
+// documents ne diffèrent que par l'espace avant « € » (U+00A0 contre U+0020) : un écran passé de l'une à l'autre changerait
+// de texte sans qu'aucun parcours E2E ne le voie, `toHaveText` et `\s` acceptant toute espace. Chaque fichier qui met en
+// forme un montant par le module est donc lié à la famille de son texte d'avant #205, et à elle seule. Chaque nom compte,
+// alias de la forme des documents compris.
+const FAMILLES_MONTANT: Record<string, string> = {
+  fmtEuro: 'euro près',
+  fmtEuroCentime: 'centime en devise',
+  fmtMontantDocument: 'forme des documents',
+  formatEuros: 'forme des documents',
+  formatPrix: 'forme des documents',
+  formatPrixFacultatif: 'forme des documents',
+};
+// Les commentaires ne comptent pas : un commentaire peut nommer une autre famille sans l'employer. Le « // » d'une adresse
+// (« https:// ») n'ouvre pas de commentaire.
+const sansCommentaires = (texte: string) => texte.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:\\])\/\/.*$/gm, '$1');
+const famillesEmployees = (texte: string) => {
+  const code = sansCommentaires(texte);
+  return [...new Set(Object.keys(FAMILLES_MONTANT).filter((nom) => new RegExp(`\\b${nom}\\b`).test(code)).map((nom) => FAMILLES_MONTANT[nom]))];
+};
+// Famille du texte d'avant #205, fichier par fichier (test « chaque famille garde son texte »).
+const FAMILLE_PAR_FICHIER: [string, string][] = [
+  // Inventaire du cadrage.
+  ['pages/ListeChantiers.tsx', 'euro près'],
+  ['pages/Dashboard.tsx', 'euro près'],
+  ['pages/MesCommerciaux.tsx', 'euro près'],
+  ['pages/ResultatCommercial.tsx', 'euro près'],
+  ['components/EditeurBareme.tsx', 'euro près'],
+  ['pages/Performances.tsx', 'euro près'],
+  ['pages/Statistiques.tsx', 'euro près'],
+  ['components/CoutsSuitesChantier.tsx', 'centime en devise'],
+  ['components/OuvrirChantierAffaire.tsx', 'centime en devise'],
+  ['pages/Factures.tsx', 'centime en devise'],
+  ['pages/Reglements.tsx', 'centime en devise'],
+  ['components/FactureTempsPasse.tsx', 'centime en devise'],
+  ['pages/Interventions.tsx', 'centime en devise'],
+  ['lib/mainOeuvre.ts', 'forme des documents'],
+  ['lib/tempsPasse.ts', 'forme des documents'],
+  // Hors inventaire : écrans qui employaient déjà ces noms avant #205, au même texte. Le prix du devis au temps passé et
+  // du forfait reste celui du PDF.
+  ['components/ChantierJournalAchats.tsx', 'euro près'],
+  ['components/CatalogueMainOeuvre.tsx', 'forme des documents'],
+  ['components/DevisTempsPasse.tsx', 'forme des documents'],
+  ['components/DevisForfaitMainOeuvre.tsx', 'forme des documents'],
+];
+
+test('famille de montant de chaque fichier : celle de son texte d’avant #205, et elle seule ; tout fichier qui met en forme un montant est lié à la sienne', () => {
+  // Témoins du relevé : un nom se reconnaît seul (fmtEuro n'est pas lu dans fmtEuroCentime), un alias compte pour sa
+  // famille, un commentaire ne compte pas, une adresse n'ouvre pas de commentaire.
+  assert.deepEqual(famillesEmployees('{fmtEuroCentime(facture.totalTtc)}'), ['centime en devise']);
+  assert.deepEqual(famillesEmployees("import { formatEuros } from '../lib/mainOeuvre';"), ['forme des documents']);
+  assert.deepEqual(famillesEmployees('{fmtEuro(a)} {fmtEuroCentime(b)}'), ['euro près', 'centime en devise']);
+  assert.deepEqual(famillesEmployees('{fmtEuroCentime(a)} // et non fmtMontantDocument\n/* ni fmtEuro */ {/* ni formatPrix */}'), ['centime en devise']);
+  assert.deepEqual(famillesEmployees("const lien = 'https://exemple.fr'; fmtEuro(a);"), ['euro près']);
+  for (const [fichier, famille] of FAMILLE_PAR_FICHIER) {
+    assert.deepEqual(famillesEmployees(source(fichier)), [famille], `${fichier} : familles de montant employées`);
+  }
+  // Liste close : tout fichier de src/ qui emploie une famille y figure, hors le module et l'exception nommée (#388) ; et
+  // tout export d'une ligne qui renvoie à une famille (un alias, une enveloppe) est compté dans FAMILLES_MONTANT.
+  const sources = path.join(racineClient, 'src');
+  for (const chemin of fichiersSources(sources)) {
+    const relatif = path.relative(sources, chemin).split(path.sep).join('/');
+    if (relatif === 'lib/formats.ts' || relatif in EXCEPTIONS) continue;
+    const texte = readFileSync(chemin, 'utf8');
+    if (famillesEmployees(texte).length) assert.ok(FAMILLE_PAR_FICHIER.some(([f]) => f === relatif), `${relatif} : met en forme un montant ; sa famille est à fixer dans FAMILLE_PAR_FICHIER`);
+    for (const [, nom, definition] of sansCommentaires(texte).matchAll(/^export const (\w+)\s*=(.*)$/gm)) {
+      if (famillesEmployees(definition).length) assert.ok(nom in FAMILLES_MONTANT, `${relatif} : ${nom} renvoie à une famille de montant ; à compter dans FAMILLES_MONTANT`);
+    }
+  }
+});
+
 test('un seul module de formats : lib/formats.ts remplace lib/formatsChantier.ts, et aucun écran ne redéfinit ses fonctions (#205)', () => {
   assert.ok(existsSync(path.join(racineClient, 'src/lib/formats.ts')), 'lib/formats.ts existe');
   assert.ok(!existsSync(path.join(racineClient, 'src/lib/formatsChantier.ts')), 'lib/formatsChantier.ts est remplacé');
