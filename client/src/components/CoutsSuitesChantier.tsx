@@ -1,8 +1,5 @@
 import type { CoutsSuites } from '../lib/suiviChantiers';
-import { arrondiCentime } from '../lib/montants';
-
-const euros = (montant: number) => arrondiCentime(montant).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' });
-const heures = (nombre: number) => nombre.toLocaleString('fr-FR', { maximumFractionDigits: 2 });
+import { fmtEuroCentime, fmtNombreHeures } from '../lib/formats';
 
 // Coûts des suites SAV comptés dans le réel d'un chantier (décision de Nelson de la nuit du 26 au
 // 27-10-2026, « Les suites seulement ») : l'écran dit d'où vient l'écart avec les journaux du
@@ -13,16 +10,16 @@ const heures = (nombre: number) => nombre.toLocaleString('fr-FR', { maximumFract
 // montants arrivent nuls pour qui ne les voit pas, comme le reste du réel.
 export const CoutsSuitesChantier = ({ couts, interventionDevis }: { couts?: CoutsSuites | null; interventionDevis?: CoutsSuites | null }) => {
   const devis: string[] = [];
-  if (interventionDevis?.heures) devis.push(`${heures(interventionDevis.heures)} h dans les heures réalisées`);
-  if (interventionDevis?.coutMainOeuvre) devis.push(`main-d’œuvre ${euros(interventionDevis.coutMainOeuvre)}`);
-  if (interventionDevis?.materiel) devis.push(`matériel ${euros(interventionDevis.materiel)}`);
+  if (interventionDevis?.heures) devis.push(`${fmtNombreHeures(interventionDevis.heures)} h dans les heures réalisées`);
+  if (interventionDevis?.coutMainOeuvre) devis.push(`main-d’œuvre ${fmtEuroCentime(interventionDevis.coutMainOeuvre)}`);
+  if (interventionDevis?.materiel) devis.push(`matériel ${fmtEuroCentime(interventionDevis.materiel)}`);
   const suites: string[] = [];
   if (couts && (couts.heures || couts.materiel || couts.coutMainOeuvre)) {
     const montants: string[] = [];
-    if (couts.materiel != null) montants.push(`matériel ${euros(couts.materiel)}`);
-    if (couts.coutMainOeuvre != null) montants.push(`main-d’œuvre ${euros(couts.coutMainOeuvre)}`);
+    if (couts.materiel != null) montants.push(`matériel ${fmtEuroCentime(couts.materiel)}`);
+    if (couts.coutMainOeuvre != null) montants.push(`main-d’œuvre ${fmtEuroCentime(couts.coutMainOeuvre)}`);
     if (montants.length) suites.push(`Dont suites SAV de l’affaire, comptées dans le réel : ${montants.join(' · ')}.`);
-    if (couts.heures) suites.push(`Heures des suites SAV de l’affaire, hors des heures réalisées : ${heures(couts.heures)} h.`);
+    if (couts.heures) suites.push(`Heures des suites SAV de l’affaire, hors des heures réalisées : ${fmtNombreHeures(couts.heures)} h.`);
   }
   if (!devis.length && !suites.length) return null;
   return (

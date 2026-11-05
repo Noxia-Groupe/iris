@@ -3,7 +3,7 @@ import { isAdminRole } from '../roles';
 import { jourCivilChantier } from '../lib/dateFormatting';
 import { AlertesChantier } from './AlertesChantier';
 import { ancienneteSaisie } from '../lib/suiviChantiers';
-import { toDateFrancaise } from '../lib/formatsChantier';
+import { toDateFrancaise } from '../lib/formats';
 
 const STATUT_LABELS: Record<string, string> = { EN_COURS: 'En cours', TERMINE: 'Terminé', ANNULE: 'Annulé' };
 

@@ -1,5 +1,5 @@
 import { Hammer, Pencil, Trash2, Search } from 'lucide-react';
-import { toDateFrancaise, fmtDate, fmtHeures } from '../lib/formatsChantier';
+import { toDateFrancaise, fmtDate, fmtHeures } from '../lib/formats';
 
 export function ChantierJournalHeures({ pointages, heuresTotal, pointageSearch, setPointageSearch, pointageIntervenantFiltre, setPointageIntervenantFiltre, pointagesIntervenantsDispo, pointageRoleFiltre, setPointageRoleFiltre, pointagesRolesDispo, pointageTri, setPointageTri, pointagesFiltreActif, resetPointagesFiltres, pointagesAffiches, editingPointageId, handlePointageSubmit, intervenants, savingPointage, setEditingPointageId, peutCorrigerTravaux, peutArchiverTravaux, startEditPointage, handleDeletePointage, pointagesAffichesTotal }: {
   pointages: any[];

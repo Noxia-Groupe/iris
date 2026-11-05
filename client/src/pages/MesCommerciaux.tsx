@@ -6,6 +6,7 @@ import { useReferencePeriode } from '../lib/referencePeriode';
 import { AvisSansPlanCommercial } from '../components/AvisSansPlanCommercial';
 import { useModules } from '../modules';
 import { arrondiEuro } from '../lib/montants';
+import { fmtEuro } from '../lib/formats';
 
 const MOIS = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
 const STATUT_LABELS: Record<string, string> = { EN_COURS: 'En cours', TERMINE: 'Terminé' };
@@ -18,8 +19,6 @@ const periodLabelComm = (period: CommPeriod, periodStart: string) => {
   if (period === 'quarter') return `T${Math.ceil(m / 3)} ${y}`;
   return `${MOIS[m - 1]} ${y}`;
 };
-
-const fmtEuro = (n: number) => `${arrondiEuro(n).toLocaleString()} €`;
 
 // Suivi des commerciaux (CA vendu, marge, commission) — page réservée aux administrateurs
 // (extraite de l'onglet « Mes Commerciaux » d'Administration pour être son propre menu,

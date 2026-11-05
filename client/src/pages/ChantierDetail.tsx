@@ -13,7 +13,7 @@ import { archivagesRestaurables } from '../lib/archivesRestaurables';
 import { RapportClientChantier } from '../components/RapportClientChantier';
 import type { EstimationMarge } from '../lib/suiviChantiers';
 import { sommeExacte, differenceExacte, arrondiCentime } from '../lib/montants';
-import { fmtDate } from '../lib/formatsChantier';
+import { fmtDate } from '../lib/formats';
 import { ChantierEnTete } from '../components/ChantierEnTete';
 import { ChantierIndicateurs, type FactureLiee } from '../components/ChantierIndicateurs';
 import { ChantierJournalAchats } from '../components/ChantierJournalAchats';

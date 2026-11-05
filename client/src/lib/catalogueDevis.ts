@@ -2,6 +2,7 @@
 // devient une ligne COPIÉE du devis. Le serveur recopie la référence et, pour qui n'écrit pas
 // le prix d'achat prévu, celui de la fiche ; l'écran pré-remplit le reste, modifiable tant que
 // le devis n'est pas signé.
+import { fmtHeures } from './formats';
 
 export type NatureLigneDevis = 'MAIN_OEUVRE' | 'FOURNITURE';
 export type FamilleCatalogue = 'prestations' | 'articles' | 'equipements';
@@ -51,7 +52,7 @@ export type LigneDevisSaisie = {
 
 // Total des heures prévues d'un devis (lot « budget et heures prévues du chantier ») : calculé par le
 // serveur, affiché à l'écran du devis seulement, jamais sur le PDF (réponse « Écran seulement »).
-export const formatHeuresPrevues = (heures: number) => `${Number(heures).toLocaleString('fr-FR', { maximumFractionDigits: 2 })} h`;
+export const formatHeuresPrevues = (heures: number) => fmtHeures(heures);
 
 export const LIBELLES_FAMILLES: Record<FamilleCatalogue, string> = {
   prestations: 'Prestation',

@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
 import { apiFetch } from '../api';
 import { type ApercuFactureTempsPasse, heuresComptees, heuresFr, regleFactureTempsPasse } from '../lib/factureTempsPasse';
-
-const formatMontant = (montant: number) => montant.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' });
+import { fmtEuroCentime } from '../lib/formats';
 
 // Aperçu de la facture au temps passé d'une intervention, calculé par le serveur : heures saisies sur
 // l'intervention et ses suites, règle du devis, heures facturées et lignes. Le parent reçoit l'aperçu (ou
@@ -69,16 +68,16 @@ export default function FactureTempsPasse({ interventionId, onApercu }: { interv
                   <tr key={ligne.ordre} className="border-t">
                     <td className="p-2">{ligne.designation}{ligne.tempsPasse && <span className="block text-xs text-gray-500">Au temps passé</span>}</td>
                     <td className="p-2">{ligne.quantite.toLocaleString('fr-FR', { maximumFractionDigits: 3 })}</td>
-                    <td className="p-2">{formatMontant(ligne.prixUnitaireHt)}</td>
+                    <td className="p-2">{fmtEuroCentime(ligne.prixUnitaireHt)}</td>
                     <td className="p-2">{ligne.tauxTva.toLocaleString('fr-FR')} %</td>
-                    <td className="p-2">{formatMontant(ligne.totalHt)}</td>
+                    <td className="p-2">{fmtEuroCentime(ligne.totalHt)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
           <p className="text-sm" aria-label="Totaux de la facture au temps passé">
-            Total HT {formatMontant(apercu.totalHt)} · TVA {formatMontant(apercu.totalTva)} · Total TTC {formatMontant(apercu.totalTtc)}
+            Total HT {fmtEuroCentime(apercu.totalHt)} · TVA {fmtEuroCentime(apercu.totalTva)} · Total TTC {fmtEuroCentime(apercu.totalTtc)}
           </p>
         </div>
       )}

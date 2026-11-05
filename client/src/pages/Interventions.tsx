@@ -20,6 +20,7 @@ import { useModules } from '../modules';
 import { interventionRemettable } from '../lib/remiseAPlanifier';
 import { useCompanyTimezone } from '../companyTimezoneContext';
 import { formatCompanyDate, formatDateOnly } from '../lib/dateFormatting';
+import { fmtEuroCentime } from '../lib/formats';
 import { chantiersDuClient } from '../lib/chantiersDuClient';
 import type { ContactIntervention, Planification, SiteIntervention } from '../lib/intervention';
 
@@ -54,7 +55,6 @@ const transitions: Record<string, { statut: string; libelle: string }[]> = {
   TERMINEE: [], ANNULEE: [],
 };
 
-const montantEuros = (montant: number) => Number(montant || 0).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' });
 // Nom du PDF du compte rendu, le même que celui que donne le serveur (lot 6a-4a), pour le bouton « PDF »
 // comme pour l'envoi (lot 6a-4d).
 const nomFichierCompteRendu = (reference: string) => `Compte-rendu-${reference}.pdf`;
@@ -314,11 +314,11 @@ export default function Interventions({ interventionId }: { interventionId?: str
       {item.couvertureContrat && <p className="mt-3 rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm text-blue-900">Couverture contractuelle figée : main-d’œuvre {item.couvertureContrat.politiqueMainOeuvre === 'INCLUSE' ? 'incluse' : 'hors forfait'} · matériel {item.couvertureContrat.politiqueMateriel === 'INCLUS' ? 'inclus' : 'hors forfait'}{item.couvertureContrat.noteCouverture ? ` · ${item.couvertureContrat.noteCouverture}` : ''}</p>}
       {couts[item.id] && (estTechnicien || (estEncadrement && (resumeCoutsIntervention(couts[item.id], !item.contratMaintenanceId) || (fournisseurs !== null && item.statut !== 'ANNULEE')))) && <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
         {/* Coût réel, main-d'œuvre comprise, pour l'administration (main-d'œuvre seule hors contrat sans matériel) ; matériel seul pour un conducteur (lot (d)). */}
-        {estEncadrement && (() => { const resume = resumeCoutsIntervention(couts[item.id], !item.contratMaintenanceId); return resume && <p className="font-medium text-slate-800">{resume.libelle} : {montantEuros(resume.montant)} HT</p>; })()}
+        {estEncadrement && (() => { const resume = resumeCoutsIntervention(couts[item.id], !item.contratMaintenanceId); return resume && <p className="font-medium text-slate-800">{resume.libelle} : {fmtEuroCentime(resume.montant)} HT</p>; })()}
         {/* Intervention issue d'un devis, sans chantier : sa marge, suites comprises, pour l'administration (décision de la nuit du 26 au 27-10-2026). */}
-        {estEncadrement && couts[item.id].margeDevis && (() => { const marge = couts[item.id].margeDevis!; return <div data-marge-devis className="mt-1"><p className="font-medium text-slate-800">Marge sur le devis {libelleDevisMarge(marge)} : {montantEuros(marge.margeHT)} HT</p><p className="text-xs text-slate-600">Total HT du devis {montantEuros(marge.totalDevisHT)}, moins les coûts de l’intervention ({montantEuros(marge.coutsInterventionHT)} HT){marge.nombreSuites === 0 ? ' ; aucune suite pour l’instant.' : ` et de ${marge.nombreSuites > 1 ? `ses ${marge.nombreSuites} suites` : 'sa suite'} (${montantEuros(marge.coutsSuitesHT)} HT).`}</p></div>; })()}
+        {estEncadrement && couts[item.id].margeDevis && (() => { const marge = couts[item.id].margeDevis!; return <div data-marge-devis className="mt-1"><p className="font-medium text-slate-800">Marge sur le devis {libelleDevisMarge(marge)} : {fmtEuroCentime(marge.margeHT)} HT</p><p className="text-xs text-slate-600">Total HT du devis {fmtEuroCentime(marge.totalDevisHT)}, moins les coûts de l’intervention ({fmtEuroCentime(marge.coutsInterventionHT)} HT){marge.nombreSuites === 0 ? ' ; aucune suite pour l’instant.' : ` et de ${marge.nombreSuites > 1 ? `ses ${marge.nombreSuites} suites` : 'sa suite'} (${fmtEuroCentime(marge.coutsSuitesHT)} HT).`}</p></div>; })()}
         {/* Intervention SAV hors contrat, sans devis ni chantier : sa marge à l'heure, au prix figé des mains d'œuvre, pour l'administration (lot « marge d'un SAV hors contrat »). */}
-        {estEncadrement && couts[item.id].margeSav && (() => { const marge = couts[item.id].margeSav!; const alerte = alerteMargeSav(marge); return <div data-marge-sav className="mt-1"><p className="font-medium text-slate-800">Marge à l’heure : {montantEuros(marge.margeHT)} HT</p><p className="text-xs text-slate-600">{detailMargeSav(marge, montantEuros)}</p>{alerte && <p role="note" className="mt-1 text-xs text-amber-800">{alerte}</p>}</div>; })()}
+        {estEncadrement && couts[item.id].margeSav && (() => { const marge = couts[item.id].margeSav!; const alerte = alerteMargeSav(marge); return <div data-marge-sav className="mt-1"><p className="font-medium text-slate-800">Marge à l’heure : {fmtEuroCentime(marge.margeHT)} HT</p><p className="text-xs text-slate-600">{detailMargeSav(marge, fmtEuroCentime)}</p>{alerte && <p role="note" className="mt-1 text-xs text-amber-800">{alerte}</p>}</div>; })()}
         {estTechnicien && <>
           {(couts[item.id].heures || []).length > 0 && <ul className="mb-3 space-y-1 text-slate-700">{couts[item.id].heures!.map((heure) => <li key={heure.id}>{formatDateOnlyOrEmpty(heure.date)} — {heure.nbrHeures} h{heure.commentaire ? ` — ${heure.commentaire}` : ''}</li>)}</ul>}
           <form onSubmit={(event) => void enregistrerHeures(event, item.id)} className="grid gap-2 sm:grid-cols-2"><input required name="date" inputMode="numeric" pattern="\d{2}-\d{2}-\d{4}" placeholder="Date (JJ-MM-AAAA)" className="form-input" /><input required name="nbrHeures" inputMode="decimal" placeholder="Heures" className="form-input" /><input name="commentaire" maxLength={500} placeholder="Commentaire" className="form-input sm:col-span-2" /><input name="motif" maxLength={500} placeholder="Motif (obligatoire si 0)" className="form-input" /><button type="submit" className="btn btn-secondary">Enregistrer mes heures</button></form>

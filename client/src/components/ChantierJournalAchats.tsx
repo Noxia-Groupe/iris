@@ -1,5 +1,5 @@
 import { Wallet, Pencil, Trash2, Search } from 'lucide-react';
-import { toDateFrancaise, fmtDate, fmtEuro } from '../lib/formatsChantier';
+import { toDateFrancaise, fmtDate, fmtEuro } from '../lib/formats';
 
 export function ChantierJournalAchats({ achats, achatsTotal, achatSearch, setAchatSearch, achatFournisseurFiltre, setAchatFournisseurFiltre, achatsFournisseursDispo, achatCategorieFiltre, setAchatCategorieFiltre, achatsCategoriesDispo, achatTri, setAchatTri, achatsFiltreActif, resetAchatsFiltres, achatsAffiches, editingAchatId, handleAchatSubmit, fournisseurs, categories, savingAchat, setEditingAchatId, peutCorrigerTravaux, peutArchiverTravaux, startEditAchat, handleDeleteAchat, achatsAffichesTotal }: {
   achats: any[];

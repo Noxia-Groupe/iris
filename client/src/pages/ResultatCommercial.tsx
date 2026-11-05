@@ -6,6 +6,7 @@ import { useReferencePeriode } from '../lib/referencePeriode';
 import { useCompanyTimezone } from '../companyTimezoneContext';
 import { AvisSansPlanCommercial } from '../components/AvisSansPlanCommercial';
 import { arrondiEuro } from '../lib/montants';
+import { fmtEuro } from '../lib/formats';
 
 type Period = 'month' | 'quarter' | 'year';
 
@@ -17,8 +18,6 @@ const periodLabel = (period: Period, periodStart: string) => {
   if (period === 'quarter') return `T${Math.ceil(m / 3)} ${y}`;
   return `${MOIS[m - 1]} ${y}`;
 };
-
-const fmtEuro = (n: number) => `${arrondiEuro(n).toLocaleString()} €`;
 
 const STATUT_LABELS: Record<string, string> = { EN_COURS: 'En cours', TERMINE: 'Terminé' };
 

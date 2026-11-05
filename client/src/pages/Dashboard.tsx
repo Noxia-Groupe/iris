@@ -11,6 +11,7 @@ import { estASurveiller, trierChantiers } from '../lib/suiviChantiers';
 import { useCompanyTimezone } from '../companyTimezoneContext';
 import { companyDateInputValue, jourCivilChantier } from '../lib/dateFormatting';
 import { sommeExacte, arrondiEuro } from '../lib/montants';
+import { fmtEuro, fmtHeures } from '../lib/formats';
 
 type Period = 'month' | 'quarter' | 'year';
 
@@ -83,7 +84,6 @@ const Dashboard = () => {
   const depenseEnCours = sommeExacte(portefeuille.map(c => c.metrics?.totalDepenses ?? 0), 4);
   const margeEstimeeEnCours = sommeExacte(portefeuille.map(c => c.metrics.margeEstimee), 4);
   const margeEstimeeEnCoursPct = venduEnCours > 0 ? (margeEstimeeEnCours / venduEnCours) * 100 : 0;
-  const euros = (n: number) => `${arrondiEuro(n).toLocaleString('fr-FR')} €`;
 
   // Un chantier archivé n'a pas toujours de date de fin renseignée : on retombe
   // sur sa dernière modification (le passage au statut archivé la met à jour).
@@ -181,7 +181,7 @@ const Dashboard = () => {
               <div className="p-2 rounded-lg bg-orange-50 text-orange-600"><ShoppingCart size={18} /></div>
               <div>
                 <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Total des achats</div>
-                <div className="text-2xl font-black text-orange-600 mt-0.5">{arrondiEuro(globalStats.achatsTotal).toLocaleString()} €</div>
+                <div className="text-2xl font-black text-orange-600 mt-0.5">{fmtEuro(globalStats.achatsTotal)}</div>
                 <div className="text-xs text-gray-400">{periodLabel}</div>
               </div>
             </div>
@@ -192,7 +192,7 @@ const Dashboard = () => {
               <div className="p-2 rounded-lg bg-purple-50 text-purple-600"><Clock3 size={18} /></div>
               <div>
                 <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Heures enregistrées</div>
-                <div className="text-2xl font-black text-purple-600 mt-0.5">{Math.round(globalStats.heuresTotal).toLocaleString()} h</div>
+                <div className="text-2xl font-black text-purple-600 mt-0.5">{fmtHeures(Math.round(globalStats.heuresTotal))}</div>
                 <div className="text-xs text-gray-400">{periodLabel}</div>
               </div>
             </div>
@@ -203,7 +203,7 @@ const Dashboard = () => {
               <div className="p-2 rounded-lg bg-blue-50 text-accent"><Wallet size={18} /></div>
               <div>
                 <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">CA Vendu</div>
-                <div className="text-2xl font-black text-primary-dark mt-0.5">{arrondiEuro(globalStats.caTotal).toLocaleString()} €</div>
+                <div className="text-2xl font-black text-primary-dark mt-0.5">{fmtEuro(globalStats.caTotal)}</div>
                 <div className="text-xs text-gray-400">{periodLabel}</div>
               </div>
             </div>
@@ -215,7 +215,7 @@ const Dashboard = () => {
               <div>
                 <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Marge totale</div>
                 <div className={`text-2xl font-black mt-0.5 ${arrondiEuro(globalStats.margeTotal) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                  {arrondiEuro(globalStats.margeTotal).toLocaleString()} €
+                  {fmtEuro(globalStats.margeTotal)}
                 </div>
                 <div className="text-xs text-gray-400">
                   {globalStats.margePct != null ? `${globalStats.margePct.toFixed(1)}% · ` : ''}{periodLabel}
@@ -233,7 +233,7 @@ const Dashboard = () => {
                 <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">
                   {isAdminRole(userRole) ? 'Commission commerciale' : 'Ma commission'}
                 </div>
-                <div className="text-2xl font-black text-emerald-600 mt-0.5">{arrondiEuro(commissionCommerciale).toLocaleString()} €</div>
+                <div className="text-2xl font-black text-emerald-600 mt-0.5">{fmtEuro(commissionCommerciale)}</div>
                 <div className="text-xs text-gray-400">{globalStats.sansPlanCommercial ? MESSAGE_SANS_PLAN_COMMERCIAL : periodLabel}</div>
               </div>
             </div>
@@ -265,19 +265,19 @@ const Dashboard = () => {
               <div className={`grid grid-cols-1 gap-4 ${depensesVisibles ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
                 <div>
                   <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Vendu</div>
-                  <div className="text-2xl font-black text-primary-dark mt-0.5">{euros(venduEnCours)}</div>
+                  <div className="text-2xl font-black text-primary-dark mt-0.5">{fmtEuro(venduEnCours)}</div>
                 </div>
                 {depensesVisibles && (
                 <div>
                   <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Dépensé à ce jour</div>
-                  <div className="text-2xl font-black text-orange-600 mt-0.5">{euros(depenseEnCours)}</div>
+                  <div className="text-2xl font-black text-orange-600 mt-0.5">{fmtEuro(depenseEnCours)}</div>
                   <div className="mt-1.5"><ProgressMeter value={depenseEnCours} max={venduEnCours || 1} color="orange" size="sm" /></div>
                 </div>
                 )}
                 <div>
                   <div className="text-xs font-bold text-gray-500 uppercase tracking-wider">Marge estimée en fin de chantier</div>
                   <div className={`text-2xl font-black mt-0.5 ${arrondiEuro(margeEstimeeEnCours) >= 0 ? 'text-emerald-600' : 'text-red-600'}`} data-marge-portefeuille>
-                    {euros(margeEstimeeEnCours)}
+                    {fmtEuro(margeEstimeeEnCours)}
                   </div>
                   <div className={`text-xs font-semibold ${arrondiEuro(margeEstimeeEnCours) >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>
                     {margeEstimeeEnCoursPct.toLocaleString('fr-FR', { maximumFractionDigits: 1 })} % du vendu

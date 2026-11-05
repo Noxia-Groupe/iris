@@ -4,12 +4,11 @@ import { apiFetch } from '../api';
 import { TYPES_CHANTIER } from '../chantierTypes';
 import { useCompanyTimezone, useFuseauSocieteConnu } from '../companyTimezoneContext';
 import { companyDateInputValue } from '../lib/dateFormatting';
+import { fmtEuroCentime } from '../lib/formats';
 
 type DevisAConvertir = { id: string; numero: string; version: number; objet: string; totalHt: number; client: { id: string; raisonSociale: string } };
 type Compte = { id: string; name: string };
 type Resultat = { ok: boolean; texte: string; chantierId?: string };
-
-const euros = (montant: number) => montant.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' });
 
 // Ouverture du chantier d'une affaire depuis l'Administration (décision de Nelson du 14-10-2026).
 // Un chantier n'existe que par la conversion du devis signé de son affaire, et chaque affaire
@@ -161,7 +160,7 @@ export default function OuvrirChantierAffaire({ onOuvert }: { onOuvert: () => vo
             </select>
             {choisi && (
               <p className="text-sm text-gray-600 mt-2 break-words">
-                Chantier « {choisi.objet} » pour {choisi.client.raisonSociale}, vendu {euros(choisi.totalHt)} HT.
+                Chantier « {choisi.objet} » pour {choisi.client.raisonSociale}, vendu {fmtEuroCentime(choisi.totalHt)} HT.
               </p>
             )}
           </div>

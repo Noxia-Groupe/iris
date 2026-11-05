@@ -5,7 +5,7 @@ import { isAdminRole } from '../roles';
 import { CoutsSuitesChantier } from './CoutsSuitesChantier';
 import { hypotheseCoutHoraire, hypotheseMateriel, type EstimationMarge } from '../lib/suiviChantiers';
 import { arrondiEuro, arrondiCentime } from '../lib/montants';
-import { toDateFrancaise, fmtEuro, fmtHeures } from '../lib/formatsChantier';
+import { toDateFrancaise, fmtEuro, fmtHeures } from '../lib/formats';
 
 export type FactureLiee = {
   id: string;
