@@ -38,6 +38,11 @@ export function ChantierIndicateurs({ showBudgetVendu, chantier, userRole, handl
   parFournisseur: BreakdownRow[];
   parIntervenant: BreakdownRow[];
 }) {
+  // Affaire annulée (#483, décision de Nelson du 04-11-2026, option 1 : « Masquer ces montants ») :
+  // elle ne se facture plus (refus du serveur, factures/routes.ts), si bien que le reste à
+  // facturer, la marge et les alertes de budget sont remplacés par « Affaire annulée ». Le
+  // statut seul décide, et non `isTermine`, qui couvre aussi le chantier terminé.
+  const affaireAnnulee = chantier.statut === 'ANNULE';
   return (
     <>
           {/* Key Metrics */}
@@ -51,10 +56,14 @@ export function ChantierIndicateurs({ showBudgetVendu, chantier, userRole, handl
             )}
 
             {chantier.facturation && (
-              <div className="bg-emerald-50 p-5 rounded-xl border border-emerald-100 flex flex-col justify-center">
+              <div data-facturation className="bg-emerald-50 p-5 rounded-xl border border-emerald-100 flex flex-col justify-center">
                 <div className="text-xs font-bold text-emerald-700 uppercase tracking-widest mb-1">Facturé HT</div>
                 <div className="text-2xl font-black text-emerald-800">{fmtEuro(chantier.facturation.totalFactureHt)}</div>
-                <div className="mt-1 text-xs text-emerald-700">Reste à facturer : {fmtEuro(chantier.facturation.resteAFacturerHt)}</div>
+                {affaireAnnulee ? (
+                  <div className="mt-1 text-xs text-gray-600">Affaire annulée</div>
+                ) : (
+                  <div className="mt-1 text-xs text-emerald-700">Reste à facturer : {fmtEuro(chantier.facturation.resteAFacturerHt)}</div>
+                )}
               </div>
             )}
 
@@ -113,19 +122,25 @@ export function ChantierIndicateurs({ showBudgetVendu, chantier, userRole, handl
           {/* Marge Commerciale (admin, ou conducteur responsable sur sa fiche chantier — cf.
               GET /api/chantiers/:id côté serveur —, si activée dans les paramètres) */}
           {showMarge && (
-            <div className={`mb-8 p-6 rounded-xl border-l-8 flex flex-col gap-4 shadow-sm relative overflow-hidden ${margeAffichee > 0 ? 'bg-emerald-50 border-emerald-500' : 'bg-red-50 border-red-500'}`}>
+            <div data-marge-commerciale className={`mb-8 p-6 rounded-xl border-l-8 flex flex-col gap-4 shadow-sm relative overflow-hidden ${affaireAnnulee ? 'bg-gray-50 border-gray-300' : margeAffichee > 0 ? 'bg-emerald-50 border-emerald-500' : 'bg-red-50 border-red-500'}`}>
               <div className="flex flex-col md:flex-row justify-between items-center gap-4">
                 <div className="z-10 text-center md:text-left">
-                  <div className={`text-xs font-bold uppercase tracking-widest ${margeAffichee > 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                  <div className={`text-xs font-bold uppercase tracking-widest ${affaireAnnulee ? 'text-gray-500' : margeAffichee > 0 ? 'text-emerald-700' : 'text-red-700'}`}>
                     Marge Commerciale
                   </div>
-                  <div className={`text-5xl font-black mt-2 tracking-tight ${margeAffichee > 0 ? 'text-emerald-700' : 'text-red-700'}`}>
-                    {margeAffichee.toLocaleString()} €
-                  </div>
-                  {metrics.margePct != null && (
-                    <div className={`text-sm font-bold mt-1 ${margeAffichee > 0 ? 'text-emerald-700' : 'text-red-700'}`}>
-                      {metrics.margePct.toFixed(1)}% du budget vendu
-                    </div>
+                  {affaireAnnulee ? (
+                    <div className="text-2xl font-black mt-2 tracking-tight text-gray-600">Affaire annulée</div>
+                  ) : (
+                    <>
+                      <div className={`text-5xl font-black mt-2 tracking-tight ${margeAffichee > 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                        {margeAffichee.toLocaleString()} €
+                      </div>
+                      {metrics.margePct != null && (
+                        <div className={`text-sm font-bold mt-1 ${margeAffichee > 0 ? 'text-emerald-700' : 'text-red-700'}`}>
+                          {metrics.margePct.toFixed(1)}% du budget vendu
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
 
