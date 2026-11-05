@@ -973,6 +973,9 @@ test.describe('Facturation — parcours utilisateur', () => {
     // Un règlement entièrement affecté seulement : l'écart bloque l'envoi.
     await montant.fill('50');
     await expect(formulaire.getByRole('status', { name: 'Affectation du règlement' })).toContainText('affecté en trop : 70,00 €');
+    // #499 : au centime en devise, avec l'espace insécable U+00A0 avant « € », que la chaîne ci-dessus ne distingue pas
+    // de l'espace ordinaire du texte de saisie (Playwright ramène toute espace à l'espace ordinaire).
+    await expect(formulaire.getByRole('status', { name: 'Affectation du règlement' })).toHaveText(/^Affecté : 120,00\u00A0€ sur 50,00\u00A0€ — affecté en trop : 70,00\u00A0€$/);
     await expect(envoyer).toBeDisabled();
     await formulaire.getByRole('button', { name: 'Répartir le montant' }).click();
     await expect(part).toHaveValue('50,00');
@@ -1019,6 +1022,50 @@ test.describe('Facturation — parcours utilisateur', () => {
     await expect(apres).toContainText('EMISE');
     await expect(apres).toContainText('Partiellement réglée');
     await expect(apres).toContainText(/50,00\s€/);
+  });
+
+  // Correctif #499 (cadrage version 2, « Tests ») : les quatre phrases du résumé de la saisie passent au centime en devise
+  // (fmtEuroCentime), la famille des sept autres montants de la page (choix par défaut, à confirmer) ; les champs de
+  // saisie gardent leur texte modifiable (« 1481,40 », saisieDeCentimes). Chaque expression nomme U+202F (milliers) et
+  // U+00A0 (avant « € ») : avec une chaîne, Playwright ramènerait toute espace à l'espace ordinaire.
+  test('#499 : le résumé de la saisie d’un règlement écrit ses quatre phrases au centime en devise, au-delà de 1 000 €', async ({ allerSurPageAdmin, creerClient, apiAdmin, request, session }) => {
+    const api = `http://127.0.0.1:${process.env.E2E_API_PORT || '3001'}/api`;
+    const headers = { Authorization: `Bearer ${session.token}` };
+    const client = await creerClient('règlement milliers');
+    // 1 234,50 € HT, TVA à 20 % : 1 481,40 € TTC, dus en entier.
+    const brouillon = await request.post(`${api}/factures`, { headers, data: { clientId: client.id, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'Résumé d’un règlement au-delà de 1 000 €', dateEmission: dateDuJour(), dateEcheance: dateDuJour(), lignes: [{ designation: 'Centrale d’alarme', quantite: 1, prixUnitaireHt: 1234.5, tauxTva: 20 }] } });
+    expect(brouillon.ok(), await brouillon.text()).toBeTruthy();
+    const emission = await request.post(`${api}/factures/${(await brouillon.json()).id}/emettre`, { headers });
+    expect(emission.ok(), await emission.text()).toBeTruthy();
+    const facture = await emission.json() as { id: string; numero: string; totalTtc: number };
+    expect(facture.totalTtc).toBe(1481.4);
+
+    const page = await allerSurPageAdmin(`/reglements?facture=${facture.id}`);
+    const formulaire = page.getByRole('form', { name: 'Nouveau règlement' });
+    const montant = formulaire.getByLabel('Montant reçu');
+    const part = formulaire.getByRole('textbox', { name: `Montant affecté à la facture ${facture.numero}` });
+    const resume = formulaire.getByRole('status', { name: 'Affectation du règlement' });
+    // Les champs de saisie gardent le texte de saisie, sans séparateur des milliers.
+    await expect(montant).toHaveValue('1481,40');
+    await expect(part).toHaveValue('1481,40');
+    // « Affecté : … sur … », 1 481,40 € sur 1 481,40 € : écarte le texte de saisie d'avant #499 (« 1481,40 € », espace
+    // ordinaire), la forme des documents (U+0020 avant « € ») et des centimes non divisés par 100 (« 148 140,00 € »).
+    await expect(resume).toHaveText(/^Affecté : 1\u202F481,40\u00A0€ sur 1\u202F481,40\u00A0€$/);
+    // « reste à affecter » : 3 000,00 € reçus, 1 481,40 € affectés, 1 518,60 € à affecter.
+    await montant.fill('3000');
+    await expect(resume).toHaveText(/^Affecté : 1\u202F481,40\u00A0€ sur 3\u202F000,00\u00A0€ — reste à affecter : 1\u202F518,60\u00A0€$/);
+    // « affecté en trop » : 200,00 € reçus pour 1 481,40 € affectés, 1 281,40 € en trop.
+    await montant.fill('200');
+    await expect(resume).toHaveText(/^Affecté : 1\u202F481,40\u00A0€ sur 200,00\u00A0€ — affecté en trop : 1\u202F281,40\u00A0€$/);
+    // « Trop-perçu de … » : 2 715,90 € affectés à une facture qui en doit 1 481,40 €, soit 1 234,50 € de trop-perçu.
+    await montant.fill('2715,90');
+    await part.fill('2715,90');
+    await expect(resume).toHaveText(/^Affecté : 2\u202F715,90\u00A0€ sur 2\u202F715,90\u00A0€$/);
+    const numero = facture.numero.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    await expect(formulaire.getByText(/^Trop-perçu de/)).toHaveText(new RegExp(`^Trop-perçu de 1\u202F234,50\u00A0€ sur la facture ${numero} : elle sera réglée, avec un reste dû négatif\\.$`));
+    // Le résumé n'écrit rien : la facture doit toujours 1 481,40 €, sans règlement.
+    const aRegler = await (await apiAdmin.get('/factures/a-regler')).json() as { factures: { id: string; resteDu: number; montantRegle: number }[] };
+    expect(aRegler.factures.filter((f) => f.id === facture.id).map((f) => [f.resteDu, f.montantRegle])).toEqual([[1481.4, 0]]);
   });
 
   // Ce parcours couvre confirmation, statut et téléchargement ; le contenu du PDF est
