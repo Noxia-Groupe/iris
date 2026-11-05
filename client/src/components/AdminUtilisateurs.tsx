@@ -1,5 +1,5 @@
 import type { RefObject } from 'react';
-import { isAdminRole, isSuperAdminRole, ROLE_SUPERADMIN, ROLE_TECHNICIEN } from '../roles';
+import { isAdminRole, isSuperAdminRole, ROLE_TECHNICIEN, typesCompteProposes } from '../roles';
 import type { CurrentUser } from '../lib/droits';
 import { DROITS_DEVIS, droitsApresBasculeDevis, etatDroitDevis } from '../lib/droitDevis';
 import { ChoixResponsable, type CompteResume } from './ChoixResponsable';
@@ -63,17 +63,8 @@ export function AdminUtilisateurs({ user, isSuper, users, newUserRole, setNewUse
               <div className="form-group mb-0">
                 <label className="form-label">Rôle d'accès</label>
                 <select name="role" value={newUserRole} onChange={(e) => setNewUserRole(e.target.value)} className="form-input">
-                  <option value="CONDUCTEUR_TRAVAUX">Conducteur de Travaux</option>
-                  <option value="COMMERCIAL">Commercial</option>
-                  <option value="ASSISTANTE_COMMERCIALE">Assistante commerciale</option>
-                  <option value="TECHNICIEN">Technicien</option>
-                  <option value="COMPTABLE">Comptable</option>
-                  <option value="DIRECTEUR_COMMERCIAL">Directeur commercial</option>
-                  <option value="RESPONSABLE">Responsable</option>
-                  <option value="DIRECTEUR">Directeur</option>
-                  <option value="ADMIN">Administrateur</option>
-                  {/* Seul un super administrateur peut en désigner un autre. */}
-                  {isSuper && <option value={ROLE_SUPERADMIN}>Super Administrateur</option>}
+                  {/* Seul un super administrateur peut en désigner un autre (typesCompteProposes). */}
+                  {typesCompteProposes(isSuper).map((type) => <option key={type.valeur} value={type.valeur}>{type.libelle}</option>)}
                 </select>
               </div>
               <div className="form-group mb-0 md:col-span-2 flex flex-wrap gap-3">
@@ -159,16 +150,7 @@ export function AdminUtilisateurs({ user, isSuper, users, newUserRole, setNewUse
                             ? MESSAGE_COMPTE_SUPERADMIN
                             : 'Modifier le rôle'}
                       >
-                        <option value="CONDUCTEUR_TRAVAUX">Conducteur de Travaux</option>
-                        <option value="COMMERCIAL">Commercial</option>
-                  <option value="ASSISTANTE_COMMERCIALE">Assistante commerciale</option>
-                  <option value="TECHNICIEN">Technicien</option>
-                  <option value="COMPTABLE">Comptable</option>
-                  <option value="DIRECTEUR_COMMERCIAL">Directeur commercial</option>
-                  <option value="RESPONSABLE">Responsable</option>
-                  <option value="DIRECTEUR">Directeur</option>
-                        <option value="ADMIN">Administrateur</option>
-                        {isSuper && <option value={ROLE_SUPERADMIN}>Super Administrateur</option>}
+                        {typesCompteProposes(isSuper).map((type) => <option key={type.valeur} value={type.valeur}>{type.libelle}</option>)}
                       </select>
                     </td>
                     <td className="px-4 py-4">

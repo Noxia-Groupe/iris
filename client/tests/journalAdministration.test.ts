@@ -19,8 +19,8 @@ test('le mode d’envoi des documents se lit en clair dans le journal d’admini
 });
 
 test('les autres champs du journal se lisent comme avant le déplacement de lisible()', () => {
-  assert.equal(lisible('ADMIN', 'role'), 'Admin');
-  assert.equal(lisible('SUPERADMIN', 'role'), 'Super Admin');
+  assert.equal(lisible('ADMIN', 'role'), 'Administrateur');
+  assert.equal(lisible('SUPERADMIN', 'role'), 'Super administrateur');
   assert.equal(lisible(true, 'planningActif'), 'oui');
   assert.equal(lisible(false, 'planningActif'), 'non');
   assert.equal(lisible(null, 'joursSansSaisie'), '—');

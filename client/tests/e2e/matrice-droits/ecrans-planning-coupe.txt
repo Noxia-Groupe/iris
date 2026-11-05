@@ -1,12 +1,12 @@
 CT | fiche intervention | intervention-planifiee | planning coupé | titre « Fiche intervention » ; boutons : Annuler, Créer la suite, Démarrer, Enregistrer l’achat matériel
 CT | fiche intervention | intervention-terminee | planning coupé | titre « Fiche intervention » ; boutons : Créer la suite, Enregistrer l’achat matériel, Envoyer le compte rendu de l’intervention <intervention-terminee>, Faire signer ce compte rendu, Marquer « à suivre », PDF du compte rendu de l’intervention <intervention-terminee>
-CT | menu | — | planning coupé | sections : Accueil, Chantiers, Interventions, Pilotage, Référentiels, Réglages ; type affiché : Conducteur
+CT | menu | — | planning coupé | sections : Accueil, Chantiers, Interventions, Pilotage, Référentiels, Réglages ; type affiché : Conducteur de travaux
 CT | planning | hors lignes | planning coupé | redirigé vers /
 CT | route /interventions/:id | intervention-planifiee | planning coupé | hors menu ; accessible
 CT | route /planning | — | planning coupé | hors menu ; redirigée vers /
 SA | fiche intervention | intervention-planifiee | planning coupé | titre « Fiche intervention » ; boutons : Annuler, Créer la suite, Démarrer, Enregistrer l’achat matériel, Remettre à planifier
 SA | fiche intervention | intervention-terminee | planning coupé | titre « Fiche intervention » ; boutons : Créer la suite, Enregistrer l’achat matériel, Envoyer le compte rendu de l’intervention <intervention-terminee>, Faire signer ce compte rendu, Marquer « à suivre », PDF du compte rendu de l’intervention <intervention-terminee>
-SA | menu | — | planning coupé | sections : Accueil, Chantiers, Interventions, Facturation, Pilotage, Référentiels, Réglages ; type affiché : Super Admin
+SA | menu | — | planning coupé | sections : Accueil, Chantiers, Interventions, Facturation, Pilotage, Référentiels, Réglages ; type affiché : Super administrateur
 SA | planning | hors lignes | planning coupé | titre « Planning d'intervention » ; boutons : <partage du planning>, Affectation, Semaine #, Semaine précédente, Semaine suivante, Types d'événements
 SA | route /interventions/:id | intervention-planifiee | planning coupé | hors menu ; accessible
 SA | route /planning | — | planning coupé | menu « Chantiers › Planning » ; accessible
