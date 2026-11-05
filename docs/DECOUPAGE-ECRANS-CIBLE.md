@@ -91,7 +91,7 @@ Plages relevées sur `main` `bdef300` (03-11-2026) ; 112 props au total.
 | `ChantierModaleModification.tsx` | contenu de la modale « Modifier le chantier » (1358-1479, 19 props, 17 après #493) |
 | `ChantierEnTete.tsx` | en-tête (titre, statut, client, dates, commercial modifiable en place), alertes et bannière d'encaissement (701-804, 16 props), avec `STATUT_LABELS` ; un fragment |
 | `ChantierIndicateurs.tsx` | indicateurs clés et factures liées, marge et estimation, barres de progression, `CoutsSuitesChantier`, répartitions (806-1020, 19 props), avec `FactureLiee` (exporté : la page l'emploie aussi) ; un fragment |
-| `lib/formatsChantier.ts` | `toDateFrancaise`, `fmtDate`, `fmtEuro` et `fmtHeures` (25-35), tels quels : plusieurs sections les emploient |
+| `lib/formatsChantier.ts` | `toDateFrancaise`, `fmtDate`, `fmtEuro` et `fmtHeures` (25-35), tels quels : plusieurs sections les emploient ; le fichier est devenu `lib/formats.ts`, seul module de formats des montants et des heures, avec #500 (A5, #205) |
 
 Restent dans la page, inchangés :
 - tous les hooks (avant les retours anticipés, l.596 et 602 sur `bdef300`) et les valeurs dérivées de `metrics` (613-654) ;
@@ -120,8 +120,8 @@ Une PR à la fois, chacune depuis `main` à jour, avec le même contrat que pour
   - Admin, onglet Intervenants : une branche inaccessible (l.738 et 757-761), `colSpan={4}` pour 5 colonnes (l.832) : #202, **réglée par #487** (branche inaccessible retirée ; le `colSpan` était déjà corrigé depuis `8b189ff`, et les renvois de lignes ci-dessus datent d'avant le déplacement) ;
   - Admin, onglet Utilisateurs : les options de rôle dupliquées entre le formulaire (l.1194-1204) et le tableau (l.1290-1299) : #203, **réglée par #491** (une seule liste et un seul libellé par type de compte) ;
   - fiche chantier : deux références jamais lues (`editChantierBudgetRef`, `editChantierAdresseRef`, l.97-98), alors que le commentaire l.94-96 annonce un préremplissage qui n'existe pas : #204, **réglée par #493** ;
-  - utilitaires de format dupliqués entre écrans (`fmtEuro`, `fmtHeures`, `toDateFrancaise`, alors que `jourFrancais` existe dans `lib/dateFormatting.ts`) : #205 ;
-  - lecture du rôle : Planning et la fiche chantier lisent `localStorage.user` directement, quand Admin passe par `getCurrentUser` et `useCurrentRole` : #206.
+  - utilitaires de format dupliqués entre écrans (`fmtEuro`, `fmtHeures`, `toDateFrancaise`, alors que `jourFrancais` existe dans `lib/dateFormatting.ts`) : #205, **réglée par #500** (un seul module, `client/src/lib/formats.ts`, qui reprend `jourFrancais` pour les jours ; les écrans listés par le cadrage l'emploient ; le reste est suivi par [#499](https://github.com/Noxia-Groupe/iris/issues/499)) ;
+  - lecture du rôle : Planning et la fiche chantier lisent `localStorage.user` directement, quand Admin passe par `getCurrentUser` et `useCurrentRole` : #206, **réglée par #497** (le rôle est lu par `roleDuCompte`, sans repli sur « Conducteur » ; les six pages, dont Planning et la fiche chantier, lisent le compte relu par `useCurrentUser()` ; un compte sans rôle n'a ni planning ni administration à l'écran, choix par défaut, à confirmer, passation section 4).
 
 ## Décisions du 18-10-2026
 
@@ -129,4 +129,4 @@ Réponse de Nelson aux trois questions de la proposition : « 1. Oui je valide l
 
 1. **Principe validé par Nelson** : déplacement pur, état laissé dans la page. **Ordre retenu par Claude Code**, Nelson ne s'étant pas prononcé sur ce point de la question : outil de comparaison du rendu, puis Planning, Admin et fiche chantier.
 2. **Fichiers dans `components/`, à plat**, comme aujourd'hui (décision de Nelson).
-3. **Petites anomalies** : le seul point délégué par Nelson. Chacune a son issue : #202, #203, #204, #205 et #206. Sa correction vient **après** les trois PR de déplacement, dans sa propre PR avec un test. Corriger pendant un déplacement fausserait la preuve d'un rendu identique. Depuis la décision de Nelson du 23-10-2026, un test manquant seul, hors montants, ne retarde plus la fusion : pour #202, la correction est fusionnée (#487) et son test est versé à #489 ; pour #204, le test manquant du budget et de l'adresse est versé dans sa PR (#493).
+3. **Petites anomalies** : le seul point délégué par Nelson. Chacune a son issue : #202, #203, #204, #205 et #206. Sa correction vient **après** les trois PR de déplacement, dans sa propre PR avec un test. Corriger pendant un déplacement fausserait la preuve d'un rendu identique. Depuis la décision de Nelson du 23-10-2026, un test manquant seul, hors montants, ne retarde plus la fusion : pour #202, la correction est fusionnée (#487) et son test est versé à #489 ; pour #204, le test manquant du budget et de l'adresse est versé dans sa PR (#493) : c'est un champ de montant, versé avant la fusion (choix par défaut, à confirmer, passation section 3), et non une application de cette règle. Pour #206, le test du type relu est versé à [#498](https://github.com/Noxia-Groupe/iris/issues/498) ; pour #205, le test manquant d'un montant (famille de chaque écran) est versé dans sa PR (#500).
