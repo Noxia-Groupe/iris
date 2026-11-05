@@ -245,3 +245,45 @@ test('changement de client tracé au journal de la fiche, puis refusé une fois 
   await expect(enTeteClient).toHaveText(`Client: ${second.raisonSociale}`);
   await expect(traces).toHaveCount(1);
 });
+
+// #204 (PR A2) : « Modifier le chantier » envoie l'adresse et le budget global tels que saisis, sans rien y écrire
+// d'autre (les références retirées annonçaient un préremplissage qui n'existait pas) ; rouverte, la fenêtre les
+// reprend du chantier relu.
+test('#204 : « Modifier le chantier » envoie l’adresse et le budget global saisis, et les reprend à la réouverture', async ({ allerSurPageAdmin, creerClient, request, session }) => {
+  const headers = auth(session.token);
+  const client = await creerClient('fiche 204');
+  const chantier = await ouvrirAffaire(request, headers, client.id, `Fiche 204 ${Date.now()}`);
+  const lire = async () => (await (await request.get(`${api}/chantiers/${chantier.id}`, { headers })).json()) as { adresse: string | null; budgetGlobalVendu: number | null };
+  const avant = await lire();
+  // Témoin : l'administration lit le budget global de l'affaire convertie.
+  expect(typeof avant.budgetGlobalVendu).toBe('number');
+
+  const page = await allerSurPageAdmin(`/chantiers/${chantier.id}`);
+  const ouvrirEdition = async () => {
+    await page.getByRole('button', { name: 'Modifier', exact: true }).first().click();
+    await expect(page.getByRole('heading', { name: 'Modifier le chantier' })).toBeVisible();
+  };
+  const adresse = page.getByPlaceholder('Adresse du site');
+  const budget = page.locator('.form-group', { has: page.getByText('Budget Global (€ HT)', { exact: true }) }).locator('input');
+
+  // 1. À l'ouverture, les deux champs reprennent le chantier ; enregistrés sans retouche, ils partent tels quels.
+  await ouvrirEdition();
+  await expect(adresse).toHaveAttribute('name', 'adresse');
+  await expect(budget).toHaveAttribute('name', 'budgetGlobalVendu');
+  await expect(adresse).toHaveValue(avant.adresse ?? '');
+  await expect(budget).toHaveValue(String(avant.budgetGlobalVendu));
+  expect(await enregistrer(page, chantier.id)).toMatchObject({ adresse: avant.adresse ?? '', budgetGlobalVendu: String(avant.budgetGlobalVendu) });
+  expect(await lire()).toMatchObject({ adresse: avant.adresse, budgetGlobalVendu: avant.budgetGlobalVendu });
+
+  // 2. Saisis, l'adresse et le budget (au centime) partent tels quels et sont enregistrés.
+  await ouvrirEdition();
+  await adresse.fill('12 rue de la Fiche 204, 14000 Caen');
+  await budget.fill('12345.67');
+  expect(await enregistrer(page, chantier.id)).toMatchObject({ adresse: '12 rue de la Fiche 204, 14000 Caen', budgetGlobalVendu: '12345.67' });
+  expect(await lire()).toMatchObject({ adresse: '12 rue de la Fiche 204, 14000 Caen', budgetGlobalVendu: 12345.67 });
+
+  // 3. Rouverte, la fenêtre reprend les valeurs enregistrées.
+  await ouvrirEdition();
+  await expect(adresse).toHaveValue('12 rue de la Fiche 204, 14000 Caen');
+  await expect(budget).toHaveValue('12345.67');
+});
