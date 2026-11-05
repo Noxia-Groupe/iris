@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import ts from 'typescript';
 import { fmtDate, fmtEuro, fmtEuroCentime, fmtHeures, fmtMontantDocument, fmtNombreHeures, toDateFrancaise } from '../src/lib/formats.ts';
 import { jourFrancais } from '../src/lib/dateFormatting.ts';
 import { arrondiCentime, arrondiEuro, sommeExacte } from '../src/lib/montants.ts';
@@ -332,13 +333,41 @@ const FAMILLES_MONTANT: Record<string, string> = {
   formatPrix: 'forme des documents',
   formatPrixFacultatif: 'forme des documents',
 };
-// Les commentaires ne comptent pas : un commentaire peut nommer une autre famille sans l'employer. Le « // » d'une adresse
-// (« https:// ») n'ouvre pas de commentaire.
-const sansCommentaires = (texte: string) => texte.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:\\])\/\/.*$/gm, '$1');
-const famillesEmployees = (texte: string) => {
-  const code = sansCommentaires(texte);
-  return [...new Set(Object.keys(FAMILLES_MONTANT).filter((nom) => new RegExp(`\\b${nom}\\b`).test(code)).map((nom) => FAMILLES_MONTANT[nom]))];
+// Relevé par le parseur TypeScript : seuls les identifiants du code comptent (N9 de la vérification de l'audit de #500).
+// Un commentaire, une chaîne, une expression régulière ou un texte JSX peuvent nommer une famille, ou contenir « /* » et
+// « // », sans rien employer ni rien cacher. Un retrait des commentaires par expression régulière laissait un « /* » écrit
+// dans un commentaire de ligne (« /api/factures/* »), une chaîne ou une expression régulière avaler le code jusqu'au
+// prochain « */ ».
+const arbre = (texte: string, fichier = 'extrait.tsx') => ts.createSourceFile(fichier, texte, ts.ScriptTarget.Latest, false, fichier.endsWith('.ts') ? ts.ScriptKind.TS : ts.ScriptKind.TSX);
+const identifiants = (noeud: ts.Node, vus = new Set<string>()) => {
+  if (ts.isIdentifier(noeud)) vus.add(noeud.text);
+  // Rappel sans valeur rendue : forEachChild s'arrête au premier enfant dont le rappel rend une valeur.
+  ts.forEachChild(noeud, (enfant) => { identifiants(enfant, vus); });
+  return vus;
 };
+const famillesDe = (noeud: ts.Node) => {
+  const vus = identifiants(noeud);
+  return [...new Set(Object.keys(FAMILLES_MONTANT).filter((nom) => vus.has(nom)).map((nom) => FAMILLES_MONTANT[nom]))];
+};
+const famillesEmployees = (texte: string, fichier?: string) => famillesDe(arbre(texte, fichier));
+// Enveloppes exportées : export dont le corps se réduit à une expression hors JSX (alias, flèche à expression, fonction à
+// un seul return), sur une ou plusieurs lignes. Un composant qui rend du JSX n'en est pas une.
+const expressionSeule = (noeud: ts.Node | undefined): ts.Node | null => {
+  if (!noeud) return null;
+  if (!ts.isArrowFunction(noeud) && !ts.isFunctionExpression(noeud) && !ts.isFunctionDeclaration(noeud)) return noeud;
+  const corps = noeud.body;
+  if (!corps || !ts.isBlock(corps)) return corps ?? null;
+  const [seule, ...autres] = corps.statements;
+  return seule && !autres.length && ts.isReturnStatement(seule) ? seule.expression ?? null : null;
+};
+const estJsx = (noeud: ts.Node): boolean => (ts.isParenthesizedExpression(noeud) ? estJsx(noeud.expression) : ts.isJsxElement(noeud) || ts.isJsxFragment(noeud) || ts.isJsxSelfClosingElement(noeud));
+const enveloppesDeFamille = (fichierArbre: ts.SourceFile) => fichierArbre.statements.flatMap((instruction) => {
+  if (!ts.canHaveModifiers(instruction) || !(ts.getModifiers(instruction) ?? []).some((m) => m.kind === ts.SyntaxKind.ExportKeyword)) return [];
+  const exports: [string, ts.Node | null][] = ts.isVariableStatement(instruction)
+    ? instruction.declarationList.declarations.flatMap((d) => (ts.isIdentifier(d.name) ? [[d.name.text, expressionSeule(d.initializer)] as [string, ts.Node | null]] : []))
+    : ts.isFunctionDeclaration(instruction) && instruction.name ? [[instruction.name.text, expressionSeule(instruction)]] : [];
+  return exports.filter(([, expression]) => expression && !estJsx(expression) && famillesDe(expression).length).map(([nom]) => nom);
+});
 // Famille du texte d'avant #205, fichier par fichier (test « chaque famille garde son texte »).
 const FAMILLE_PAR_FICHIER: [string, string][] = [
   // Inventaire du cadrage.
@@ -367,25 +396,41 @@ const FAMILLE_PAR_FICHIER: [string, string][] = [
 
 test('famille de montant de chaque fichier : celle de son texte d’avant #205, et elle seule ; tout fichier qui met en forme un montant est lié à la sienne', () => {
   // Témoins du relevé : un nom se reconnaît seul (fmtEuro n'est pas lu dans fmtEuroCentime), un alias compte pour sa
-  // famille, un commentaire ne compte pas, une adresse n'ouvre pas de commentaire.
+  // famille, un commentaire, une chaîne ou un texte JSX ne comptent pas.
   assert.deepEqual(famillesEmployees('{fmtEuroCentime(facture.totalTtc)}'), ['centime en devise']);
   assert.deepEqual(famillesEmployees("import { formatEuros } from '../lib/mainOeuvre';"), ['forme des documents']);
   assert.deepEqual(famillesEmployees('{fmtEuro(a)} {fmtEuroCentime(b)}'), ['euro près', 'centime en devise']);
   assert.deepEqual(famillesEmployees('{fmtEuroCentime(a)} // et non fmtMontantDocument\n/* ni fmtEuro */ {/* ni formatPrix */}'), ['centime en devise']);
   assert.deepEqual(famillesEmployees("const lien = 'https://exemple.fr'; fmtEuro(a);"), ['euro près']);
+  assert.deepEqual(famillesEmployees("const nom = 'fmtEuroCentime'; const p = <p>fmtMontantDocument</p>;"), []);
+  // Un « /* » dans un commentaire de ligne, une chaîne ou une expression régulière n'efface pas le code qui suit (N9).
+  assert.deepEqual(famillesEmployees('// routes /api/factures/*\n{fmtEuroCentime(a)} {fmtMontantDocument(b)}\n{/* fin */}'), ['centime en devise', 'forme des documents']);
+  assert.deepEqual(famillesEmployees("const routes = '/api/factures/*';\n{fmtEuroCentime(a)} {fmtMontantDocument(b)}\n/* fin */"), ['centime en devise', 'forme des documents']);
+  assert.deepEqual(famillesEmployees("const sansBarre = (c: string) => c.replace(/\\/*$/, '');\n{fmtMontantDocument(b)}\n/* fin */"), ['forme des documents']);
+  // Témoins des enveloppes : alias, flèche et fonction à un seul return, sur une ou plusieurs lignes ; ni un composant,
+  // ni une fonction qui compose sa phrase en plusieurs instructions.
+  assert.deepEqual(enveloppesDeFamille(arbre([
+    'export const a = fmtMontantDocument;',
+    'export const b = (m: number) =>\n  fmtEuro(m);',
+    'export function c(m: number) {\n  return fmtEuroCentime(m);\n}',
+    'export function Composant() {\n  return (<span>{fmtEuro(1)}</span>);\n}',
+    'export const phrase = (m: number) => { const t = fmtEuro(m); return `Total ${t}`; };',
+    'export const sansFamille = (m: number) => m;',
+  ].join('\n'))), ['a', 'b', 'c']);
   for (const [fichier, famille] of FAMILLE_PAR_FICHIER) {
-    assert.deepEqual(famillesEmployees(source(fichier)), [famille], `${fichier} : familles de montant employées`);
+    assert.deepEqual(famillesEmployees(source(fichier), fichier), [famille], `${fichier} : familles de montant employées`);
   }
   // Liste close : tout fichier de src/ qui emploie une famille y figure, hors le module et l'exception nommée (#388) ; et
-  // tout export d'une ligne qui renvoie à une famille (un alias, une enveloppe) est compté dans FAMILLES_MONTANT.
+  // toute enveloppe exportée d'une famille (alias, flèche ou fonction réduite à une expression) est comptée dans
+  // FAMILLES_MONTANT.
   const sources = path.join(racineClient, 'src');
   for (const chemin of fichiersSources(sources)) {
     const relatif = path.relative(sources, chemin).split(path.sep).join('/');
     if (relatif === 'lib/formats.ts' || relatif in EXCEPTIONS) continue;
-    const texte = readFileSync(chemin, 'utf8');
-    if (famillesEmployees(texte).length) assert.ok(FAMILLE_PAR_FICHIER.some(([f]) => f === relatif), `${relatif} : met en forme un montant ; sa famille est à fixer dans FAMILLE_PAR_FICHIER`);
-    for (const [, nom, definition] of sansCommentaires(texte).matchAll(/^export const (\w+)\s*=(.*)$/gm)) {
-      if (famillesEmployees(definition).length) assert.ok(nom in FAMILLES_MONTANT, `${relatif} : ${nom} renvoie à une famille de montant ; à compter dans FAMILLES_MONTANT`);
+    const fichierArbre = arbre(readFileSync(chemin, 'utf8'), chemin);
+    if (famillesDe(fichierArbre).length) assert.ok(FAMILLE_PAR_FICHIER.some(([f]) => f === relatif), `${relatif} : met en forme un montant ; sa famille est à fixer dans FAMILLE_PAR_FICHIER`);
+    for (const nom of enveloppesDeFamille(fichierArbre)) {
+      assert.ok(nom in FAMILLES_MONTANT, `${relatif} : ${nom} renvoie à une famille de montant ; à compter dans FAMILLES_MONTANT`);
     }
   }
 });
