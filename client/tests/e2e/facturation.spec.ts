@@ -1068,6 +1068,38 @@ test.describe('Facturation — parcours utilisateur', () => {
     expect(aRegler.factures.filter((f) => f.id === facture.id).map((f) => [f.resteDu, f.montantRegle])).toEqual([[1481.4, 0]]);
   });
 
+  // Audit des montants de #502 : le trop-perçu annoncé se compte sur le reste dû de la facture, et non sur son total TTC.
+  // Sur une facture sans règlement, les deux coïncident ; ici, un premier règlement de 246,90 € ramène le reste dû de
+  // 1 481,40 € à 1 234,50 €.
+  test('#499 : le trop-perçu d’une facture déjà réglée en partie se compte sur son reste dû, au centime en devise', async ({ allerSurPageAdmin, creerClient, apiAdmin, request, session }) => {
+    const api = `http://127.0.0.1:${process.env.E2E_API_PORT || '3001'}/api`;
+    const headers = { Authorization: `Bearer ${session.token}` };
+    const client = await creerClient('trop-perçu reste dû');
+    const brouillon = await request.post(`${api}/factures`, { headers, data: { clientId: client.id, origine: 'HORS_AFFAIRE', motifHorsAffaire: 'Trop-perçu sur un reste dû', dateEmission: dateDuJour(), dateEcheance: dateDuJour(), lignes: [{ designation: 'Centrale d’alarme', quantite: 1, prixUnitaireHt: 1234.5, tauxTva: 20 }] } });
+    expect(brouillon.ok(), await brouillon.text()).toBeTruthy();
+    const emission = await request.post(`${api}/factures/${(await brouillon.json()).id}/emettre`, { headers });
+    expect(emission.ok(), await emission.text()).toBeTruthy();
+    const facture = await emission.json() as { id: string; numero: string; totalTtc: number };
+    expect(facture.totalTtc).toBe(1481.4);
+    const premier = await request.post(`${api}/reglements`, { headers, data: { clientId: client.id, dateReglement: dateDuJour(), montant: '246.90', moyen: 'VIREMENT', reference: `VIR partiel ${Date.now()}`, affectations: [{ factureId: facture.id, montant: '246.90' }] } });
+    expect(premier.ok(), await premier.text()).toBeTruthy();
+    const lire = async () => ((await (await apiAdmin.get('/factures/a-regler')).json()) as { factures: { id: string; resteDu: number; montantRegle: number }[] }).factures.filter((f) => f.id === facture.id).map((f) => [f.resteDu, f.montantRegle]);
+    expect(await lire()).toEqual([[1234.5, 246.9]]);
+
+    const page = await allerSurPageAdmin(`/reglements?facture=${facture.id}`);
+    const formulaire = page.getByRole('form', { name: 'Nouveau règlement' });
+    const part = formulaire.getByRole('textbox', { name: `Montant affecté à la facture ${facture.numero}` });
+    await expect(part).toHaveValue('1234,50');
+    await formulaire.getByLabel('Montant reçu').fill('2715,90');
+    await part.fill('2715,90');
+    await expect(formulaire.getByRole('status', { name: 'Affectation du règlement' })).toHaveText(/^Affecté : 2\u202F715,90\u00A0€ sur 2\u202F715,90\u00A0€$/);
+    // 2 715,90 − 1 234,50 = 1 481,40 € : écarte le trop-perçu compté sur le total TTC (2 715,90 − 1 481,40 = 1 234,50 €).
+    const numero = facture.numero.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    await expect(formulaire.getByText(/^Trop-perçu de/)).toHaveText(new RegExp(`^Trop-perçu de 1\u202F481,40\u00A0€ sur la facture ${numero} : elle sera réglée, avec un reste dû négatif\\.$`));
+    // Le résumé n'écrit rien.
+    expect(await lire()).toEqual([[1234.5, 246.9]]);
+  });
+
   // Ce parcours couvre confirmation, statut et téléchargement ; le contenu du PDF est
   // extrait et vérifié par les tests serveur avec pdf-parse.
   test('annule une facture après confirmation et garde son document téléchargeable', async ({ allerSurPageAdmin, creerClient, apiAdmin }) => {

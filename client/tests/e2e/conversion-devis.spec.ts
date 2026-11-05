@@ -226,11 +226,11 @@ test('formulaire de conversion à 320 px : une raison sociale insécable se coup
 });
 
 // Correctif #499 (cadrage version 2, « Tests ») : l'acompte constaté s'écrit à la forme des documents (fmtMontantDocument),
-// le texte du PDF du même devis (choix par défaut, à confirmer) ; c'est le montant constaté, et non le taux exigé, qui
-// s'affiche. L'acompte est constaté par POST /api/devis/:id/acompte, réservé à l'administration, avec le jeton d'un compte
+// comme les montants du même devis (choix par défaut, à confirmer) ; le PDF du devis, lui, n'imprime que le taux exigé
+// (devis/document.ts, « Acompte demandé : … % »). C'est le montant constaté, et non le taux exigé, qui s'affiche. L'acompte est constaté par POST /api/devis/:id/acompte, réservé à l'administration, avec le jeton d'un compte
 // administrateur, que l'écran affiche ensuite. Les expressions nomment U+202F (milliers) et U+0020 (avant « € ») : avec
 // une chaîne, Playwright ramènerait toute espace à l'espace ordinaire.
-test('#499 : l’acompte constaté par un administrateur s’affiche « Acompte de 1 234,50 € constaté », au texte du PDF', async ({ creerClient, request, session, connexion }) => {
+test('#499 : l’acompte constaté par un administrateur s’affiche « Acompte de 1 234,50 € constaté », à la forme des documents, comme les montants du même devis', async ({ creerClient, request, session, connexion }) => {
   const headers = { Authorization: `Bearer ${session.token}` };
   const suffixe = `${Date.now()}.${Math.random().toString(36).slice(2, 8)}`;
   const creationAdmin = await request.post(`${api}/users`, { headers, data: { email: `acompte.e2e.${Date.now()}@iris.test`, name: `Admin acompte ${suffixe}`, role: 'ADMIN' } });
@@ -238,8 +238,10 @@ test('#499 : l’acompte constaté par un administrateur s’affiche « Acompte 
   const admin = await creationAdmin.json() as { id: string };
   const client = await creerClient('acompte-milliers');
   const objet = `Acompte constaté milliers ${suffixe}`;
-  // 4 115,00 € HT, TVA à 20 % : 823,00 € ; 4 938,00 € TTC. Acompte exigé à 25 % : 1 234,50 €.
-  const creation = await request.post(`${api}/devis`, { headers, data: { clientId: client.id, objet, acompteExige: true, tauxAcompte: 25, lignes: [
+  // 4 115,00 € HT, TVA à 20 % : 823,00 € ; 4 938,00 € TTC. Acompte exigé à 30 %, soit 1 481,40 € ; constaté : 1 234,50 €
+  // (aucune règle ne borne l'acompte constaté : note N4 de l'audit des montants de #440, question posée à Nelson). Un taux
+  // de 25 % donnerait exactement 1 234,50 € et ne séparerait pas le montant constaté du taux exigé appliqué au TTC.
+  const creation = await request.post(`${api}/devis`, { headers, data: { clientId: client.id, objet, acompteExige: true, tauxAcompte: 30, lignes: [
     { designation: 'Centrale d’alarme', nature: 'FOURNITURE', quantite: 1, prixUnitaireHt: 4115, tauxTva: 20 },
   ] } });
   expect(creation.ok(), await creation.text()).toBeTruthy();
@@ -248,13 +250,14 @@ test('#499 : l’acompte constaté par un administrateur s’affiche « Acompte 
   expect(constat.status(), await constat.text()).toBe(200);
   const relu = (await (await request.get(`${api}/devis`, { headers })).json() as { id: string; acompteMontant: number; tauxAcompte: number; acompteReference: string; acompteRecuLe: string | null; totalTtc: number }[])
     .find((d) => d.id === devis.id);
-  expect([relu?.acompteMontant, relu?.tauxAcompte, relu?.acompteReference, !!relu?.acompteRecuLe, relu?.totalTtc]).toEqual([1234.5, 25, `VIR ${suffixe}`, true, 4938]);
+  expect([relu?.acompteMontant, relu?.tauxAcompte, relu?.acompteReference, !!relu?.acompteRecuLe, relu?.totalTtc]).toEqual([1234.5, 30, `VIR ${suffixe}`, true, 4938]);
 
   const page = await connexion(admin);
   await page.goto('/devis', { waitUntil: 'networkidle' });
   const ligne = page.locator('li', { hasText: objet });
   // 1 234,50 € : écarte le point décimal d'avant #499 (« 1234.50 € »), l'espace insécable U+00A0 du centime en devise, un
-  // séparateur des milliers absent ou ordinaire, et le taux à la place du montant (« 25,00 € »).
+  // séparateur des milliers absent ou ordinaire, le taux à la place du montant (« 30,00 € ») et le taux exigé appliqué au
+  // TTC à la place du montant constaté (« 1 481,40 € »).
   await expect(ligne.getByText(/^Acompte de/)).toHaveText(/^Acompte de 1\u202F234,50\u0020€ constaté$/);
   await expect(ligne).toContainText(/HT 4\u202F115,00\u0020€ · TVA 823,00\u0020€ · TTC 4\u202F938,00\u0020€/);
 });

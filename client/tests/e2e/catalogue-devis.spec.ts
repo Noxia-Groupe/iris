@@ -153,8 +153,10 @@ test('#499 : la liste du catalogue écrit le prix de vente et le prix d’achat 
   const suffixe = `${Date.now()}`;
   const avecAchat = await envoyer(request, session.token, 'post', '/catalogue/articles', { reference: `E2E-PRIX-A-${suffixe}`, nom: `Détecteur E2E ${suffixe}`, unite: 'u', prixVenteHt: '1234.50', tauxTva: '20', prixAchatHt: '1087.25' }) as { id: string; reference: string };
   const sansAchat = await envoyer(request, session.token, 'post', '/catalogue/articles', { reference: `E2E-PRIX-B-${suffixe}`, nom: `Sirène E2E ${suffixe}`, unite: 'u', prixVenteHt: '3050', tauxTva: '20' }) as { id: string; reference: string };
+  // Achat gratuit : un prix d'achat de 0, distinct d'un prix absent (catalogue/metier.ts, cataloguePrixAchat).
+  const achatNul = await envoyer(request, session.token, 'post', '/catalogue/articles', { reference: `E2E-PRIX-C-${suffixe}`, nom: `Badge E2E ${suffixe}`, unite: 'u', prixVenteHt: '1250', tauxTva: '20', prixAchatHt: '0' }) as { id: string; reference: string };
   const fiches = await (await request.get(`${api}/catalogue/articles`, { headers: { Authorization: `Bearer ${session.token}` } })).json() as { id: string; prixVenteHt: number; prixAchatHt: number | null }[];
-  expect([avecAchat.id, sansAchat.id].map((id) => fiches.filter((f) => f.id === id).map((f) => [f.prixVenteHt, f.prixAchatHt]))).toEqual([[[1234.5, 1087.25]], [[3050, null]]]);
+  expect([avecAchat.id, sansAchat.id, achatNul.id].map((id) => fiches.filter((f) => f.id === id).map((f) => [f.prixVenteHt, f.prixAchatHt]))).toEqual([[[1234.5, 1087.25]], [[3050, null]], [[1250, 0]]]);
 
   const page = await allerSurPageAdmin('/catalogue');
   await page.getByRole('button', { name: 'Articles', exact: true }).click();
@@ -168,4 +170,8 @@ test('#499 : la liste du catalogue écrit le prix de vente et le prix d’achat 
   // Sans prix d'achat : « — », et non « 0,00 € » ; le prix de vente aux centimes nuls garde ses deux décimales.
   await expect(cellules(sansAchat.reference).nth(3)).toHaveText(/^3\u202F050,00\u0020€$/);
   await expect(cellules(sansAchat.reference).nth(4)).toHaveText(/^—$/);
+  // Prix d'achat de 0 : « 0,00 € », et non « — » (écarte un test de vérité, `!f.prixAchatHt`, qui confondrait l'achat
+  // gratuit avec le prix absent).
+  await expect(cellules(achatNul.reference).nth(3)).toHaveText(/^1\u202F250,00\u0020€$/);
+  await expect(cellules(achatNul.reference).nth(4)).toHaveText(/^0,00\u0020€$/);
 });
