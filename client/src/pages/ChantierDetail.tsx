@@ -66,11 +66,6 @@ const ChantierDetail = () => {
   // en place — une réaffectation silencieuse à l'occasion d'une correction sans rapport.
   const [editResponsableId, setEditResponsableId] = useState('');
   const [editCommercialId, setEditCommercialId] = useState('');
-  // Préremplissage du budget global vendu et de l'adresse depuis la référence d'affaire
-  // sélectionné (modale d'édition ci-dessous) — champs non contrôlés, on écrit
-  // directement dedans.
-  const editChantierBudgetRef = useRef<HTMLInputElement>(null);
-  const editChantierAdresseRef = useRef<HTMLInputElement>(null);
 
   // Correction d'un pointage d'heures déjà saisi (erreur de date, d'intervenant, de
   // nombre d'heures...) — ouverte aux conducteurs comme aux admins (contrairement à
@@ -745,10 +740,10 @@ const ChantierDetail = () => {
         <ChantierModaleModification
           setEditingChantier={setEditingChantier} handleChantierSubmit={handleChantierSubmit} chantier={chantier}
           userRole={userRole} editClientId={editClientId} setEditClientId={setEditClientId} clientActuel={clientActuel}
-          editChantierAdresseRef={editChantierAdresseRef} editResponsableId={editResponsableId}
+          editResponsableId={editResponsableId}
           setEditResponsableId={setEditResponsableId} conducteurs={conducteurs} commerciaux={commerciaux}
           editCommercialId={editCommercialId} setEditCommercialId={setEditCommercialId}
-          companyTimezone={companyTimezone} fuseauConnu={fuseauConnu} editChantierBudgetRef={editChantierBudgetRef}
+          companyTimezone={companyTimezone} fuseauConnu={fuseauConnu}
           libelleBaremeReduit={libelleBaremeReduit} savingChantier={savingChantier}
         />
       )}

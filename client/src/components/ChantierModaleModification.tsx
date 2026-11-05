@@ -1,11 +1,10 @@
-import type { RefObject } from 'react';
 import { X } from 'lucide-react';
 import { SelecteurClient, type ClientActuel } from './SelecteurClient';
 import { TYPES_CHANTIER } from '../chantierTypes';
 import { isAdminRole } from '../roles';
 import { jourCivilChantier } from '../lib/dateFormatting';
 
-export function ChantierModaleModification({ setEditingChantier, handleChantierSubmit, chantier, userRole, editClientId, setEditClientId, clientActuel, editChantierAdresseRef, editResponsableId, setEditResponsableId, conducteurs, commerciaux, editCommercialId, setEditCommercialId, companyTimezone, fuseauConnu, editChantierBudgetRef, libelleBaremeReduit, savingChantier }: {
+export function ChantierModaleModification({ setEditingChantier, handleChantierSubmit, chantier, userRole, editClientId, setEditClientId, clientActuel, editResponsableId, setEditResponsableId, conducteurs, commerciaux, editCommercialId, setEditCommercialId, companyTimezone, fuseauConnu, libelleBaremeReduit, savingChantier }: {
   setEditingChantier: React.Dispatch<React.SetStateAction<boolean>>;
   handleChantierSubmit: (e: React.FormEvent) => void;
   chantier: any;
@@ -13,7 +12,6 @@ export function ChantierModaleModification({ setEditingChantier, handleChantierS
   editClientId: string;
   setEditClientId: React.Dispatch<React.SetStateAction<string>>;
   clientActuel: ClientActuel | null;
-  editChantierAdresseRef: RefObject<HTMLInputElement | null>;
   editResponsableId: string;
   setEditResponsableId: React.Dispatch<React.SetStateAction<string>>;
   conducteurs: any[];
@@ -22,7 +20,6 @@ export function ChantierModaleModification({ setEditingChantier, handleChantierS
   setEditCommercialId: React.Dispatch<React.SetStateAction<string>>;
   companyTimezone: string;
   fuseauConnu: boolean;
-  editChantierBudgetRef: RefObject<HTMLInputElement | null>;
   libelleBaremeReduit: string;
   savingChantier: boolean;
 }) {
@@ -60,7 +57,7 @@ export function ChantierModaleModification({ setEditingChantier, handleChantierS
               </div>
               <div className="form-group mb-0 md:col-span-2">
                 <label className="form-label">Adresse du site (optionnel)</label>
-                <input ref={editChantierAdresseRef} name="adresse" defaultValue={chantier.adresse || ''} className="form-input" placeholder="Adresse du site" />
+                <input name="adresse" defaultValue={chantier.adresse || ''} className="form-input" placeholder="Adresse du site" />
               </div>
               <div className="form-group mb-0">
                 <label className="form-label">Responsable Chantier</label>
@@ -103,7 +100,7 @@ export function ChantierModaleModification({ setEditingChantier, handleChantierS
               {chantier.budgetGlobalVendu != null && (
                 <div className="form-group mb-0">
                   <label className="form-label font-bold text-primary">Budget Global (€ HT)</label>
-                  <input ref={editChantierBudgetRef} required type="number" min="0" step="0.01" name="budgetGlobalVendu" defaultValue={chantier.budgetGlobalVendu} className="form-input" />
+                  <input required type="number" min="0" step="0.01" name="budgetGlobalVendu" defaultValue={chantier.budgetGlobalVendu} className="form-input" />
                 </div>
               )}
               <div className="form-group mb-0">
