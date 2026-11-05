@@ -8,7 +8,7 @@ import {
   couleurEvent, texteSurCouleur, libelleEvent, badgeCreneau, tooltipEvent,
 } from '../planningUtils';
 import ShareModal, { type PlanningShareState } from '../components/PlanningShareModal';
-import { isAdminRole } from '../roles';
+import { isAdminRole, roleDuCompte, useCurrentUser } from '../roles';
 import { ROLE_TECHNICIEN } from '../lib/droits';
 import { useModules } from '../modules';
 import { jourCivilEntrepriseIso, jourFrancais, jourSemaineFrancais } from '../lib/dateFormatting';
@@ -31,9 +31,9 @@ const Planning = () => {
   // Rôle réel : le partage public (Publier/Renouveler/Désactiver) reste réservé aux
   // admins (action plus sensible, expose des données sans authentification) — le reste du
   // module (affectations, types d'événements) est ouvert aux conducteurs comme aux admins.
-  const userStr = localStorage.getItem('user');
-  const user = userStr ? JSON.parse(userStr) : null;
-  const userRole = user?.role || 'CONDUCTEUR_TRAVAUX';
+  // Compte relu auprès de /api/me ; aucun repli sur le conducteur (#206).
+  const user = useCurrentUser();
+  const userRole = roleDuCompte(user);
   const isAdmin = isAdminRole(userRole);
   // Le technicien consulte le planning sans le modifier (lot pilote 3, choix par défaut) : ni
   // affectation, ni type d'événement, ni placement. Le serveur le refuse aussi (blockTechnicien).

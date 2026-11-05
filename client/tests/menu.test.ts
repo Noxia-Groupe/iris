@@ -62,14 +62,31 @@ test('seuls l’accueil et la liste des chantiers sont actifs sur leur chemin ex
   assert.deepEqual(entrees.filter((e) => e.exact).map((e) => e.to), ['/', '/chantiers']);
 });
 
-test('sans compte connu, le menu reprend l’ancien repli : conducteur, sans les statistiques ni l’annuaire', () => {
-  // L'ancien menu traitait un rôle absent en conducteur, mais les statistiques (comme les
-  // devis et, depuis le 16-10-2026, l'annuaire des clients) se décident sur le compte lui-même :
-  // sans compte, elles restent masquées.
+test('sans compte connu ni type de compte, le menu ne reprend plus celui d’un conducteur : l’accueil et la liste des chantiers seuls (#206)', () => {
+  // PR A4 du lot « anomalies d'écran », #206 (cadrage, version 2, contrôlé : C1 et C7). Choix par défaut, à confirmer
+  // (règle 5, option la plus restrictive) : un compte sans rôle n'a aucun rôle, et non celui d'un conducteur. Jusqu'à
+  // A4, le menu traitait un rôle absent en conducteur (planning, journaux, interventions, administration) ; les
+  // statistiques, l'annuaire et les devis, qui se décident sur le compte lui-même, restaient déjà masqués.
   const versListe = (sections: ReturnType<typeof sectionsMenu>) => sections.flatMap((s) => s.entrees.map((e) => e.to)).sort();
-  const sansStatistiques = (planningActif: boolean) => attendu('CONDUCTEUR_TRAVAUX', planningActif, []).filter((to) => to !== '/statistiques' && to !== '/clients');
-  assert.deepEqual(versListe(sectionsMenu(null, true)), sansStatistiques(true));
-  assert.deepEqual(versListe(sectionsMenu({}, false)), sansStatistiques(false));
+  const sansRole = ['/', '/chantiers'];
+  for (const planningActif of [true, false]) {
+    for (const [cas, compte] of [
+      ['aucun compte (null)', null], ['aucun compte (undefined)', undefined], ['compte vide', {}],
+      ['rôle vide', { role: '' }], ['rôle undefined', { role: undefined }], ['rôle null', { role: null as unknown as string }],
+      // Compte d'un conducteur relu par /api/me, dont le rôle manque : ses permissions ne rendent pas son menu.
+      ['permissions d’un conducteur sans rôle', { id: 'ct', name: 'Conducteur', permissions: ['chantiers:read', 'chantiers:write', 'clients:read'] }],
+    ] as const) {
+      const obtenu = versListe(sectionsMenu(compte, planningActif));
+      assert.deepEqual(obtenu, sansRole, `${cas}, planning=${planningActif}`);
+      // Lecture écartée, nommée : l'ancien repli sur le conducteur (moins statistiques et annuaire).
+      const ancienRepli = attendu('CONDUCTEUR_TRAVAUX', planningActif, []).filter((to) => to !== '/statistiques' && to !== '/clients');
+      assert.notDeepEqual(obtenu, ancienRepli, `${cas}, planning=${planningActif} : pas le menu d'un conducteur`);
+      for (const to of ['/planning', '/achats', '/heures', '/interventions', '/admin']) assert.equal(obtenu.includes(to), false, `${cas} : ${to}`);
+    }
+  }
+  // L'accueil garde son libellé commun, et non « Ma journée » du technicien.
+  assert.deepEqual(sectionsMenu(null, true)[0].entrees.map((e) => [e.to, e.libelle]), [['/', 'Tableau de bord']]);
+  assert.deepEqual(sectionsMenu(null, true).map((s) => s.titre ?? 'Accueil'), ['Accueil', 'Chantiers']);
 });
 
 test('un directeur pilote sans écran opérationnel : tableau de bord et chantiers, devis s’il en a reçu le droit', () => {
@@ -118,8 +135,9 @@ test('le technicien et le conducteur consultent l’annuaire des clients, dans l
 });
 
 // #179 (décision 11 de la proposition de droits) : le directeur commercial, l'assistante commerciale
-// et le comptable n'ont ni le planning ni l'administration, comme le commercial et le directeur.
-test('le directeur commercial, l’assistante commerciale et le comptable n’ont ni planning ni administration (#179)', () => {
+// et le comptable n'ont ni le planning ni l'administration, comme le commercial et le directeur. #206 (C7 du contrôle du
+// cadrage de A4) : un rôle absent non plus, et non plus le repli du conducteur.
+test('le directeur commercial, l’assistante commerciale et le comptable n’ont ni planning ni administration (#179), ni un compte sans type (#206)', () => {
   for (const role of ['DIRECTEUR_COMMERCIAL', 'ASSISTANTE_COMMERCIALE', 'COMPTABLE', 'COMMERCIAL', 'DIRECTEUR']) {
     assert.equal(peutConsulterPlanning(role), false, role);
     assert.equal(peutOuvrirAdministration(role), false, role);
@@ -130,5 +148,13 @@ test('le directeur commercial, l’assistante commerciale et le comptable n’on
     assert.equal(peutConsulterPlanning(role), true, role);
     assert.equal(liens(role).includes('/planning'), true, role);
   }
-  assert.equal(peutConsulterPlanning(undefined), true, 'sans compte connu, le repli reste celui du conducteur');
+  // #206, choix par défaut, à confirmer (règle 5, option la plus restrictive) : sans compte connu, aucun rôle, donc ni
+  // planning ni administration ; ce n'est plus le repli du conducteur, qui les avait.
+  for (const role of [undefined, null, '']) {
+    assert.equal(peutConsulterPlanning(role), false, `rôle absent (${JSON.stringify(role)}) : pas de planning`);
+    assert.equal(peutOuvrirAdministration(role), false, `rôle absent (${JSON.stringify(role)}) : pas d'administration`);
+  }
+  assert.equal(peutConsulterPlanning(), false, 'sans argument : pas de planning');
+  assert.equal(peutOuvrirAdministration(), false, 'sans argument : pas d’administration');
+  assert.equal(liens('').includes('/planning') || liens('').includes('/admin'), false, 'rôle vide : ni planning ni administration au menu');
 });

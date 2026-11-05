@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { apiFetch } from '../api';
-import { isAdminRole } from '../roles';
+import { isAdminRole, roleDuCompte, useCurrentUser } from '../roles';
 import { useCompanyTimezone, useFuseauSocieteConnu } from '../companyTimezoneContext';
 import { companyDateInputValue, formatDateOnly } from '../lib/dateFormatting';
 
@@ -13,10 +13,8 @@ const Achats = () => {
   const [categories, setCategories] = useState<any[]>([]);
   const [fournisseurs, setFournisseurs] = useState<any[]>([]);
 
-  // Rôle réel
-  const userStr = localStorage.getItem('user');
-  const user = userStr ? JSON.parse(userStr) : null;
-  const userRole = user?.role || 'CONDUCTEUR_TRAVAUX';
+  // Rôle réel, relu auprès de /api/me ; aucun repli sur le conducteur (#206).
+  const userRole = roleDuCompte(useCurrentUser());
 
   useEffect(() => {
     fetchData();

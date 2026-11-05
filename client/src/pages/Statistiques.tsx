@@ -3,7 +3,7 @@ import { PieChart, Users, Truck, Tags, ChevronLeft, ChevronRight } from 'lucide-
 import { apiFetch } from '../api';
 import { decalerReference, jourFrancais } from '../lib/dateFormatting';
 import { useReferencePeriode } from '../lib/referencePeriode';
-import { isAdminRole, roleLabel } from '../roles';
+import { isAdminRole, roleDuCompte, roleLabel, useCurrentUser } from '../roles';
 import { arrondiEuro } from '../lib/montants';
 
 type Period = 'week' | 'month' | 'year';
@@ -318,9 +318,8 @@ function TypesChantiersTab() {
 }
 
 const Statistiques = () => {
-  const userStr = localStorage.getItem('user');
-  const user = userStr ? JSON.parse(userStr) : null;
-  const userRole = user?.role || 'CONDUCTEUR_TRAVAUX';
+  // Compte relu auprès de /api/me ; aucun repli sur le conducteur (#206).
+  const userRole = roleDuCompte(useCurrentUser());
 
   const [activeTab, setActiveTab] = useState(isAdminRole(userRole) ? 'chantiers' : 'intervenants');
 

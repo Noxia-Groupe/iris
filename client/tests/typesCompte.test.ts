@@ -62,13 +62,21 @@ test('chaque type de compte se lit sous le libellé de la liste, dans le menu co
   for (const type of TYPES_COMPTE) assert.equal(roleLabel(type.valeur), type.libelle, type.valeur);
 });
 
-test('un rôle absent ou inconnu garde, dans cette PR, le repli « Conducteur » (C2 ; la PR A4, #206, le fixe)', () => {
-  // Choix C2 du contrôle du cadrage : le repli d'un rôle absent ou inconnu ne change pas en A3. Ce test est à mettre à
-  // jour par la PR A4, qui le fixe à '' (rien d'affiché).
-  for (const role of ['', null, undefined, 'INCONNU', 'superadmin', 'Administrateur', 'constructor', 'toString']) {
-    assert.equal(roleLabel(role), 'Conducteur', String(role));
+test('un rôle absent ou inconnu n’a aucun libellé : rien n’est affiché, ni « Conducteur » ni un autre type (#206)', () => {
+  // PR A4 du lot « anomalies d'écran », #206 (cadrage, version 2, point 3 ; C2 du contrôle du cadrage). Choix par défaut,
+  // à confirmer (règle 5, option la plus restrictive) : le repli de roleLabel est '' (menu et « Connecté en tant que »
+  // n'affichent rien), et non plus « Conducteur », qu'aucun type ne porte depuis #203. Le journal d'administration, lui,
+  // garde sa propre lecture (journalAdministration.test.ts).
+  // Valeurs proches d'un code connu, sans en être un : 'superadmin' et 'Administrateur' (casse ou libellé, et non code),
+  // ' ADMIN' et 'ADMIN ' (espaces) ; 'constructor' et 'toString' (propriétés héritées, si la table devenait un dictionnaire).
+  for (const role of ['', null, undefined, 'INCONNU', 'superadmin', 'Administrateur', 'constructor', 'toString', ' ADMIN', 'ADMIN ']) {
+    assert.equal(roleLabel(role), '', JSON.stringify(role) ?? 'undefined');
   }
-  assert.equal(roleLabel(), 'Conducteur');
-  // Le repli n'est pas le libellé d'un conducteur de travaux connu.
-  assert.notEqual(roleLabel(''), roleLabel('CONDUCTEUR_TRAVAUX'));
+  assert.equal(roleLabel(), '');
+  // Lectures écartées, nommées : l'ancien repli « Conducteur », et le libellé d'un conducteur de travaux connu.
+  for (const role of ['', null, undefined, 'INCONNU']) {
+    assert.notEqual(roleLabel(role), 'Conducteur');
+    assert.notEqual(roleLabel(role), roleLabel('CONDUCTEUR_TRAVAUX'));
+    assert.equal(TYPES_COMPTE.some((type) => type.libelle === roleLabel(role)), false, `aucun libellé de type pour ${String(role)}`);
+  }
 });

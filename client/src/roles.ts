@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { apiFetch, getToken } from './api';
-import { ROLE_CONDUCTEUR, type CurrentUser } from './lib/droits';
+import { roleDuCompte, type CurrentUser } from './lib/droits';
 
 export * from './lib/droits';
 
@@ -15,7 +15,7 @@ export function getCurrentUser(): CurrentUser | null {
 }
 
 export function getCurrentRole(): string {
-  return getCurrentUser()?.role || ROLE_CONDUCTEUR;
+  return roleDuCompte(getCurrentUser());
 }
 
 /**
@@ -54,7 +54,7 @@ export function useCurrentUser(): CurrentUser | null {
   return user;
 }
 
-/** Rôle du compte connecté, resynchronisé avec le serveur. */
+/** Rôle du compte connecté, resynchronisé avec le serveur ; '' s'il n'en porte pas (#206). */
 export function useCurrentRole(): string {
-  return useCurrentUser()?.role || ROLE_CONDUCTEUR;
+  return roleDuCompte(useCurrentUser());
 }

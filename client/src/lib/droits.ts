@@ -3,7 +3,9 @@
 // Rôles de l'application — source unique de vérité côté client.
 // Le serveur applique exactement les mêmes règles (cf. isAdminRole / isSuperAdminRole
 // dans server/index.ts) : ce qui est masqué ici est également refusé côté API, l'affichage
-// n'est jamais la sécurité.
+// n'est jamais la sécurité. Un compte sans rôle (cas qui n'existe pas en base, où le rôle est
+// obligatoire) n'a aucun rôle à l'écran : ni repli sur un autre type, ni planning, ni
+// administration (#206, choix par défaut, à confirmer) ; le serveur reste seul juge.
 export const ROLE_SUPERADMIN = 'SUPERADMIN';
 export const ROLE_ADMIN = 'ADMIN';
 export const ROLE_CONDUCTEUR = 'CONDUCTEUR_TRAVAUX';
@@ -50,9 +52,18 @@ export function typesCompteProposes(estSuperAdmin: boolean): ReadonlyArray<{ val
   return TYPES_COMPTE.filter((type) => estSuperAdmin || type.valeur !== ROLE_SUPERADMIN);
 }
 
+/** Libellé d'un type de compte ; '' pour un rôle absent ou inconnu, qui n'affiche rien (#206). */
 export function roleLabel(role?: string | null): string {
-  // Repli d'un rôle absent ou inconnu inchangé ici (#203) ; la PR A4 du lot (#206) le fixe.
-  return TYPES_COMPTE.find((type) => type.valeur === role)?.libelle ?? 'Conducteur';
+  return TYPES_COMPTE.find((type) => type.valeur === role)?.libelle ?? '';
+}
+
+/**
+ * Rôle du compte connecté, tel qu'il est mémorisé ou relu auprès de /api/me ; '' s'il n'en porte
+ * pas (#206). Seule lecture du rôle pour le menu, les pages et roles.ts : aucun repli sur le
+ * conducteur de travaux, que le compte n'est pas forcément.
+ */
+export function roleDuCompte(user?: CurrentUser | null): string {
+  return user?.role || '';
 }
 
 export interface CurrentUser {
@@ -90,7 +101,8 @@ export function peutVoirStatistiques(user?: CurrentUser | null): boolean {
  * Comptes exclus des écrans opérationnels (planning, administration, saisies) : le
  * commercial, qui a son propre résultat, et le directeur, qui consulte sans modifier (hors la
  * clôture d'un chantier en cours, depuis la liste des chantiers).
- * Même règle que blockCommercial côté serveur.
+ * Même règle que blockCommercial côté serveur, pour ces deux types ; un rôle absent, qui n'existe
+ * pas côté serveur, est écarté par les aides ci-dessous (#206).
  */
 export function estExcluDesOperations(role?: string | null): boolean {
   return role === ROLE_COMMERCIAL || role === ROLE_DIRECTEUR;
@@ -99,23 +111,29 @@ export function estExcluDesOperations(role?: string | null): boolean {
 /**
  * Directeur commercial, assistante commerciale et comptable : ni planning, lectures comprises, ni
  * écriture des référentiels des achats (décision 11 de la proposition de droits, #179). Même règle
- * que blockCommercialEtAssimiles côté serveur.
+ * que blockCommercialEtAssimiles côté serveur, pour ces trois types.
  */
 export const ROLES_SANS_PLANNING_NI_REFERENTIELS = [ROLE_DIRECTEUR_COMMERCIAL, ROLE_ASSISTANTE_COMMERCIALE, ROLE_COMPTABLE];
 
-/** Planning : fermé aux comptes exclus des opérations et aux trois types ci-dessus. */
+/**
+ * Planning : fermé aux comptes exclus des opérations, aux trois types ci-dessus et à un rôle absent
+ * ('', null ou undefined : option la plus restrictive, #206, choix par défaut, à confirmer).
+ */
 export function peutConsulterPlanning(role?: string | null): boolean {
-  return !estExcluDesOperations(role) && !ROLES_SANS_PLANNING_NI_REFERENTIELS.includes(role || '');
+  if (!role) return false;
+  return !estExcluDesOperations(role) && !ROLES_SANS_PLANNING_NI_REFERENTIELS.includes(role);
 }
 
 /**
  * Administration : complète pour les administrateurs, réduite aux référentiels des achats
  * (fournisseurs, catégories) pour le conducteur. Le technicien n'y a plus rien à faire depuis le
  * lot pilote 3, qui lui retire ces écritures (choix par défaut), ni le directeur commercial,
- * l'assistante commerciale et le comptable depuis #179 ; le serveur les leur refuse aussi.
+ * l'assistante commerciale et le comptable depuis #179 ; le serveur les leur refuse aussi. Un rôle
+ * absent ('', null ou undefined) ne l'ouvre pas non plus (#206, choix par défaut, à confirmer).
  */
 export function peutOuvrirAdministration(role?: string | null): boolean {
-  return !estExcluDesOperations(role) && role !== ROLE_TECHNICIEN && !ROLES_SANS_PLANNING_NI_REFERENTIELS.includes(role || '');
+  if (!role) return false;
+  return !estExcluDesOperations(role) && role !== ROLE_TECHNICIEN && !ROLES_SANS_PLANNING_NI_REFERENTIELS.includes(role);
 }
 
 /**

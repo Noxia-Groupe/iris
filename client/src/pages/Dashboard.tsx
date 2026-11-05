@@ -6,7 +6,7 @@ import { ProgressMeter } from '../components/ProgressMeter';
 import { SectionRepliable } from '../components/SectionRepliable';
 import { AlertesChantier } from '../components/AlertesChantier';
 import { MESSAGE_SANS_PLAN_COMMERCIAL } from '../components/AvisSansPlanCommercial';
-import { isAdminRole, peutAccederAuxDevis, roleLabel, useCurrentUser } from '../roles';
+import { isAdminRole, peutAccederAuxDevis, roleDuCompte, roleLabel, useCurrentUser } from '../roles';
 import { estASurveiller, trierChantiers } from '../lib/suiviChantiers';
 import { useCompanyTimezone } from '../companyTimezoneContext';
 import { companyDateInputValue, jourCivilChantier } from '../lib/dateFormatting';
@@ -26,10 +26,8 @@ const Dashboard = () => {
   const navigate = useNavigate();
   const utilisateur = useCurrentUser();
 
-  // Rôle réel
-  const userStr = localStorage.getItem('user');
-  const user = userStr ? JSON.parse(userStr) : null;
-  const userRole = user?.role || 'CONDUCTEUR_TRAVAUX';
+  // Rôle réel, relu auprès de /api/me ; aucun repli sur le conducteur (#206).
+  const userRole = roleDuCompte(utilisateur);
 
   useEffect(() => {
     fetchChantiers();

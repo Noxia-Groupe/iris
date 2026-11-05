@@ -174,8 +174,9 @@ export const test = base.extend<Outils>({
   // Lot D1a-6 (cadrage version 3 du 03-11-2026, §4.2) : session d'un compte dans un contexte de navigateur à lui ('SA' :
   // session de l'accès de secours, fixture session). Le compte est relu par GET /api/me avec son jeton, puis mémorisé avec
   // ses permissions effectives, comme la vraie connexion (domaines/authentification/routes.ts:46 et :100) : la fiche
-  // chantier lit les permissions dans localStorage au rendu (ChantierDetail.tsx:30-37), et useCurrentUser ne les réécrit
-  // qu'après. La page est rendue sans navigation ; les contextes ouverts sont fermés à la fin du test.
+  // chantier (ChantierDetail.tsx) lit les permissions par useCurrentUser(), dont la valeur initiale est cette copie
+  // mémorisée, et que la relecture de /api/me ne remplace qu'après le premier rendu. La page est rendue sans navigation ;
+  // les contextes ouverts sont fermés à la fin du test.
   connexion: async ({ browser, request, session }, fournir) => {
     const contextes: BrowserContext[] = [];
     await fournir(async (compte, options = {}) => {
