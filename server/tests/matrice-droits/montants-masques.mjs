@@ -61,6 +61,12 @@ export const VALEURS_DERIVEES = { chantier: ['metrics.alertes'] };
 // pas (rentabiliteDirecteurs=non ; réponse de Nelson du 06-11-2026, « Chantiers seulement »), réglage ajouté plus bas aux
 // montants des chantiers qu'elle lui masque.
 const ADMIN = ['SA', 'AD', 'AD-COM', 'DIR'];
+// L'assistante technique (lot « Assistante technique », PR AT-1, cadrage v2.1, « Chantiers en lecture » et « Montants du
+// SAV ») lit les montants du conducteur hors de son périmètre : budgets par poste, matériel, achats et matériel SAV ;
+// jamais la rentabilité (voitRentabilite inchangé : vendu, marges, estimation, facturation), ni le coût prévu
+// (voitCoutPrevuParPrixAchat inchangé), ni taux ni coût de main-d'œuvre (voitCoutMainOeuvre inchangé), ni la marge du
+// devis ou d'un SAV hors contrat. Elle est classée « voit » ou « masque » champ par champ ci-dessous ; le test fermé
+// matrice-droits-assistante-technique.test.mjs vérifie, ligne à ligne, qu'elle lit ce qu'elle « voit ».
 
 // Une entrée : type d'objet, chemins du champ dans l'objet (un seul, sauf les instantanés du journal, avant et
 // après), règle, source dans le code, comptes qui le voient (un au moins doit l'avoir présent) et comptes qui ne le
@@ -80,72 +86,72 @@ const SRC_SERIALISE = 'chantiers/suivi.ts:226-239 (serializeChantier)';
 export const MONTANTS_MASQUES = [
   // --- Chantier : liste, fiche, clé chantiers:read ---
   M('chantier', 'budgetGlobalVendu', RENTABILITE, `${SRC_SERIALISE}, l.233 ; chantiers/droits.ts:23-35`, {
-    voit: [...ADMIN, 'CT', 'RESP', 'CLE chantiers:read+finances:read'], masque: ['COM', 'DC', 'AC', 'CPT', 'TECH', 'CLE chantiers:read'],
+    voit: [...ADMIN, 'CT', 'RESP', 'CLE chantiers:read+finances:read'], masque: ['COM', 'DC', 'AC', 'AT', 'CPT', 'TECH', 'CLE chantiers:read'],
     reglages: ['rentabiliteConducteur=non', 'rentabiliteDirecteurs=non', 'rentabiliteHierarchie=non'],
   }),
-  M('chantier', 'budgetMaterielVendu', MONTANTS_CHANTIER, 'chantiers/droits.ts:61 (chantierSansMontants) ; droits/visibilite.ts:11-14', { voit: [...ADMIN, 'CT', 'COM'], masque: ['TECH'] }),
-  M('chantier', 'budgetMainOeuvreVendu', MONTANTS_CHANTIER, 'chantiers/droits.ts:62 (chantierSansMontants)', { voit: [...ADMIN, 'CT', 'COM'], masque: ['TECH'] }),
+  M('chantier', 'budgetMaterielVendu', MONTANTS_CHANTIER, 'chantiers/droits.ts:61 (chantierSansMontants) ; droits/visibilite.ts:11-14', { voit: [...ADMIN, 'CT', 'COM', 'AT'], masque: ['TECH'] }),
+  M('chantier', 'budgetMainOeuvreVendu', MONTANTS_CHANTIER, 'chantiers/droits.ts:62 (chantierSansMontants)', { voit: [...ADMIN, 'CT', 'COM', 'AT'], masque: ['TECH'] }),
   // Le directeur lit le coût prévu par la rentabilité, et non par les prix d'achat (voitCoutPrevuParPrixAchat ; décisions
   // de Nelson du 30-10-2026 et du 06-11-2026) : il le perd avec rentabiliteDirecteurs=non.
   M('chantier', 'coutMaterielPrevu', `(voitCoutPrevuParPrixAchat ou ${RENTABILITE}) et ${MONTANTS_CHANTIER}`, `${SRC_SERIALISE}, l.234 ; chantiers/droits.ts (voitCoutPrevuParPrixAchat)`, {
-    voit: [...ADMIN, 'CT', 'CLE chantiers:read+finances:read'], masque: ['COM', 'TECH', 'CLE chantiers:read'], reglages: ['rentabiliteConducteur=non', 'rentabiliteDirecteurs=non'],
+    voit: [...ADMIN, 'CT', 'CLE chantiers:read+finances:read'], masque: ['COM', 'AT', 'TECH', 'CLE chantiers:read'], reglages: ['rentabiliteConducteur=non', 'rentabiliteDirecteurs=non'],
   }),
-  M('chantier', 'metrics.materielReel', MONTANTS_CHANTIER, 'chantiers/droits.ts:67', { voit: [...ADMIN, 'CT', 'COM'], masque: ['TECH'] }),
-  M('chantier', 'metrics.pctMateriel', MONTANTS_CHANTIER, 'chantiers/droits.ts:67', { voit: [...ADMIN, 'CT', 'COM'], masque: ['TECH'] }),
-  M('chantier', 'metrics.moReel', COUT_MO, 'chantiers/droits.ts:48 (chantierSansCoutMainOeuvre) et :67', { voit: [...ADMIN, 'CLE chantiers:read'], masque: ['CT', 'COM', 'TECH'] }),
-  M('chantier', 'metrics.totalDepenses', COUT_MO, 'chantiers/droits.ts:48 et :67', { voit: [...ADMIN, 'CLE chantiers:read'], masque: ['CT', 'COM', 'TECH'] }),
-  M('chantier', 'metrics.pctMainOeuvre', COUT_MO, 'chantiers/droits.ts:48 et :67', { voit: [...ADMIN, 'CLE chantiers:read'], masque: ['CT', 'COM', 'TECH'] }),
-  M('chantier', 'metrics.coutsSuites.coutMainOeuvre', COUT_MO, 'chantiers/droits.ts:49 et :68', { voit: [...ADMIN, 'CLE chantiers:read'], masque: ['CT', 'COM', 'TECH'] }),
-  M('chantier', 'metrics.coutsSuites.materiel', MONTANTS_CHANTIER, 'chantiers/droits.ts:68', { voit: [...ADMIN, 'CT', 'COM'], masque: ['TECH'] }),
-  M('chantier', 'metrics.coutsInterventionDevis.coutMainOeuvre', COUT_MO, 'chantiers/droits.ts:50 et :69', { voit: [...ADMIN, 'CLE chantiers:read'], masque: ['CT', 'COM', 'TECH'] }),
-  M('chantier', 'metrics.coutsInterventionDevis.materiel', MONTANTS_CHANTIER, 'chantiers/droits.ts:69', { voit: [...ADMIN, 'CT', 'COM'], masque: ['TECH'] }),
+  M('chantier', 'metrics.materielReel', MONTANTS_CHANTIER, 'chantiers/droits.ts:67', { voit: [...ADMIN, 'CT', 'COM', 'AT'], masque: ['TECH'] }),
+  M('chantier', 'metrics.pctMateriel', MONTANTS_CHANTIER, 'chantiers/droits.ts:67', { voit: [...ADMIN, 'CT', 'COM', 'AT'], masque: ['TECH'] }),
+  M('chantier', 'metrics.moReel', COUT_MO, 'chantiers/droits.ts:48 (chantierSansCoutMainOeuvre) et :67', { voit: [...ADMIN, 'CLE chantiers:read'], masque: ['CT', 'COM', 'AT', 'TECH'] }),
+  M('chantier', 'metrics.totalDepenses', COUT_MO, 'chantiers/droits.ts:48 et :67', { voit: [...ADMIN, 'CLE chantiers:read'], masque: ['CT', 'COM', 'AT', 'TECH'] }),
+  M('chantier', 'metrics.pctMainOeuvre', COUT_MO, 'chantiers/droits.ts:48 et :67', { voit: [...ADMIN, 'CLE chantiers:read'], masque: ['CT', 'COM', 'AT', 'TECH'] }),
+  M('chantier', 'metrics.coutsSuites.coutMainOeuvre', COUT_MO, 'chantiers/droits.ts:49 et :68', { voit: [...ADMIN, 'CLE chantiers:read'], masque: ['CT', 'COM', 'AT', 'TECH'] }),
+  M('chantier', 'metrics.coutsSuites.materiel', MONTANTS_CHANTIER, 'chantiers/droits.ts:68', { voit: [...ADMIN, 'CT', 'COM', 'AT'], masque: ['TECH'] }),
+  M('chantier', 'metrics.coutsInterventionDevis.coutMainOeuvre', COUT_MO, 'chantiers/droits.ts:50 et :69', { voit: [...ADMIN, 'CLE chantiers:read'], masque: ['CT', 'COM', 'AT', 'TECH'] }),
+  M('chantier', 'metrics.coutsInterventionDevis.materiel', MONTANTS_CHANTIER, 'chantiers/droits.ts:69', { voit: [...ADMIN, 'CT', 'COM', 'AT'], masque: ['TECH'] }),
   ...['margeBrute', 'margeCommerciale', 'margePct', 'margeEstimee', 'margeEstimeePct', 'estimation'].map((champ) => M('chantier', `metrics.${champ}`, MARGE, 'chantiers/suivi.ts:139-141 (computeChantierMetrics)', {
-    voit: [...ADMIN, 'CT', 'RESP', 'CLE chantiers:read+finances:read'], masque: ['COM', 'DC', 'AC', 'CPT', 'TECH', 'CLE chantiers:read'],
+    voit: [...ADMIN, 'CT', 'RESP', 'CLE chantiers:read+finances:read'], masque: ['COM', 'DC', 'AC', 'AT', 'CPT', 'TECH', 'CLE chantiers:read'],
     reglages: ['margeCommercialeActive=non', 'rentabiliteConducteur=non', 'rentabiliteDirecteurs=non', 'rentabiliteHierarchie=non'],
   })),
   // Estimation présente (rentabilité) : ses coûts de main-d'œuvre restent masqués hors administration. Ses autres
   // champs (coût matériel attendu, ratio, sources) ne sont masqués qu'avec l'estimation entière.
   ...['coutEstime', 'coutMainOeuvreAttendu', 'coutHoraireReference'].map((champ) => M('chantier', `metrics.estimation.${champ}`, COUT_MO, 'chantiers/droits.ts:51 (chantierSansCoutMainOeuvre)', {
-    voit: [...ADMIN, 'CLE chantiers:read+finances:read'], masque: ['CT', 'RESP'],
+    voit: [...ADMIN, 'CLE chantiers:read+finances:read'], masque: ['CT', 'RESP', 'AT'],
   })),
-  M('chantier', 'achats[].montantHT', MONTANTS_CHANTIER, 'chantiers/droits.ts:63 ; droits/visibilite.ts:18-26 (sansMontantsSaisie)', { voit: [...ADMIN, 'CT', 'CLE chantiers:read'], masque: ['TECH'] }),
-  M('chantier', 'pointages[].tauxHoraireApplique', COUT_MO, 'chantiers/droits.ts:45 et :64 ; droits/visibilite.ts:41-50 (sansTauxHoraire)', { voit: [...ADMIN, 'CLE chantiers:read'], masque: ['CT', 'TECH'] }),
-  M('chantier', 'pointages[].intervenant.tauxHoraireCharge', COUT_MO, 'chantiers/routes.ts:141 (intervenant joint à la fiche) ; droits/visibilite.ts:47 et :24', { voit: ADMIN, masque: ['CT', 'TECH'], routes: ['GET /api/chantiers/:id'] }),
+  M('chantier', 'achats[].montantHT', MONTANTS_CHANTIER, 'chantiers/droits.ts:63 ; droits/visibilite.ts:18-26 (sansMontantsSaisie)', { voit: [...ADMIN, 'CT', 'AT', 'CLE chantiers:read'], masque: ['TECH'] }),
+  M('chantier', 'pointages[].tauxHoraireApplique', COUT_MO, 'chantiers/droits.ts:45 et :64 ; droits/visibilite.ts:41-50 (sansTauxHoraire)', { voit: [...ADMIN, 'CLE chantiers:read'], masque: ['CT', 'AT', 'TECH'] }),
+  M('chantier', 'pointages[].intervenant.tauxHoraireCharge', COUT_MO, 'chantiers/routes.ts:141 (intervenant joint à la fiche) ; droits/visibilite.ts:47 et :24', { voit: ADMIN, masque: ['CT', 'AT', 'TECH'], routes: ['GET /api/chantiers/:id'] }),
   M('chantier', 'facturation', RENTABILITE, 'chantiers/routes.ts:168-177 (fiche seulement)', {
-    voit: [...ADMIN, 'CT', 'RESP'], masque: ['COM', 'DC', 'AC', 'CPT', 'TECH'], reglages: ['rentabiliteConducteur=non', 'rentabiliteDirecteurs=non', 'rentabiliteHierarchie=non'], routes: ['GET /api/chantiers/:id'],
+    voit: [...ADMIN, 'CT', 'RESP'], masque: ['COM', 'DC', 'AC', 'AT', 'CPT', 'TECH'], reglages: ['rentabiliteConducteur=non', 'rentabiliteDirecteurs=non', 'rentabiliteHierarchie=non'], routes: ['GET /api/chantiers/:id'],
   }),
 
   // --- Journaux des achats et des heures (et leurs jumelles /api/v1) ---
-  M('achat-chantier', 'montantHT', MONTANTS_CHANTIER, 'chantiers/saisies.ts:96', { voit: [...ADMIN, 'CT', 'CLE chantiers:read'], masque: ['TECH'] }),
-  M('heure-chantier', 'tauxHoraireApplique', `saisieSelonDroits : ${COUT_MO}`, 'chantiers/saisies.ts:115 ; droits/visibilite.ts:53-57', { voit: [...ADMIN, 'CLE chantiers:read'], masque: ['CT', 'TECH'] }),
-  M('heure-chantier', 'intervenant.tauxHoraireCharge', `saisieSelonDroits : ${COUT_MO}`, 'chantiers/saisies.ts:115 ; droits/visibilite.ts:24 et :47', { voit: [...ADMIN, 'CLE chantiers:read'], masque: ['CT', 'TECH'] }),
+  M('achat-chantier', 'montantHT', MONTANTS_CHANTIER, 'chantiers/saisies.ts:96', { voit: [...ADMIN, 'CT', 'AT', 'CLE chantiers:read'], masque: ['TECH'] }),
+  M('heure-chantier', 'tauxHoraireApplique', `saisieSelonDroits : ${COUT_MO}`, 'chantiers/saisies.ts:115 ; droits/visibilite.ts:53-57', { voit: [...ADMIN, 'CLE chantiers:read'], masque: ['CT', 'AT', 'TECH'] }),
+  M('heure-chantier', 'intervenant.tauxHoraireCharge', `saisieSelonDroits : ${COUT_MO}`, 'chantiers/saisies.ts:115 ; droits/visibilite.ts:24 et :47', { voit: [...ADMIN, 'CLE chantiers:read'], masque: ['CT', 'AT', 'TECH'] }),
 
   // --- Journal des saisies : instantanés avant et après, selon la cible de l'entrée ---
-  M('journal-saisie', ['avant.montantHT', 'apres.montantHT'], `saisieSelonDroits : ${MONTANTS_CHANTIER}`, 'chantiers/routes.ts:200-201', { cible: 'ACHAT', voit: [...ADMIN, 'CT'], masque: ['TECH'] }),
-  M('journal-saisie', ['avant.tauxHoraireApplique', 'apres.tauxHoraireApplique'], `saisieSelonDroits : ${COUT_MO}`, 'chantiers/routes.ts:200-201', { cible: 'HEURE', voit: ADMIN, masque: ['CT', 'TECH'] }),
-  M('journal-saisie', ['avant.tauxHoraireApplique', 'apres.tauxHoraireApplique'], `saisieSelonDroits : ${COUT_MO}`, 'interventions/routes.ts:269-270', { cible: 'COUT_INTERVENTION_HEURE', voit: ADMIN, masque: ['CT'] }),
-  M('journal-saisie', ['avant.prixVenteHoraireApplique', 'apres.prixVenteHoraireApplique'], `saisieSelonDroits : ${COUT_MO}`, 'interventions/routes.ts:269-270 ; droits/visibilite.ts:41', { cible: 'COUT_INTERVENTION_HEURE', voit: ADMIN, masque: ['CT'] }),
+  M('journal-saisie', ['avant.montantHT', 'apres.montantHT'], `saisieSelonDroits : ${MONTANTS_CHANTIER}`, 'chantiers/routes.ts:200-201', { cible: 'ACHAT', voit: [...ADMIN, 'CT', 'AT'], masque: ['TECH'] }),
+  M('journal-saisie', ['avant.tauxHoraireApplique', 'apres.tauxHoraireApplique'], `saisieSelonDroits : ${COUT_MO}`, 'chantiers/routes.ts:200-201', { cible: 'HEURE', voit: ADMIN, masque: ['CT', 'AT', 'TECH'] }),
+  M('journal-saisie', ['avant.tauxHoraireApplique', 'apres.tauxHoraireApplique'], `saisieSelonDroits : ${COUT_MO}`, 'interventions/routes.ts:269-270', { cible: 'COUT_INTERVENTION_HEURE', voit: ADMIN, masque: ['CT', 'AT'] }),
+  M('journal-saisie', ['avant.prixVenteHoraireApplique', 'apres.prixVenteHoraireApplique'], `saisieSelonDroits : ${COUT_MO}`, 'interventions/routes.ts:269-270 ; droits/visibilite.ts:41', { cible: 'COUT_INTERVENTION_HEURE', voit: ADMIN, masque: ['CT', 'AT'] }),
   M('journal-saisie', ['avant.montantHT', 'apres.montantHT'], `saisieSelonDroits : ${MONTANTS_CHANTIER}`, 'interventions/routes.ts:269-270', {
-    cible: 'COUT_INTERVENTION_ACHAT', voit: [...ADMIN, 'CT'],
+    cible: 'COUT_INTERVENTION_ACHAT', voit: [...ADMIN, 'CT', 'AT'],
     inatteignable: 'seul le technicien perd ce montant, et le journal SAV lui est refusé (403) avant toute lecture (interventions/routes.ts:267)',
   }),
 
   // --- Fiches intervenant ---
-  M('intervenant', 'tauxHoraireCharge', `saisieSelonDroits : ${COUT_MO}`, 'utilisateurs/equipes.ts:60', { voit: ADMIN, masque: ['CT', 'COM', 'TECH'] }),
+  M('intervenant', 'tauxHoraireCharge', `saisieSelonDroits : ${COUT_MO}`, 'utilisateurs/equipes.ts:60', { voit: ADMIN, masque: ['CT', 'COM', 'AT', 'TECH'] }),
   // Le rattachement désigne le prix de vente à l'heure de la main d'œuvre du catalogue (visibilite.ts:72-78) : il
   // est masqué avec le taux.
-  M('intervenant', 'mainOeuvreId', 'voitRattachementMainOeuvre : administration en session seulement', 'utilisateurs/equipes.ts:56-58 ; droits/visibilite.ts:76-78', { voit: ADMIN, masque: ['CT', 'COM', 'TECH'] }),
-  M('intervenant', 'mainOeuvre', 'voitRattachementMainOeuvre : administration en session seulement', 'utilisateurs/equipes.ts:56-58', { voit: ADMIN, masque: ['CT', 'COM', 'TECH'] }),
+  M('intervenant', 'mainOeuvreId', 'voitRattachementMainOeuvre : administration en session seulement', 'utilisateurs/equipes.ts:56-58 ; droits/visibilite.ts:76-78', { voit: ADMIN, masque: ['CT', 'COM', 'AT', 'TECH'] }),
+  M('intervenant', 'mainOeuvre', 'voitRattachementMainOeuvre : administration en session seulement', 'utilisateurs/equipes.ts:56-58', { voit: ADMIN, masque: ['CT', 'COM', 'AT', 'TECH'] }),
 
   // --- Coûts d'une intervention ---
-  M('couts-intervention', 'heures[].tauxHoraireApplique', `${COUT_MO} ; le technicien ne reçoit que ses heures, sans montant`, 'interventions/routes.ts:95-104 et :116', { voit: ADMIN, masque: ['CT', 'TECH'] }),
-  M('couts-intervention', 'heures[].prixVenteHoraireApplique', `${COUT_MO} ; le technicien ne reçoit que ses heures, sans montant`, 'interventions/routes.ts:95-104 et :116', { voit: ADMIN, masque: ['CT', 'TECH'] }),
-  M('couts-intervention', 'achats', 'encadrement (administration, conducteur)', 'interventions/routes.ts:95-104', { voit: [...ADMIN, 'CT'], masque: ['TECH'] }),
-  M('couts-intervention', 'totalMainOeuvreHT', COUT_MO, 'interventions/routes.ts:116', { voit: ADMIN, masque: ['CT', 'TECH'] }),
-  M('couts-intervention', 'totalMaterielHT', 'encadrement (administration, conducteur)', 'interventions/routes.ts:95-104', { voit: [...ADMIN, 'CT'], masque: ['TECH'] }),
-  M('couts-intervention', 'totalCoutsHT', COUT_MO, 'interventions/routes.ts:116', { voit: ADMIN, masque: ['CT', 'TECH'] }),
-  M('couts-intervention', 'margeDevis', `${COUT_MO} (administration seule)`, 'interventions/routes.ts:116-121', { voit: ADMIN, masque: ['CT', 'TECH'] }),
-  M('couts-intervention', 'margeSav', `${COUT_MO} (administration seule)`, 'interventions/routes.ts:116-124', { voit: ADMIN, masque: ['CT', 'TECH'] }),
+  M('couts-intervention', 'heures[].tauxHoraireApplique', `${COUT_MO} ; le technicien ne reçoit que ses heures, sans montant`, 'interventions/routes.ts:95-104 et :116', { voit: ADMIN, masque: ['CT', 'AT', 'TECH'] }),
+  M('couts-intervention', 'heures[].prixVenteHoraireApplique', `${COUT_MO} ; le technicien ne reçoit que ses heures, sans montant`, 'interventions/routes.ts:95-104 et :116', { voit: ADMIN, masque: ['CT', 'AT', 'TECH'] }),
+  M('couts-intervention', 'achats', 'encadrement (administration, conducteur, assistante technique)', 'interventions/routes.ts:95-104', { voit: [...ADMIN, 'CT', 'AT'], masque: ['TECH'] }),
+  M('couts-intervention', 'totalMainOeuvreHT', COUT_MO, 'interventions/routes.ts:116', { voit: ADMIN, masque: ['CT', 'AT', 'TECH'] }),
+  M('couts-intervention', 'totalMaterielHT', 'encadrement (administration, conducteur, assistante technique)', 'interventions/routes.ts:95-104', { voit: [...ADMIN, 'CT', 'AT'], masque: ['TECH'] }),
+  M('couts-intervention', 'totalCoutsHT', COUT_MO, 'interventions/routes.ts:116', { voit: ADMIN, masque: ['CT', 'AT', 'TECH'] }),
+  M('couts-intervention', 'margeDevis', `${COUT_MO} (administration seule)`, 'interventions/routes.ts:116-121', { voit: ADMIN, masque: ['CT', 'AT', 'TECH'] }),
+  M('couts-intervention', 'margeSav', `${COUT_MO} (administration seule)`, 'interventions/routes.ts:116-124', { voit: ADMIN, masque: ['CT', 'AT', 'TECH'] }),
 
   // --- Prix d'achat : devis, catalogue, parc ---
   M('devis', 'lignes[].prixAchatUnitaireHt', 'voitPrixAchatDevis : administration en session ; clé portant finances:read', 'devis/metier.ts:163-172 (devisPourLecteur) ; droits/visibilite.ts:63-67', {
@@ -162,12 +168,12 @@ export const MONTANTS_MASQUES = [
   // --- Tableau de bord et statistiques ---
   // Tableau de bord : le directeur lit les chiffres de l'administration, quel que soit le réglage de la rentabilité (réponse
   // de Nelson du 06-11-2026, « Chantiers seulement »), et non plus ceux d'un compte hors administration.
-  M('stats-global', 'achatsTotal', `non commercial, et ${MONTANTS_CHANTIER}`, 'statistiques/routes.ts:83-88', { voit: [...ADMIN, 'CT'], masque: ['COM', 'TECH'] }),
-  M('stats-global', 'caTotal', 'administration, et margeCommercialeActive', 'statistiques/routes.ts:94-108', { voit: ADMIN, masque: ['CT', 'COM'], reglages: ['margeCommercialeActive=non'] }),
-  M('stats-global', 'margeTotal', 'administration ou commercial, et margeCommercialeActive', 'statistiques/routes.ts:109 et :117', { voit: [...ADMIN, 'COM'], masque: ['CT', 'TECH'], reglages: ['margeCommercialeActive=non'] }),
-  M('stats-global', 'margePct', 'administration, et margeCommercialeActive', 'statistiques/routes.ts:110', { voit: ADMIN, masque: ['CT', 'COM'], reglages: ['margeCommercialeActive=non'] }),
-  M('stats-global', 'commissionCommercialeTotal', 'administration, et margeCommercialeActive', 'statistiques/routes.ts:111', { voit: ADMIN, masque: ['CT', 'COM'], reglages: ['margeCommercialeActive=non'] }),
-  M('stats-global', 'commissionTotal', 'commercial, et margeCommercialeActive', 'statistiques/routes.ts:118', { voit: ['COM'], masque: [...ADMIN, 'CT'], reglages: ['margeCommercialeActive=non'] }),
+  M('stats-global', 'achatsTotal', `non commercial, et ${MONTANTS_CHANTIER}`, 'statistiques/routes.ts:83-88', { voit: [...ADMIN, 'CT', 'AT'], masque: ['COM', 'TECH'] }),
+  M('stats-global', 'caTotal', 'administration, et margeCommercialeActive', 'statistiques/routes.ts:94-108', { voit: ADMIN, masque: ['CT', 'AT', 'COM'], reglages: ['margeCommercialeActive=non'] }),
+  M('stats-global', 'margeTotal', 'administration ou commercial, et margeCommercialeActive', 'statistiques/routes.ts:109 et :117', { voit: [...ADMIN, 'COM'], masque: ['CT', 'AT', 'TECH'], reglages: ['margeCommercialeActive=non'] }),
+  M('stats-global', 'margePct', 'administration, et margeCommercialeActive', 'statistiques/routes.ts:110', { voit: ADMIN, masque: ['CT', 'AT', 'COM'], reglages: ['margeCommercialeActive=non'] }),
+  M('stats-global', 'commissionCommercialeTotal', 'administration, et margeCommercialeActive', 'statistiques/routes.ts:111', { voit: ADMIN, masque: ['CT', 'AT', 'COM'], reglages: ['margeCommercialeActive=non'] }),
+  M('stats-global', 'commissionTotal', 'commercial, et margeCommercialeActive', 'statistiques/routes.ts:118', { voit: ['COM'], masque: [...ADMIN, 'CT', 'AT'], reglages: ['margeCommercialeActive=non'] }),
   M('stats-conducteur', 'depensesTotal', 'administration', 'statistiques/routes.ts:226', { voit: ADMIN, masque: ['RESP'] }),
   M('stats-conducteur', 'manqueAGagnerMainOeuvre', 'administration', 'statistiques/routes.ts:227', { voit: ADMIN, masque: ['RESP'] }),
   // Performances : le CA et la marge suivent voitRentabilite seule (statistiques/routes.ts, réponse du 06-11-2026) ; le

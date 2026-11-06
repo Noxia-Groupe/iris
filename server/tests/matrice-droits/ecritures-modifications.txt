@@ -818,6 +818,187 @@ AD-COM | PUT /api/interventions/:id/planning | intervention-terminee-signee | d�
 AD-COM | PUT /api/interventions/:id/planning | visite-contrat | défaut, corps jour, créneau et fiche libre | 200 écrit (Intervention,InterventionAffectation,JournalSaisieChantier,PlanningEvent,_PlanningEventIntervenants)
 AD-COM | PUT /api/parametres | — | défaut, corps margeCommercialeActive=non | 200 écrit (JournalAdministration,Parametres)
 AD-COM | PUT /api/planning/types/:id | type-planning | défaut, corps libellé | 200 écrit (PlanningEventType)
+AT | DELETE /api/achats/:id | achat-archive-chantier-ct | droit chantiers:archive, corps motif d’archivage | 404 « Chantier introuvable » inchangé
+AT | DELETE /api/achats/:id | achat-chantier-autre | droit chantiers:archive, corps motif d’archivage | 404 « Chantier introuvable » inchangé
+AT | DELETE /api/achats/:id | achat-chantier-ct | droit chantiers:archive, corps motif d’archivage | 404 « Chantier introuvable » inchangé
+AT | DELETE /api/achats/:id | achat-chantier-ct-branche-resp | droit chantiers:archive, corps motif d’archivage | 404 « Chantier introuvable » inchangé
+AT | DELETE /api/achats/:id | achat-chantier-termine | droit chantiers:archive, corps motif d’archivage | 404 « Chantier introuvable » inchangé
+AT | DELETE /api/heures/:id | heure-archivee-chantier-ct | droit chantiers:archive, corps motif d’archivage | 404 « Chantier introuvable » inchangé
+AT | DELETE /api/heures/:id | heure-chantier-autre | droit chantiers:archive, corps motif d’archivage | 404 « Chantier introuvable » inchangé
+AT | DELETE /api/heures/:id | heure-chantier-ct | droit chantiers:archive, corps motif d’archivage | 404 « Chantier introuvable » inchangé
+AT | DELETE /api/heures/:id | heure-chantier-ct-branche-resp | droit chantiers:archive, corps motif d’archivage | 404 « Chantier introuvable » inchangé
+AT | DELETE /api/heures/:id | heure-chantier-termine | droit chantiers:archive, corps motif d’archivage | 404 « Chantier introuvable » inchangé
+AT | PATCH /api/achats/:id | achat-archive-chantier-ct | droit chantiers:write, corps description, montantHT et motif | 404 « Chantier introuvable » inchangé
+AT | PATCH /api/achats/:id | achat-chantier-autre | droit chantiers:write, corps description, montantHT et motif | 404 « Chantier introuvable » inchangé
+AT | PATCH /api/achats/:id | achat-chantier-ct | droit chantiers:write, corps description, montantHT et motif | 404 « Chantier introuvable » inchangé
+AT | PATCH /api/achats/:id | achat-chantier-ct-branche-resp | droit chantiers:write, corps description, montantHT et motif | 404 « Chantier introuvable » inchangé
+AT | PATCH /api/achats/:id | achat-chantier-termine | droit chantiers:write, corps description, montantHT et motif | 404 « Chantier introuvable » inchangé
+AT | PATCH /api/devis/:id | devis-brouillon | droit devis, corps client, objet et ligne | 200 écrit (Devis,DevisLigne)
+AT | PATCH /api/devis/:id | devis-brouillon | droit devis:write, corps client, objet et ligne | 200 écrit (Devis,DevisLigne)
+AT | PATCH /api/devis/:id | devis-converti | droit devis, corps client, objet et ligne | 409 « Ce devis est signé : créez une nouvelle révision brouillon pour le modifier. » inchangé
+AT | PATCH /api/devis/:id | devis-converti | droit devis:write, corps client, objet et ligne | 409 « Ce devis est signé : créez une nouvelle révision brouillon pour le modifier. » inchangé
+AT | PATCH /api/devis/:id | devis-signe | droit devis, corps client, objet et ligne | 409 « Ce devis est signé : créez une nouvelle révision brouillon pour le modifier. » inchangé
+AT | PATCH /api/devis/:id | devis-signe | droit devis:write, corps client, objet et ligne | 409 « Ce devis est signé : créez une nouvelle révision brouillon pour le modifier. » inchangé
+AT | PATCH /api/heures/:id | heure-archivee-chantier-ct | droit chantiers:write, corps commentaire, heures et motif | 404 « Chantier introuvable » inchangé
+AT | PATCH /api/heures/:id | heure-chantier-autre | droit chantiers:write, corps commentaire, heures et motif | 404 « Chantier introuvable » inchangé
+AT | PATCH /api/heures/:id | heure-chantier-ct | droit chantiers:write, corps commentaire, heures et motif | 404 « Chantier introuvable » inchangé
+AT | PATCH /api/heures/:id | heure-chantier-ct-branche-resp | droit chantiers:write, corps commentaire, heures et motif | 404 « Chantier introuvable » inchangé
+AT | PATCH /api/heures/:id | heure-chantier-termine | droit chantiers:write, corps commentaire, heures et motif | 404 « Chantier introuvable » inchangé
+AT | PATCH /api/interventions/:id/couts/:type/:coutId | heures-archivees-suite-affaire-annulee | défaut, corps nbrHeures et motif | 403 « Accès non autorisé. » inchangé
+AT | PATCH /api/interventions/:id/couts/:type/:coutId | heures-suite-affaire-close | défaut, corps nbrHeures et motif | 403 « Accès non autorisé. » inchangé
+AT | PATCH /api/interventions/:id/couts/:type/:coutId | materiel-archive-suite-affaire-annulee | défaut, corps montantHT et motif | 409 « L’affaire de cette suite est annulée : plus aucun coût ne peut y être saisi. » inchangé
+AT | PATCH /api/interventions/:id/couts/:type/:coutId | materiel-suite-affaire-close | défaut, corps montantHT et motif | 403 « Le chantier de cette suite est clôturé : ses coûts ne peuvent plus être saisis ni modifiés. » inchangé
+AT | POST /api/achats | chantierId=chantier-ac | droit chantiers:write, corps achat | 404 « Chantier introuvable » inchangé
+AT | POST /api/achats | chantierId=chantier-ad | droit chantiers:write, corps achat | 404 « Chantier introuvable » inchangé
+AT | POST /api/achats | chantierId=chantier-annule | droit chantiers:write, corps achat | 404 « Chantier introuvable » inchangé
+AT | POST /api/achats | chantierId=chantier-autre | droit chantiers:write, corps achat | 404 « Chantier introuvable » inchangé
+AT | POST /api/achats | chantierId=chantier-com | droit chantiers:write, corps achat | 404 « Chantier introuvable » inchangé
+AT | POST /api/achats | chantierId=chantier-com-titulaire | droit chantiers:write, corps achat | 404 « Chantier introuvable » inchangé
+AT | POST /api/achats | chantierId=chantier-cpt | droit chantiers:write, corps achat | 404 « Chantier introuvable » inchangé
+AT | POST /api/achats | chantierId=chantier-ct | droit chantiers:write, corps achat | 404 « Chantier introuvable » inchangé
+AT | POST /api/achats | chantierId=chantier-ct-branche-resp | droit chantiers:write, corps achat | 404 « Chantier introuvable » inchangé
+AT | POST /api/achats | chantierId=chantier-dc | droit chantiers:write, corps achat | 404 « Chantier introuvable » inchangé
+AT | POST /api/achats | chantierId=chantier-dir | droit chantiers:write, corps achat | 404 « Chantier introuvable » inchangé
+AT | POST /api/achats | chantierId=chantier-resp | droit chantiers:write, corps achat | 404 « Chantier introuvable » inchangé
+AT | POST /api/achats | chantierId=chantier-tech-branche-resp | droit chantiers:write, corps achat | 404 « Chantier introuvable » inchangé
+AT | POST /api/achats | chantierId=chantier-termine | droit chantiers:write, corps achat | 404 « Chantier introuvable » inchangé
+AT | POST /api/achats/:id/restaurer | achat-archive-chantier-ct | droit chantiers:archive, corps motif de restauration | 404 « Chantier introuvable » inchangé
+AT | POST /api/achats/:id/restaurer | achat-chantier-autre | droit chantiers:archive, corps motif de restauration | 404 « Chantier introuvable » inchangé
+AT | POST /api/achats/:id/restaurer | achat-chantier-ct | droit chantiers:archive, corps motif de restauration | 404 « Chantier introuvable » inchangé
+AT | POST /api/achats/:id/restaurer | achat-chantier-ct-branche-resp | droit chantiers:archive, corps motif de restauration | 404 « Chantier introuvable » inchangé
+AT | POST /api/achats/:id/restaurer | achat-chantier-termine | droit chantiers:archive, corps motif de restauration | 404 « Chantier introuvable » inchangé
+AT | POST /api/categories | — | défaut, corps nom | 200 écrit (Categorie)
+AT | POST /api/contrats-maintenance/:id/generer-intervention | contrat-sans-visite | défaut | 403 « Accès réservé aux administrateurs » inchangé
+AT | POST /api/devis | clientId=client-actif | droit devis, corps client, objet et ligne | 201 écrit (Devis,DevisLigne,SequenceAffaire)
+AT | POST /api/devis | clientId=client-actif | droit devis:write, corps client, objet et ligne | 201 écrit (Devis,DevisLigne,SequenceAffaire)
+AT | POST /api/devis | clientId=client-desactive | droit devis, corps client, objet et ligne | 201 écrit (Devis,DevisLigne,SequenceAffaire)
+AT | POST /api/devis | clientId=client-desactive | droit devis:write, corps client, objet et ligne | 201 écrit (Devis,DevisLigne,SequenceAffaire)
+AT | POST /api/devis/:id/convertir | devis-brouillon | droit devis, corps cible=CHANTIER | 400 « Seul un devis accepté peut être converti. » inchangé
+AT | POST /api/devis/:id/convertir | devis-brouillon | droit devis, corps cible=CONTRAT | 403 « La création d’un contrat de maintenance est réservée à l’administration. » inchangé
+AT | POST /api/devis/:id/convertir | devis-brouillon | droit devis, corps cible=INTERVENTION | 400 « Seul un devis accepté peut être converti. » inchangé
+AT | POST /api/devis/:id/convertir | devis-brouillon | droit devis:write, corps cible=CHANTIER | 400 « Seul un devis accepté peut être converti. » inchangé
+AT | POST /api/devis/:id/convertir | devis-brouillon | droit devis:write, corps cible=CONTRAT | 403 « La création d’un contrat de maintenance est réservée à l’administration. » inchangé
+AT | POST /api/devis/:id/convertir | devis-brouillon | droit devis:write, corps cible=INTERVENTION | 400 « Seul un devis accepté peut être converti. » inchangé
+AT | POST /api/devis/:id/convertir | devis-converti | droit devis, corps cible=CHANTIER | 409 « Ce devis a déjà été converti : chaque affaire n’ouvre qu’un seul chantier. » inchangé
+AT | POST /api/devis/:id/convertir | devis-converti | droit devis, corps cible=CONTRAT | 403 « La création d’un contrat de maintenance est réservée à l’administration. » inchangé
+AT | POST /api/devis/:id/convertir | devis-converti | droit devis, corps cible=INTERVENTION | 201 écrit (DevisConversion,Intervention,JournalSaisieChantier,SequenceIntervention)
+AT | POST /api/devis/:id/convertir | devis-converti | droit devis:write, corps cible=CHANTIER | 409 « Ce devis a déjà été converti : chaque affaire n’ouvre qu’un seul chantier. » inchangé
+AT | POST /api/devis/:id/convertir | devis-converti | droit devis:write, corps cible=CONTRAT | 403 « La création d’un contrat de maintenance est réservée à l’administration. » inchangé
+AT | POST /api/devis/:id/convertir | devis-converti | droit devis:write, corps cible=INTERVENTION | 201 écrit (DevisConversion,Intervention,JournalSaisieChantier,SequenceIntervention)
+AT | POST /api/devis/:id/convertir | devis-signe | droit devis, corps cible=CHANTIER | 201 écrit (Chantier,DevisConversion)
+AT | POST /api/devis/:id/convertir | devis-signe | droit devis, corps cible=CONTRAT | 403 « La création d’un contrat de maintenance est réservée à l’administration. » inchangé
+AT | POST /api/devis/:id/convertir | devis-signe | droit devis, corps cible=INTERVENTION | 201 écrit (DevisConversion,Intervention,JournalSaisieChantier,SequenceIntervention)
+AT | POST /api/devis/:id/convertir | devis-signe | droit devis:write, corps cible=CHANTIER | 201 écrit (Chantier,DevisConversion)
+AT | POST /api/devis/:id/convertir | devis-signe | droit devis:write, corps cible=CONTRAT | 403 « La création d’un contrat de maintenance est réservée à l’administration. » inchangé
+AT | POST /api/devis/:id/convertir | devis-signe | droit devis:write, corps cible=INTERVENTION | 201 écrit (DevisConversion,Intervention,JournalSaisieChantier,SequenceIntervention)
+AT | POST /api/devis/:id/duplication | devis-brouillon | droit devis, corps sans corps | 201 écrit (Devis,DevisLigne,SequenceAffaire)
+AT | POST /api/devis/:id/duplication | devis-brouillon | droit devis:write, corps sans corps | 201 écrit (Devis,DevisLigne,SequenceAffaire)
+AT | POST /api/devis/:id/duplication | devis-converti | droit devis, corps sans corps | 201 écrit (Devis,DevisLigne,SequenceAffaire)
+AT | POST /api/devis/:id/duplication | devis-converti | droit devis:write, corps sans corps | 201 écrit (Devis,DevisLigne,SequenceAffaire)
+AT | POST /api/devis/:id/duplication | devis-signe | droit devis, corps sans corps | 201 écrit (Devis,DevisLigne,SequenceAffaire)
+AT | POST /api/devis/:id/duplication | devis-signe | droit devis:write, corps sans corps | 201 écrit (Devis,DevisLigne,SequenceAffaire)
+AT | POST /api/fournisseurs | — | défaut, corps nom | 200 écrit (Fournisseur)
+AT | POST /api/heures | chantierId=chantier-ac | droit chantiers:write, corps heures | 404 « Chantier introuvable » inchangé
+AT | POST /api/heures | chantierId=chantier-ad | droit chantiers:write, corps heures | 404 « Chantier introuvable » inchangé
+AT | POST /api/heures | chantierId=chantier-annule | droit chantiers:write, corps heures | 404 « Chantier introuvable » inchangé
+AT | POST /api/heures | chantierId=chantier-autre | droit chantiers:write, corps heures | 404 « Chantier introuvable » inchangé
+AT | POST /api/heures | chantierId=chantier-com | droit chantiers:write, corps heures | 404 « Chantier introuvable » inchangé
+AT | POST /api/heures | chantierId=chantier-com-titulaire | droit chantiers:write, corps heures | 404 « Chantier introuvable » inchangé
+AT | POST /api/heures | chantierId=chantier-cpt | droit chantiers:write, corps heures | 404 « Chantier introuvable » inchangé
+AT | POST /api/heures | chantierId=chantier-ct | droit chantiers:write, corps heures | 404 « Chantier introuvable » inchangé
+AT | POST /api/heures | chantierId=chantier-ct-branche-resp | droit chantiers:write, corps heures | 404 « Chantier introuvable » inchangé
+AT | POST /api/heures | chantierId=chantier-dc | droit chantiers:write, corps heures | 404 « Chantier introuvable » inchangé
+AT | POST /api/heures | chantierId=chantier-dir | droit chantiers:write, corps heures | 404 « Chantier introuvable » inchangé
+AT | POST /api/heures | chantierId=chantier-resp | droit chantiers:write, corps heures | 404 « Chantier introuvable » inchangé
+AT | POST /api/heures | chantierId=chantier-tech-branche-resp | droit chantiers:write, corps heures | 404 « Chantier introuvable » inchangé
+AT | POST /api/heures | chantierId=chantier-termine | droit chantiers:write, corps heures | 404 « Chantier introuvable » inchangé
+AT | POST /api/heures/:id/restaurer | heure-archivee-chantier-ct | droit chantiers:archive, corps motif de restauration | 404 « Chantier introuvable » inchangé
+AT | POST /api/heures/:id/restaurer | heure-chantier-autre | droit chantiers:archive, corps motif de restauration | 404 « Chantier introuvable » inchangé
+AT | POST /api/heures/:id/restaurer | heure-chantier-ct | droit chantiers:archive, corps motif de restauration | 404 « Chantier introuvable » inchangé
+AT | POST /api/heures/:id/restaurer | heure-chantier-ct-branche-resp | droit chantiers:archive, corps motif de restauration | 404 « Chantier introuvable » inchangé
+AT | POST /api/heures/:id/restaurer | heure-chantier-termine | droit chantiers:archive, corps motif de restauration | 404 « Chantier introuvable » inchangé
+AT | POST /api/interventions | chantierId=chantier-ac | défaut, corps client, titre et chantier | 201 écrit (Intervention,JournalSaisieChantier,SequenceIntervention)
+AT | POST /api/interventions | chantierId=chantier-ad | défaut, corps client, titre et chantier | 201 écrit (Intervention,JournalSaisieChantier,SequenceIntervention)
+AT | POST /api/interventions | chantierId=chantier-annule | défaut, corps client, titre et chantier | 404 « Chantier introuvable pour ce client. » inchangé
+AT | POST /api/interventions | chantierId=chantier-autre | défaut, corps client, titre et chantier | 201 écrit (Intervention,JournalSaisieChantier,SequenceIntervention)
+AT | POST /api/interventions | chantierId=chantier-com | défaut, corps client, titre et chantier | 201 écrit (Intervention,JournalSaisieChantier,SequenceIntervention)
+AT | POST /api/interventions | chantierId=chantier-com-titulaire | défaut, corps client, titre et chantier | 201 écrit (Intervention,JournalSaisieChantier,SequenceIntervention)
+AT | POST /api/interventions | chantierId=chantier-cpt | défaut, corps client, titre et chantier | 201 écrit (Intervention,JournalSaisieChantier,SequenceIntervention)
+AT | POST /api/interventions | chantierId=chantier-ct | défaut, corps client, titre et chantier | 201 écrit (Intervention,JournalSaisieChantier,SequenceIntervention)
+AT | POST /api/interventions | chantierId=chantier-ct-branche-resp | défaut, corps client, titre et chantier | 201 écrit (Intervention,JournalSaisieChantier,SequenceIntervention)
+AT | POST /api/interventions | chantierId=chantier-dc | défaut, corps client, titre et chantier | 201 écrit (Intervention,JournalSaisieChantier,SequenceIntervention)
+AT | POST /api/interventions | chantierId=chantier-dir | défaut, corps client, titre et chantier | 201 écrit (Intervention,JournalSaisieChantier,SequenceIntervention)
+AT | POST /api/interventions | chantierId=chantier-resp | défaut, corps client, titre et chantier | 201 écrit (Intervention,JournalSaisieChantier,SequenceIntervention)
+AT | POST /api/interventions | chantierId=chantier-tech-branche-resp | défaut, corps client, titre et chantier | 201 écrit (Intervention,JournalSaisieChantier,SequenceIntervention)
+AT | POST /api/interventions | chantierId=chantier-termine | défaut, corps client, titre et chantier | 201 écrit (Intervention,JournalSaisieChantier,SequenceIntervention)
+AT | POST /api/interventions | clientId=client-actif, sans chantier | défaut, corps client, titre et chantier | 201 écrit (Intervention,JournalSaisieChantier,SequenceIntervention)
+AT | POST /api/interventions | clientId=client-desactive, sans chantier | défaut, corps client, titre et chantier | 404 « Client introuvable. » inchangé
+AT | POST /api/interventions/:id/couts/:type/:coutId/:action | heures-archivees-suite-affaire-annulee | défaut, corps motif | 409 « L’affaire de cette suite est annulée : plus aucun coût ne peut y être saisi. » inchangé
+AT | POST /api/interventions/:id/couts/:type/:coutId/:action | heures-suite-affaire-close | défaut, corps motif | 403 « Le chantier de cette suite est clôturé : ses coûts ne peuvent plus être saisis ni modifiés. » inchangé
+AT | POST /api/interventions/:id/couts/:type/:coutId/:action | heures-tech-intervention-affectee | défaut, corps motif | 200 écrit (CoutInterventionHeure,JournalSaisieChantier)
+AT | POST /api/interventions/:id/couts/:type/:coutId/:action | heures-tech-sous-intervention-autre | défaut, corps motif | 404 « Coût introuvable. » inchangé
+AT | POST /api/interventions/:id/couts/:type/:coutId/:action | materiel-archive-suite-affaire-annulee | défaut, corps motif | 409 « L’affaire de cette suite est annulée : plus aucun coût ne peut y être saisi. » inchangé
+AT | POST /api/interventions/:id/couts/:type/:coutId/:action | materiel-intervention-affectee | défaut, corps motif | 200 écrit (CoutInterventionAchat,JournalSaisieChantier)
+AT | POST /api/interventions/:id/couts/:type/:coutId/:action | materiel-intervention-chantier-ct | défaut, corps motif | 200 écrit (CoutInterventionAchat,JournalSaisieChantier)
+AT | POST /api/interventions/:id/couts/:type/:coutId/:action | materiel-suite-affaire-close | défaut, corps motif | 403 « Le chantier de cette suite est clôturé : ses coûts ne peuvent plus être saisis ni modifiés. » inchangé
+AT | POST /api/interventions/:id/couts/achats | curative-sans-chantier-branche | défaut, corps date, description, montantHT et fournisseur | 201 écrit (CoutInterventionAchat,JournalSaisieChantier)
+AT | POST /api/interventions/:id/couts/achats | intervention-affectee-tech | défaut, corps date, description, montantHT et fournisseur | 201 écrit (CoutInterventionAchat,JournalSaisieChantier)
+AT | POST /api/interventions/:id/couts/achats | intervention-annulee | défaut, corps date, description, montantHT et fournisseur | 409 « Cette intervention ne peut pas recevoir de coûts. » inchangé
+AT | POST /api/interventions/:id/couts/achats | intervention-autre | défaut, corps date, description, montantHT et fournisseur | 201 écrit (CoutInterventionAchat,JournalSaisieChantier)
+AT | POST /api/interventions/:id/couts/achats | intervention-chantier-ct | défaut, corps date, description, montantHT et fournisseur | 201 écrit (CoutInterventionAchat,JournalSaisieChantier)
+AT | POST /api/interventions/:id/couts/achats | intervention-creee-ct | défaut, corps date, description, montantHT et fournisseur | 201 écrit (CoutInterventionAchat,JournalSaisieChantier)
+AT | POST /api/interventions/:id/couts/achats | intervention-terminee-motif | défaut, corps date, description, montantHT et fournisseur | 201 écrit (CoutInterventionAchat,JournalSaisieChantier)
+AT | POST /api/interventions/:id/couts/achats | intervention-terminee-signee | défaut, corps date, description, montantHT et fournisseur | 201 écrit (CoutInterventionAchat,JournalSaisieChantier)
+AT | POST /api/interventions/:id/couts/achats | suite-affaire-annulee | défaut, corps date, description, montantHT et fournisseur | 409 « L’affaire de cette suite est annulée : plus aucun coût ne peut y être saisi. » inchangé
+AT | POST /api/interventions/:id/couts/achats | suite-affaire-close | défaut, corps date, description, montantHT et fournisseur | 403 « Le chantier de cette suite est clôturé : ses coûts ne peuvent plus être saisis ni modifiés. » inchangé
+AT | POST /api/interventions/:id/couts/achats | visite-contrat | défaut, corps date, description, montantHT et fournisseur | 201 écrit (CoutInterventionAchat,JournalSaisieChantier)
+AT | POST /api/interventions/:id/couts/heures | curative-sans-chantier-branche | défaut, corps date et heures | 403 « Saisie d’heures réservée au technicien affecté. » inchangé
+AT | POST /api/interventions/:id/couts/heures | intervention-affectee-tech | défaut, corps date et heures | 403 « Saisie d’heures réservée au technicien affecté. » inchangé
+AT | POST /api/interventions/:id/couts/heures | intervention-annulee | défaut, corps date et heures | 403 « Saisie d’heures réservée au technicien affecté. » inchangé
+AT | POST /api/interventions/:id/couts/heures | intervention-autre | défaut, corps date et heures | 403 « Saisie d’heures réservée au technicien affecté. » inchangé
+AT | POST /api/interventions/:id/couts/heures | intervention-chantier-ct | défaut, corps date et heures | 403 « Saisie d’heures réservée au technicien affecté. » inchangé
+AT | POST /api/interventions/:id/couts/heures | intervention-creee-ct | défaut, corps date et heures | 403 « Saisie d’heures réservée au technicien affecté. » inchangé
+AT | POST /api/interventions/:id/couts/heures | intervention-terminee-motif | défaut, corps date et heures | 403 « Saisie d’heures réservée au technicien affecté. » inchangé
+AT | POST /api/interventions/:id/couts/heures | intervention-terminee-signee | défaut, corps date et heures | 403 « Saisie d’heures réservée au technicien affecté. » inchangé
+AT | POST /api/interventions/:id/couts/heures | suite-affaire-annulee | défaut, corps date et heures | 403 « Saisie d’heures réservée au technicien affecté. » inchangé
+AT | POST /api/interventions/:id/couts/heures | suite-affaire-close | défaut, corps date et heures | 403 « Saisie d’heures réservée au technicien affecté. » inchangé
+AT | POST /api/interventions/:id/couts/heures | visite-contrat | défaut, corps date et heures | 403 « Saisie d’heures réservée au technicien affecté. » inchangé
+AT | POST /api/mentions-legales/:version/publier | version-publiee-inactive | défaut | 403 « Accès réservé aux administrateurs » inchangé
+AT | POST /api/planning/events | chantierId=chantier-ac | défaut, corps affectation du chantier | 201 écrit (PlanningEvent,_PlanningEventIntervenants)
+AT | POST /api/planning/events | chantierId=chantier-ad | défaut, corps affectation du chantier | 201 écrit (PlanningEvent,_PlanningEventIntervenants)
+AT | POST /api/planning/events | chantierId=chantier-annule | défaut, corps affectation du chantier | 201 écrit (PlanningEvent,_PlanningEventIntervenants)
+AT | POST /api/planning/events | chantierId=chantier-autre | défaut, corps affectation du chantier | 201 écrit (PlanningEvent,_PlanningEventIntervenants)
+AT | POST /api/planning/events | chantierId=chantier-com | défaut, corps affectation du chantier | 201 écrit (PlanningEvent,_PlanningEventIntervenants)
+AT | POST /api/planning/events | chantierId=chantier-com-titulaire | défaut, corps affectation du chantier | 201 écrit (PlanningEvent,_PlanningEventIntervenants)
+AT | POST /api/planning/events | chantierId=chantier-cpt | défaut, corps affectation du chantier | 201 écrit (PlanningEvent,_PlanningEventIntervenants)
+AT | POST /api/planning/events | chantierId=chantier-ct | défaut, corps affectation du chantier | 201 écrit (PlanningEvent,_PlanningEventIntervenants)
+AT | POST /api/planning/events | chantierId=chantier-ct-branche-resp | défaut, corps affectation du chantier | 201 écrit (PlanningEvent,_PlanningEventIntervenants)
+AT | POST /api/planning/events | chantierId=chantier-dc | défaut, corps affectation du chantier | 201 écrit (PlanningEvent,_PlanningEventIntervenants)
+AT | POST /api/planning/events | chantierId=chantier-dir | défaut, corps affectation du chantier | 201 écrit (PlanningEvent,_PlanningEventIntervenants)
+AT | POST /api/planning/events | chantierId=chantier-resp | défaut, corps affectation du chantier | 201 écrit (PlanningEvent,_PlanningEventIntervenants)
+AT | POST /api/planning/events | chantierId=chantier-tech-branche-resp | défaut, corps affectation du chantier | 201 écrit (PlanningEvent,_PlanningEventIntervenants)
+AT | POST /api/planning/events | chantierId=chantier-termine | défaut, corps affectation du chantier | 201 écrit (PlanningEvent,_PlanningEventIntervenants)
+AT | POST /api/planning/events | typeEventId=type-planning | défaut, corps événement libre | 201 écrit (PlanningEvent,_PlanningEventIntervenants)
+AT | POST /api/planning/types | — | défaut, corps libellé et couleur | 201 écrit (PlanningEventType)
+AT | PUT /api/categories/:id | categorie | défaut, corps nom | 200 écrit (Categorie)
+AT | PUT /api/devis/:id/statut | devis-brouillon | droit devis, corps statut=ENVOYE | 200 écrit (Devis)
+AT | PUT /api/devis/:id/statut | devis-brouillon | droit devis:write, corps statut=ENVOYE | 200 écrit (Devis)
+AT | PUT /api/devis/:id/statut | devis-converti | droit devis, corps statut=EN_ATTENTE_ACOMPTE | 400 « Le chantier de ce devis est déjà ouvert : seule une annulation peut revenir dessus. » inchangé
+AT | PUT /api/devis/:id/statut | devis-converti | droit devis:write, corps statut=EN_ATTENTE_ACOMPTE | 400 « Le chantier de ce devis est déjà ouvert : seule une annulation peut revenir dessus. » inchangé
+AT | PUT /api/devis/:id/statut | devis-signe | droit devis, corps statut=EN_ATTENTE_ACOMPTE | 400 « Ce devis n’exige pas d’acompte. » inchangé
+AT | PUT /api/devis/:id/statut | devis-signe | droit devis:write, corps statut=EN_ATTENTE_ACOMPTE | 400 « Ce devis n’exige pas d’acompte. » inchangé
+AT | PUT /api/fournisseurs/:id | fournisseur | défaut, corps nom | 200 écrit (Fournisseur)
+AT | PUT /api/interventions/:id/a-suivre | intervention-a-suivre | défaut, corps aSuivre=non | 200 écrit (Intervention,JournalSaisieChantier)
+AT | PUT /api/interventions/:id/planning | curative-sans-chantier-branche | défaut, corps jour, créneau et fiche libre | 200 écrit (InterventionAffectation,PlanningEvent,_PlanningEventIntervenants)
+AT | PUT /api/interventions/:id/planning | intervention-affectee-tech | défaut, corps jour, créneau et fiche libre | 200 écrit (InterventionAffectation,PlanningEvent,_PlanningEventIntervenants)
+AT | PUT /api/interventions/:id/planning | intervention-annulee | défaut, corps jour, créneau et fiche libre | 409 « Cette intervention ne peut plus être planifiée. » inchangé
+AT | PUT /api/interventions/:id/planning | intervention-autre | défaut, corps jour, créneau et fiche libre | 200 écrit (Intervention,InterventionAffectation,JournalSaisieChantier,PlanningEvent,_PlanningEventIntervenants)
+AT | PUT /api/interventions/:id/planning | intervention-chantier-ct | défaut, corps jour, créneau et fiche libre | 200 écrit (InterventionAffectation,PlanningEvent)
+AT | PUT /api/interventions/:id/planning | intervention-creee-ct | défaut, corps jour, créneau et fiche libre | 200 écrit (Intervention,InterventionAffectation,JournalSaisieChantier,PlanningEvent,_PlanningEventIntervenants)
+AT | PUT /api/interventions/:id/planning | intervention-terminee-motif | défaut, corps jour, créneau et fiche libre | 409 « Cette intervention ne peut plus être planifiée. » inchangé
+AT | PUT /api/interventions/:id/planning | intervention-terminee-signee | défaut, corps jour, créneau et fiche libre | 409 « Cette intervention ne peut plus être planifiée. » inchangé
+AT | PUT /api/interventions/:id/planning | visite-contrat | défaut, corps jour, créneau et fiche libre | 200 écrit (Intervention,InterventionAffectation,JournalSaisieChantier,PlanningEvent,_PlanningEventIntervenants)
+AT | PUT /api/planning/types/:id | type-planning | défaut, corps libellé | 200 écrit (PlanningEventType)
 COM | DELETE /api/achats/:id | achat-archive-chantier-com-titulaire | droit chantiers:archive, corps motif d’archivage | 404 « Chantier introuvable » inchangé
 COM | DELETE /api/achats/:id | achat-archive-chantier-ct | droit chantiers:archive, corps motif d’archivage | 404 « Chantier introuvable » inchangé
 COM | DELETE /api/achats/:id | achat-chantier-autre | droit chantiers:archive, corps motif d’archivage | 404 « Chantier introuvable » inchangé

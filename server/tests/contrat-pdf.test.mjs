@@ -78,7 +78,8 @@ if (!TEST_DATABASE_URL) {
   const MOTIF_ANNULATION = 'TEST Motif confidentiel de l’annulation 6a4b';
   // Le directeur n'en est plus : il a les droits de l'administration (lot « Directeur aligné sur l'administration », décision
   // de Nelson du 24-10-2026, point 14).
-  const ROLES_NON_ADMINISTRATEURS = ['CONDUCTEUR_TRAVAUX', 'COMMERCIAL', 'ASSISTANTE_COMMERCIALE', 'TECHNICIEN', 'COMPTABLE', 'DIRECTEUR_COMMERCIAL', 'RESPONSABLE'];
+  // L'assistante technique (lot AT-1) y entre : les contrats restent à l'administration jusqu'à AT-2 (cadrage v2.1, « Fermé à AT-1 »).
+  const ROLES_NON_ADMINISTRATEURS = ['CONDUCTEUR_TRAVAUX', 'COMMERCIAL', 'ASSISTANTE_COMMERCIALE', 'ASSISTANTE_TECHNIQUE', 'TECHNICIEN', 'COMPTABLE', 'DIRECTEUR_COMMERCIAL', 'RESPONSABLE'];
   const TOUS_LES_SCOPES = ['clients:read', 'clients:write', 'catalogue:read', 'catalogue:write', 'equipements:read', 'equipements:write', 'devis:read', 'devis:write', 'company:read', 'chantiers:read', 'chantiers:write', 'chantiers:archive', 'finances:read'];
   const suffixe = `${Date.now()}`;
 

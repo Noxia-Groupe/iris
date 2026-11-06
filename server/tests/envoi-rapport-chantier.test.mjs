@@ -51,7 +51,9 @@ const CHAMPS_ENVOI = ['auteurNom', 'canal', 'createdAt', 'destinataire', 'expedi
 const MICROSOFT_365_PROPOSE = false;
 // Le directeur n'en est plus : il a les droits de l'administration (lot « Directeur aligné sur l'administration », décision
 // de Nelson du 24-10-2026, point 14).
-const ROLES_NON_ADMINISTRATEURS = ['CONDUCTEUR_TRAVAUX', 'COMMERCIAL', 'ASSISTANTE_COMMERCIALE', 'TECHNICIEN', 'COMPTABLE', 'DIRECTEUR_COMMERCIAL', 'RESPONSABLE'];
+// L'assistante technique (lot « Assistante technique », PR AT-1, cadrage v2.1) y entre : elle lit toutes les affaires, mais
+// le rapport de chantier et son envoi restent à l'administration jusqu'à AT-2 (cadrage, N2 de la vérification).
+const ROLES_NON_ADMINISTRATEURS = ['CONDUCTEUR_TRAVAUX', 'COMMERCIAL', 'ASSISTANTE_COMMERCIALE', 'ASSISTANTE_TECHNIQUE', 'TECHNICIEN', 'COMPTABLE', 'DIRECTEUR_COMMERCIAL', 'RESPONSABLE'];
 const TOUS_LES_SCOPES = ['clients:read', 'clients:write', 'catalogue:read', 'catalogue:write', 'equipements:read', 'equipements:write', 'devis:read', 'devis:write', 'company:read', 'chantiers:read', 'chantiers:write', 'chantiers:archive', 'finances:read'];
 
 // --- Ni montant ni heures (réponse de Nelson du 31-10-2026 ; cadrage, « Objet et texte » : « Le texte ne porte

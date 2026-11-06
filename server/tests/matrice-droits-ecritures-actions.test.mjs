@@ -5,12 +5,12 @@
 // Tests seuls : ce fichier enregistre le comportement actuel, sans rien corriger (cadrage §1 et §7). Il reprend les
 // outils, les comptes, le jeu de données et la table des routes de D1a-1 (server/tests/matrice-droits/), et ajoute
 // l'outil de remise en état (matrice-droits/remise-en-etat.mjs, avenant section 1, approche A3). Il enregistre :
-//  - les 20 routes (b) de session (action sans corps, avec un paramètre), jouées à corps vide par les 15 comptes sur
+//  - les 20 routes (b) de session (action sans corps, avec un paramètre), jouées à corps vide par les 16 comptes sur
 //    CHAQUE CIBLE RÉELLE de leur famille, et non plus sur un identifiant inexistant (cadrage §2.4 (b) : « le refus sur
 //    un dossier réel, dans ou hors du périmètre, relève de D1a-5 »), dont l'émission d'une facture (brouillon émis ;
 //    refus sur une facture émise et sur un avoir, sans effet) ;
 //  - les 16 routes (a) marquées validation-avant-droit (13 avec une famille de cibles ; POST /api/achats, /api/heures
-//    et /api/devis sans famille), rejouées AVEC UN CORPS VALIDE par les 15 comptes sur chaque cible réelle de leur
+//    et /api/devis sans famille), rejouées AVEC UN CORPS VALIDE par les 16 comptes sur chaque cible réelle de leur
 //    famille, ou avec la cible portée par le corps (chantierId, clientId), dans et hors du périmètre. Le corps peut
 //    dépendre de l'état de la cible (statut d'une intervention ou d'un chantier, relu en base) : un corps par état, et
 //    plusieurs quand le droit dépend du corps (annulation, marque « à suivre » posée ou retirée, rôle de super

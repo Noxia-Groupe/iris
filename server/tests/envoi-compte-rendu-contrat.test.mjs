@@ -471,6 +471,8 @@ if (!TEST_DATABASE_URL) {
         directeurCommercial: await creerCompte('DIRECTEUR_COMMERCIAL', 'directeur-commercial', s),
         assistanteCommerciale: await creerCompte('ASSISTANTE_COMMERCIALE', 'assistante-commerciale', s),
         comptable: await creerCompte('COMPTABLE', 'comptable', s),
+        // Lot « Assistante technique », PR AT-1 (cadrage v2.1, « SAV sur toute la société » : « comptes rendus, PDF, envois »).
+        assistanteTechnique: await creerCompte('ASSISTANTE_TECHNIQUE', 'assistante-technique', s),
       };
       const affecte = await compteTechnicien('affecte', s);
       const nonAffecte = await compteTechnicien('non-affecte', s);
@@ -513,6 +515,9 @@ if (!TEST_DATABASE_URL) {
         directeurCommercial: [404, 404, 404, 404],
         assistanteCommerciale: [404, 404, 404, 404],
         comptable: [404, 404, 404, 404],
+        // L'assistante technique voit tout le SAV et porte clients:read (lot AT-1) : comme l'administrateur, sans affectation
+        // ni rattachement. Lecture écartée : celle du conducteur tiers (404, hors périmètre).
+        assistanteTechnique: [200, 409, 200, 404],
       };
       const enregistrement = {
         ...lecture,
@@ -520,6 +525,7 @@ if (!TEST_DATABASE_URL) {
         admin: [201, 409, 409, 404],
         conducteur: [201, 409, 409, 404],
         directeur: [201, 409, 409, 404],
+        assistanteTechnique: [201, 409, 409, 404],
       };
       const MESSAGES_409 = { lecture: [null, AUCUN_COMPTE_RENDU, null, null], enregistrement: [null, AUCUN_COMPTE_RENDU, INTERVENTION_ANNULEE, null] };
       const jetons = {
@@ -548,8 +554,9 @@ if (!TEST_DATABASE_URL) {
           }
         }
       }
-      // Les quatre envois admis sont au journal de l'intervention, du plus récent au plus ancien.
-      assert.deepEqual((await lire(cheminCompteRendu(avecCompteRendu.id))).body.envois.map((e) => e.auteurNom), [comptes.directeur.name, conducteur.name, comptes.admin.name, secours.name]);
+      // Les cinq envois admis sont au journal de l'intervention, du plus récent au plus ancien, celui de l'assistante
+      // technique à son nom (lot AT-1).
+      assert.deepEqual((await lire(cheminCompteRendu(avecCompteRendu.id))).body.envois.map((e) => e.auteurNom), [comptes.assistanteTechnique.name, comptes.directeur.name, conducteur.name, comptes.admin.name, secours.name]);
       assert.equal(await prisma.envoiDocument.count({ where: { interventionId: { in: [sansCompteRendu.id, annulee.id] } } }), 0);
     });
 
@@ -595,7 +602,8 @@ if (!TEST_DATABASE_URL) {
       const refuses = [];
       // Le directeur n'en est plus : il a les droits de l'administration (lot « Directeur aligné sur l'administration »), et
       // le témoin « tous les droits » est désormais un responsable.
-      for (const role of ['CONDUCTEUR_TRAVAUX', 'COMMERCIAL', 'ASSISTANTE_COMMERCIALE', 'TECHNICIEN', 'COMPTABLE', 'DIRECTEUR_COMMERCIAL', 'RESPONSABLE']) {
+      // L'assistante technique (lot AT-1) en est aussi : les contrats restent à l'administration jusqu'à AT-2.
+      for (const role of ['CONDUCTEUR_TRAVAUX', 'COMMERCIAL', 'ASSISTANTE_COMMERCIALE', 'ASSISTANTE_TECHNIQUE', 'TECHNICIEN', 'COMPTABLE', 'DIRECTEUR_COMMERCIAL', 'RESPONSABLE']) {
         refuses.push([role, await creerCompte(role, `contrat-${role.toLowerCase()}`, s)]);
       }
       refuses.push(['RESPONSABLE (tous les droits)', await creerCompte('RESPONSABLE', 'contrat-responsable-complet', s, { permissions: TOUS_LES_SCOPES, accesFinance: true })]);

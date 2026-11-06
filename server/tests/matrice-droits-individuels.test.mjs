@@ -7,7 +7,7 @@
 // type sans droit, en entrée (routes de D1a-1) et en données (lectures de D1a-3). La référence ne liste que les gains. »
 //
 // Tests seuls : ce fichier enregistre le comportement actuel, sans rien corriger (cadrage §1 et §7). Pour chaque type de
-// compte (comptes.mjs, les dix types) et chaque droit individuel, le droit est donné au compte du type par la route
+// compte (comptes.mjs, les onze types, assistante technique comprise) et chaque droit individuel, le droit est donné au compte du type par la route
 // d'administration, comme le fait l'écran (PUT /api/users/:id/permissions, PATCH /api/users/:id/acces-finance, session
 // du super administrateur, journalisées), le compte rejoue ses cas, puis le droit lui est retiré, même en cas d'échec.
 // Le compte garde ses relations avec les cibles du jeu de données (titulaire, branche, affectation) : chaque type a un

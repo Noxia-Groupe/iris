@@ -570,8 +570,10 @@ if (!TEST_DATABASE_URL) {
         ajouter(compte, 'POST /api/heures/:id/restaurer', 'heure-archivee-chantier-ct', 'défaut, corps motif de restauration', () => ({ motifRestauration: motif('restauration') }), { montant: montantTravaux('PointageHeure', heure('heure-archivee-chantier-ct'), ['nbrHeures', 'tauxHoraireApplique'], inchange(['nbrHeures', 'tauxHoraireApplique'])) });
       }
 
-      // Interventions SAV : journal des saisies de l'intervention.
-      for (const compte of [SA, 'AD', 'DIR', 'CT']) {
+      // Interventions SAV : journal des saisies de l'intervention. L'assistante technique (lot « Assistante technique », PR
+      // AT-1, cadrage v2.1 : « ouvertures testées par écriture et journal à son nom ») est jouée comme le conducteur, sur
+      // les mêmes cibles : création, statut, suite, marque « à suivre », planning et envoi du compte rendu.
+      for (const compte of [SA, 'AD', 'DIR', 'CT', 'AT']) {
         ajouter(compte, 'POST /api/interventions', 'chantierId=chantier-ct', 'défaut, corps client, titre et chantier', () => ({ clientId: d.clientActif, titre: 'TEST Intervention créée par la matrice des journaux', chantierId: id('chantier', 'chantier-ct') }));
         ajouter(compte, 'PATCH /api/interventions/:id/statut', 'intervention-creee-ct', 'défaut, corps statut=ANNULEE et motif', () => ({ statut: 'ANNULEE', motif: motif('annulation') }));
         ajouter(compte, 'PATCH /api/interventions/:id/statut', 'intervention-chantier-ct', 'défaut, corps statut=EN_COURS', () => ({ statut: 'EN_COURS' }));
@@ -587,12 +589,15 @@ if (!TEST_DATABASE_URL) {
         ajouter(compte, 'POST /api/interventions/rapports/:rapportId/signature', 'rapport-non-signe', 'défaut, corps signataire, confirmation et tracé', () => ({ signataire: 'TEST Signataire de la matrice', confirme: true, trace: TRACE }));
         ajouter(compte, 'PUT /api/interventions/:id/a-suivre', 'intervention-a-suivre', 'défaut, corps aSuivre=non', () => ({ aSuivre: false }));
       }
-      for (const compte of [SA, 'AD', 'DIR']) ajouter(compte, 'POST /api/interventions/:id/remise-a-planifier', 'curative-sans-chantier-branche', 'défaut, corps motif', () => ({ motif: motif('remise à planifier') }));
+      // L'assistante technique remet à planifier une curative hors de toute relation (SAV de toute la société, lot AT-1).
+      for (const compte of [SA, 'AD', 'DIR', 'AT']) ajouter(compte, 'POST /api/interventions/:id/remise-a-planifier', 'curative-sans-chantier-branche', 'défaut, corps motif', () => ({ motif: motif('remise à planifier') }));
 
       // Coûts SAV (montants relus en base, §2.4) : matériel de l'encadrement, heures du technicien affecté.
       const cout = (nom) => cibleDe('cout-sav', nom).ids;
       const CHAMPS_HEURES_SAV = ['nbrHeures', 'tauxHoraireApplique', 'prixVenteHoraireApplique'];
-      for (const compte of [SA, 'AD', 'DIR', 'CT']) {
+      // Matériel SAV saisi et corrigé par l'assistante technique comme par le conducteur (réponse 7 de Nelson du 06-11-2026,
+      // « Oui, comme le conducteur » ; lot AT-1, C6 du contrôle) : montant relu en base, entrée à son nom.
+      for (const compte of [SA, 'AD', 'DIR', 'CT', 'AT']) {
         ajouter(compte, 'POST /api/interventions/:id/couts/achats', 'intervention-chantier-ct', 'défaut, corps date, description, montantHT et fournisseur', () => ({ date: d.aujourdhui, description: 'TEST Matériel SAV de la matrice des journaux', montantHT: MONTANTS.materielSavCree, fournisseurId: d.fournisseur }), {
           montant: montantTravaux('CoutInterventionAchat', null, ['montantHT'], async () => ({ montantHT: MONTANTS.materielSavCree })),
         });
@@ -615,10 +620,12 @@ if (!TEST_DATABASE_URL) {
       const montantCout = (nom) => (cout(nom).type === 'achats'
         ? montantTravaux('CoutInterventionAchat', cout(nom).coutId, ['montantHT'], inchange(['montantHT']))
         : montantTravaux('CoutInterventionHeure', cout(nom).coutId, CHAMPS_HEURES_SAV, inchange(CHAMPS_HEURES_SAV)));
-      for (const [compte, nom] of [[SA, 'heures-tech-intervention-affectee'], ['AD', 'materiel-intervention-affectee'], ['DIR', 'materiel-intervention-affectee'], ['CT', 'materiel-intervention-chantier-ct']]) {
+      for (const [compte, nom] of [[SA, 'heures-tech-intervention-affectee'], ['AD', 'materiel-intervention-affectee'], ['DIR', 'materiel-intervention-affectee'], ['CT', 'materiel-intervention-chantier-ct'], ['AT', 'materiel-intervention-affectee']]) {
+        // Lot AT-1 : l'assistante technique archive le matériel d'une intervention hors de toute relation.
         ajouter(compte, ROUTE_ACTION, nom, 'défaut, corps motif', () => ({ motif: motif('archivage') }), { montant: montantCout(nom) });
       }
-      for (const [compte, nom, auteurArchivage] of [['AD', 'heures-tech-intervention-affectee', SA], ['DIR', 'heures-tech-intervention-affectee', SA], [SA, 'materiel-intervention-affectee', 'AD']]) {
+      // Lot AT-1 : l'assistante technique restaure le matériel d'une intervention hors de toute relation, archivé par AD.
+      for (const [compte, nom, auteurArchivage] of [['AD', 'heures-tech-intervention-affectee', SA], ['DIR', 'heures-tech-intervention-affectee', SA], [SA, 'materiel-intervention-affectee', 'AD'], ['AT', 'materiel-intervention-affectee', 'AD']]) {
         const { id: interventionId, coutId, type } = cout(nom);
         const cheminCout = `/api/interventions/${interventionId}/couts/${type ?? 'heures'}/${coutId}`;
         ajouter(compte, ROUTE_ACTION, `${nom}, restauration`, `archivé par ${auteurArchivage}, puis corps motif`, () => ({ motif: motif('restauration') }), {

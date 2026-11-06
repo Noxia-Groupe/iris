@@ -309,6 +309,9 @@ if (!TEST_DATABASE_URL) {
       // Un technicien ne reçoit jamais devis:read, même accordé individuellement (DROITS_INTERDITS_TECHNICIEN).
       c.technicienAffecte = await creerCompte('TECHNICIEN', 'technicien-affecte', { permissions: ['devis:read'] });
       c.technicienNonAffecte = await creerCompte('TECHNICIEN', 'technicien-non-affecte');
+      // Lot « Assistante technique », PR AT-1 (cadrage v2.1) : SAV de toute la société, comptes rendus et leur PDF compris ;
+      // ni devis (AT-2), ni factures (AT-3), ni contrats ni rapport de chantier (administration jusqu'à AT-2).
+      c.assistanteTechnique = await creerCompte('ASSISTANTE_TECHNIQUE', 'assistante-technique');
       c.desactive = await creerCompte('ADMIN', 'admin-desactive', { actif: false });
       f.comptes = c;
       const intervenant = await prisma.intervenant.create({ data: { nom: 'TEST Intervenant affecté 6b1a', role: 'Technicien', tauxHoraireCharge: 50, userId: c.technicienAffecte.id } });
@@ -494,6 +497,8 @@ if (!TEST_DATABASE_URL) {
         ['RESPONSABLE', parCompte(c.responsable), refuse],
         ['TECHNICIEN avec devis:read accordé', parCompte(c.technicienAffecte), refuse],
         ['TECHNICIEN', parCompte(c.technicienNonAffecte), refuse],
+        // Sans devis:read par son type en AT-1 (cadrage v2.1, « Droits par défaut »).
+        ['ASSISTANTE_TECHNIQUE', parCompte(c.assistanteTechnique), refuse],
       ], f.noms);
     });
 
@@ -531,7 +536,7 @@ if (!TEST_DATABASE_URL) {
         // l'administration », décision de Nelson du 24-10-2026, point 14).
         ['DIRECTEUR', parCompte(c.directeur), administration],
         ['DIRECTEUR avec tous les droits', parCompte(c.directeurTousDroits), administration],
-        ...['commercial', 'assistante', 'comptable', 'directeurCommercial', 'conducteur', 'responsable', 'technicienAffecte'].map((cle) => [cle, parCompte(c[cle]), refuse]),
+        ...['commercial', 'assistante', 'assistanteTechnique', 'comptable', 'directeurCommercial', 'conducteur', 'responsable', 'technicienAffecte'].map((cle) => [cle, parCompte(c[cle]), refuse]),
       ];
       await jouerMatrice('facture', cibles, matrice, f.noms);
       // Identité de la société vidée : la facture émise s'imprime toujours, les refus restent les mêmes.
@@ -735,6 +740,9 @@ if (!TEST_DATABASE_URL) {
         ['COMMERCIAL', parCompte(c.commercial), Array(cibles.length).fill([403, REFUS_COMMERCIAL])],
         ['DIRECTEUR', parCompte(c.directeur), toutVu],
         ['DIRECTEUR avec tous les droits', parCompte(c.directeurTousDroits), toutVu],
+        // L'assistante technique voit tout le SAV (voitToutLeSav, lot AT-1) : comme l'administration, sans affectation ni
+        // rattachement. Lecture écartée : celle du conducteur tiers (rien).
+        ['ASSISTANTE_TECHNIQUE', parCompte(c.assistanteTechnique), toutVu],
         ['TECHNICIEN affecté', parCompte(c.technicienAffecte), Array(cibles.length).fill([403, REFUS_TECHNICIEN])],
         ['TECHNICIEN non affecté', parCompte(c.technicienNonAffecte), Array(cibles.length).fill([403, REFUS_TECHNICIEN])],
       ], f.noms);
@@ -767,7 +775,7 @@ if (!TEST_DATABASE_URL) {
       const introuvable = [404, CONTRAT_INTROUVABLE];
       const refuse = Array(cibles.length).fill([403, REFUS_ADMINISTRATION]);
       // Le directeur n'en est plus : il imprime comme l'administration (lot « Directeur aligné sur l'administration »).
-      const nonAdministrateurs = ['commercial', 'assistante', 'comptable', 'directeurCommercial', 'conducteur', 'responsable', 'technicienAffecte'].map((cle) => [cle, parCompte(c[cle]), refuse]);
+      const nonAdministrateurs = ['commercial', 'assistante', 'assistanteTechnique', 'comptable', 'directeurCommercial', 'conducteur', 'responsable', 'technicienAffecte'].map((cle) => [cle, parCompte(c[cle]), refuse]);
       await jouerMatrice('contrat', cibles, [
         ['SUPERADMIN', admin(), [200, 200, introuvable, introuvable, introuvable]],
         ['ADMIN', parCompte(c.admin), [200, 200, introuvable, introuvable, introuvable]],
@@ -796,7 +804,7 @@ if (!TEST_DATABASE_URL) {
       const refuse = Array(cibles.length).fill([403, REFUS_ADMINISTRATION]);
       // Le titulaire du chantier, son responsable et le technicien qui y intervient restent refusés ; le directeur imprime,
       // comme l'administration (lot « Directeur aligné sur l'administration »).
-      const nonAdministrateurs = ['commercial', 'assistante', 'comptable', 'directeurCommercial', 'conducteur', 'responsable', 'technicienAffecte'].map((cle) => [cle, parCompte(c[cle]), refuse]);
+      const nonAdministrateurs = ['commercial', 'assistante', 'assistanteTechnique', 'comptable', 'directeurCommercial', 'conducteur', 'responsable', 'technicienAffecte'].map((cle) => [cle, parCompte(c[cle]), refuse]);
       await jouerMatrice('chantier', cibles, [
         ['SUPERADMIN', admin(), [200, 200, introuvable, introuvable, introuvable]],
         ['ADMIN', parCompte(c.admin), [200, 200, introuvable, introuvable, introuvable]],

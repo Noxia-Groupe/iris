@@ -18,6 +18,9 @@ import {
 //    planning, ni administration (les deux aides rendent false pour '', null et undefined) ;
 //  - pour les dix types de compte, rien ne change.
 // Le serveur reste la seule sécurité : User.role y est obligatoire, et /api/me le renvoie toujours.
+// Lot « Assistante technique », PR AT-1 (cadrage v2.1) : un onzième type, ASSISTANTE_TECHNIQUE, avec le planning
+// (« Les droit de toute la partie technique », planning compris, décision de Nelson du 24-10-2026, point 18) et
+// l'Administration réduite aux référentiels des achats (cadrage, « Référentiels des achats »).
 
 // Comptes sans rôle : absents, vides, ou relus par /api/me sans leur rôle (un conducteur, avec ses permissions).
 const SANS_ROLE: ReadonlyArray<readonly [string, CurrentUser | null | undefined]> = [
@@ -46,6 +49,9 @@ const ACCES: ReadonlyArray<readonly [string, { planning: boolean; administration
   ['DIRECTEUR_COMMERCIAL', { planning: false, administration: false }],
   ['ASSISTANTE_COMMERCIALE', { planning: false, administration: false }],
   ['COMPTABLE', { planning: false, administration: false }],
+  // Lot « Assistante technique » (AT-1) : planning de toute la société, Administration réduite aux fournisseurs et
+  // catégories, comme le conducteur ; à la différence de l'assistante commerciale, qui reste sans planning (point 15).
+  ['ASSISTANTE_TECHNIQUE', { planning: true, administration: true }],
 ];
 
 test('le rôle du compte connecté est celui qu’il porte, et rien s’il n’en porte pas : jamais le conducteur de travaux (#206)', () => {
@@ -55,12 +61,13 @@ test('le rôle du compte connecté est celui qu’il porte, et rien s’il n’e
     assert.notEqual(roleDuCompte(compte), 'CONDUCTEUR_TRAVAUX', cas);
   }
   assert.equal(roleDuCompte(), '', 'sans argument');
-  // Un compte qui porte un rôle le garde tel quel, permissions ou non, pour chacun des dix types.
+  // Un compte qui porte un rôle le garde tel quel, permissions ou non, pour chacun des onze types (l'assistante technique,
+  // lot AT-1, compris).
   for (const { valeur } of TYPES_COMPTE) {
     assert.equal(roleDuCompte({ role: valeur }), valeur, valeur);
     assert.equal(roleDuCompte({ id: 'x', name: 'Compte', role: valeur, permissions: [] }), valeur, `${valeur}, avec permissions`);
   }
-  assert.equal(TYPES_COMPTE.length, 10);
+  assert.equal(TYPES_COMPTE.length, 11);
   // Le rôle n'est pas déduit des permissions : un compte relu sans rôle reste sans rôle, même avec chantiers:write.
   assert.equal(roleDuCompte({ permissions: ['chantiers:read', 'chantiers:write', 'clients:read'] }), '');
   // Toujours une chaîne : les pages la comparent et la passent à roleLabel sans garde.
@@ -83,8 +90,8 @@ test('un rôle absent (vide, null ou undefined) n’ouvre ni le planning ni l’
   }
 });
 
-test('pour les dix types de compte, le planning et l’administration restent ouverts ou fermés comme avant (#206), le directeur les ayant désormais comme l’administration', () => {
-  assert.deepEqual(ACCES.map(([role]) => role).sort(), TYPES_COMPTE.map((type) => type.valeur).sort(), 'les dix types, ni plus ni moins');
+test('pour les onze types de compte, le planning et l’administration restent ouverts ou fermés comme avant (#206), le directeur les ayant désormais comme l’administration, l’assistante technique comme le conducteur', () => {
+  assert.deepEqual(ACCES.map(([role]) => role).sort(), TYPES_COMPTE.map((type) => type.valeur).sort(), 'les onze types, ni plus ni moins');
   for (const [role, { planning, administration }] of ACCES) {
     assert.equal(peutConsulterPlanning(role), planning, `planning, ${role}`);
     assert.equal(peutOuvrirAdministration(role), administration, `administration, ${role}`);

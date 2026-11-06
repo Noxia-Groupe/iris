@@ -1,0 +1,46 @@
+AT | administration | catégorie | défaut | boutons : Modifier, Supprimer
+AT | administration | fournisseur | défaut | boutons : Modifier, Supprimer
+AT | administration | onglet par défaut | défaut | titre « Administration & Paramétrage » ; boutons : Catégories, Enregistrer, Fournisseurs
+AT | devis | hors lignes | défaut | redirigé vers /
+AT | factures | hors lignes | défaut | redirigé vers /
+AT | fiche chantier | chantier-annule | défaut | titre « Écrans annulé <s> » ; boutons : Rapport interne (PDF), Retour au tableau de bord
+AT | fiche chantier | chantier-en-cours | défaut | titre « Écrans en cours <s> » ; boutons : Rapport interne (PDF), Retour au tableau de bord
+AT | fiche chantier | chantier-termine | défaut | titre « Écrans terminé <s> » ; boutons : Rapport interne (PDF), Retour au tableau de bord
+AT | fiche chantier | chantier-titulaire-dc | défaut | titre « Écrans titulaire DC <s> » ; boutons : Rapport interne (PDF), Retour au tableau de bord
+AT | fiche chantier | chantier-titulaire-tech | défaut | titre « Écrans titulaire TECH <s> » ; boutons : Rapport interne (PDF), Retour au tableau de bord
+AT | fiche intervention | intervention-planifiee | défaut | titre « Fiche intervention » ; boutons : Annuler, Créer la suite, Démarrer, Enregistrer l’achat matériel, Remettre à planifier
+AT | fiche intervention | intervention-terminee | défaut | titre « Fiche intervention » ; boutons : Créer la suite, Enregistrer l’achat matériel, Envoyer le compte rendu de l’intervention <intervention-terminee>, Faire signer ce compte rendu, Marquer « à suivre », PDF du compte rendu de l’intervention <intervention-terminee>
+AT | liste des chantiers | chantier-annule | défaut | ligne absente
+AT | liste des chantiers | chantier-en-cours | défaut | boutons : aucun
+AT | liste des chantiers | chantier-termine | défaut | boutons : aucun
+AT | liste des chantiers | chantier-titulaire-dc | défaut | boutons : aucun
+AT | liste des chantiers | chantier-titulaire-tech | défaut | boutons : aucun
+AT | liste des chantiers | hors lignes | défaut | titre « Liste des Chantiers » ; boutons : Chantiers Terminés / Archivés# chantier(s), Créer une affaire (devis), En cours#, Heures dépassées, Main-d’œuvre dépassée, Matériel dépassé, Sans saisie, Tous, À surveiller, À surveiller#
+AT | liste des interventions | hors lignes | défaut | titre « Interventions SAV » ; boutons : Nouvelle intervention
+AT | menu | — | défaut | sections : Accueil, Chantiers, Interventions, Référentiels, Réglages ; type affiché : Assistante technique
+AT | planning | hors lignes | défaut | titre « Planning d'intervention » ; boutons : Affectation, Semaine #, Semaine précédente, Semaine suivante, Types d'événements
+AT | route / | — | défaut | menu « Accueil › Tableau de bord » ; accessible
+AT | route /achats | — | défaut | hors menu ; redirigée vers /
+AT | route /admin | — | défaut | menu « Réglages › Administration » ; accessible
+AT | route /administration/api | — | défaut | hors menu ; redirigée vers /
+AT | route /catalogue | — | défaut | hors menu ; redirigée vers /
+AT | route /chantiers | — | défaut | menu « Chantiers › Liste des chantiers » ; accessible
+AT | route /chantiers/:id | chantier-en-cours | défaut | hors menu ; accessible
+AT | route /clients | — | défaut | menu « Référentiels › Clients » ; accessible
+AT | route /clients/:id | client | défaut | hors menu ; accessible
+AT | route /commerciaux | — | défaut | hors menu ; redirigée vers /
+AT | route /comptabilite | — | défaut | hors menu ; redirigée vers /
+AT | route /contrats-maintenance | — | défaut | hors menu ; redirigée vers /
+AT | route /devis | — | défaut | hors menu ; redirigée vers /
+AT | route /factures | — | défaut | hors menu ; redirigée vers /
+AT | route /heures | — | défaut | hors menu ; redirigée vers /
+AT | route /interventions | — | défaut | menu « Interventions › Interventions SAV » ; accessible
+AT | route /interventions/:id | intervention-planifiee | défaut | hors menu ; accessible
+AT | route /mentions-legales | — | défaut | hors menu ; redirigée vers /
+AT | route /performances | — | défaut | hors menu ; redirigée vers /
+AT | route /planning | — | défaut | menu « Chantiers › Planning » ; accessible
+AT | route /prete-a-facturer | — | défaut | hors menu ; redirigée vers /
+AT | route /reglements | — | défaut | hors menu ; redirigée vers /
+AT | route /resultat-commercial | — | défaut | hors menu ; redirigée vers /
+AT | route /societe | — | défaut | hors menu ; redirigée vers /
+AT | route /statistiques | — | défaut | hors menu ; redirigée vers /

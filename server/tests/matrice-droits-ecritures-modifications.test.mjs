@@ -90,7 +90,7 @@ const SANS_COMPTE_ADMIS = ['DELETE /api/chantiers/:id', 'POST /api/chantiers', '
 const ROUTES_E = ROUTES_A.filter((route) => !RESERVEES_5D.includes(route) && !SANS_COMPTE_ADMIS.includes(route));
 // Routes jouées hors des (a) non marquées, sur des cibles propres à ce fichier seulement : la correction d'un coût SAV
 // (route marquée, note N5 de l'audit des montants de #437) et les trois écritures de la note N4 de l'audit des droits
-// de #437. Comme en D1a-5a pour ces classes de routes, les 15 comptes les jouent, refusés à l'entrée compris.
+// de #437. Comme en D1a-5a pour ces classes de routes, les 16 comptes les jouent, refusés à l'entrée compris (15 avant le lot « Assistante technique »).
 const ROUTE_CORRECTION_COUT = 'PATCH /api/interventions/:id/couts/:type/:coutId';
 const ROUTES_N4 = ['POST /api/contrats-maintenance/:id/generer-intervention', 'PUT /api/interventions/:id/a-suivre', 'POST /api/mentions-legales/:version/publier'];
 const ROUTES_TOUS_COMPTES = [ROUTE_CORRECTION_COUT, ...ROUTES_N4];
@@ -372,7 +372,7 @@ if (!TEST_DATABASE_URL) {
     };
 
     // Cas d'une route : (compte, cible, variante de corps). Les comptes refusés avant la cible ne sont pas rejoués sur
-    // une route (a) non marquée (avenant, section 3) ; ils le sont sur les routes jouées par les 15 comptes.
+    // une route (a) non marquée (avenant, section 3) ; ils le sont sur les routes jouées par les 16 comptes.
     const casDe = (route) => {
       const cas = [];
       const tous = ROUTES_TOUS_COMPTES.includes(route);

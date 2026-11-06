@@ -607,6 +607,209 @@ AD-COM | PUT /api/interventions/:id/a-suivre | intervention-terminee-signee | d�
 AD-COM | PUT /api/interventions/:id/a-suivre | intervention-terminee-signee | défaut, corps aSuivre=oui | 200 écrit (Intervention,JournalSaisieChantier)
 AD-COM | PUT /api/interventions/:id/a-suivre | visite-contrat | défaut, corps aSuivre=non | 409 « Seule une intervention terminée porte la marque « à suivre ». » inchangé
 AD-COM | PUT /api/interventions/:id/a-suivre | visite-contrat | défaut, corps aSuivre=oui | 409 « Seule une intervention terminée porte la marque « à suivre ». » inchangé
+AT | DELETE /api/catalogue/:family/:id | prestation-catalogue | défaut | 403 « Accès réservé aux administrateurs » inchangé
+AT | DELETE /api/categories/:id | categorie | défaut | 409 « Suppression impossible : 5 achat(s) et 0 ligne(s) de budget utilisent cette catégorie. » inchangé
+AT | DELETE /api/clients/:id | client-actif | défaut | 403 « Accès réservé aux administrateurs » inchangé
+AT | DELETE /api/clients/:id | client-desactive | défaut | 403 « Accès réservé aux administrateurs » inchangé
+AT | DELETE /api/fournisseurs/:id | fournisseur | défaut | 409 « Suppression impossible : 7 écriture(s) sont rattachées à ce fournisseur. » inchangé
+AT | DELETE /api/intervenants/:id | fiche-libre | défaut | 403 « Accès réservé aux administrateurs » inchangé
+AT | DELETE /api/intervenants/:id | fiche-tech | défaut | 403 « Accès réservé aux administrateurs » inchangé
+AT | DELETE /api/planning/events/:id | affectation-chantier-ct | défaut | 200 écrit (PlanningEvent,_PlanningEventIntervenants)
+AT | DELETE /api/planning/events/:id | affectation-evenement | défaut | 200 écrit (PlanningEvent,_PlanningEventIntervenants)
+AT | DELETE /api/planning/events/:id | projection-intervention-chantier-ct | défaut | 409 « Suppression impossible : cette projection est liée à une intervention SAV. Modifiez ou annulez le dossier SAV. » inchangé
+AT | DELETE /api/planning/types/:id | type-planning | défaut | 409 « Suppression impossible : 1 affectation(s) du planning utilisent ce type. » inchangé
+AT | DELETE /api/users/:id | compte-administrateur | défaut | 403 « Accès réservé aux administrateurs » inchangé
+AT | DELETE /api/users/:id | compte-commercial | défaut | 403 « Accès réservé aux administrateurs » inchangé
+AT | DELETE /api/users/:id | compte-superadmin | défaut | 403 « Accès réservé aux administrateurs » inchangé
+AT | DELETE /api/users/:id | compte-systeme | défaut | 403 « Accès réservé aux administrateurs » inchangé
+AT | DELETE /api/users/:id | compte-technicien | défaut | 403 « Accès réservé aux administrateurs » inchangé
+AT | PATCH /api/chantiers/:id/statut | chantier-ac | défaut, corps statut=TERMINE | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. » inchangé
+AT | PATCH /api/chantiers/:id/statut | chantier-ad | défaut, corps statut=TERMINE | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. » inchangé
+AT | PATCH /api/chantiers/:id/statut | chantier-annule | défaut, corps statut=TERMINE | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. » inchangé
+AT | PATCH /api/chantiers/:id/statut | chantier-autre | défaut, corps statut=TERMINE | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. » inchangé
+AT | PATCH /api/chantiers/:id/statut | chantier-com | défaut, corps statut=TERMINE | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. » inchangé
+AT | PATCH /api/chantiers/:id/statut | chantier-com-titulaire | défaut, corps statut=TERMINE | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. » inchangé
+AT | PATCH /api/chantiers/:id/statut | chantier-cpt | défaut, corps statut=TERMINE | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. » inchangé
+AT | PATCH /api/chantiers/:id/statut | chantier-ct | défaut, corps statut=TERMINE | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. » inchangé
+AT | PATCH /api/chantiers/:id/statut | chantier-ct-branche-resp | défaut, corps statut=TERMINE | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. » inchangé
+AT | PATCH /api/chantiers/:id/statut | chantier-dc | défaut, corps statut=TERMINE | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. » inchangé
+AT | PATCH /api/chantiers/:id/statut | chantier-dir | défaut, corps statut=TERMINE | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. » inchangé
+AT | PATCH /api/chantiers/:id/statut | chantier-resp | défaut, corps statut=TERMINE | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. » inchangé
+AT | PATCH /api/chantiers/:id/statut | chantier-tech-branche-resp | défaut, corps statut=TERMINE | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. » inchangé
+AT | PATCH /api/chantiers/:id/statut | chantier-termine | défaut, corps statut=EN_COURS | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. » inchangé
+AT | PATCH /api/devis/:id | devis-brouillon | défaut, corps client, objet et ligne | 403 « Permission requise : devis:write » inchangé
+AT | PATCH /api/devis/:id | devis-converti | défaut, corps client, objet et ligne | 403 « Permission requise : devis:write » inchangé
+AT | PATCH /api/devis/:id | devis-signe | défaut, corps client, objet et ligne | 403 « Permission requise : devis:write » inchangé
+AT | PATCH /api/interventions/:id/couts/:type/:coutId | heures-tech-intervention-affectee | défaut, corps nbrHeures et motif | 403 « Accès non autorisé. » inchangé
+AT | PATCH /api/interventions/:id/couts/:type/:coutId | heures-tech-sous-intervention-autre | défaut, corps nbrHeures et motif | 403 « Accès non autorisé. » inchangé
+AT | PATCH /api/interventions/:id/couts/:type/:coutId | materiel-intervention-affectee | défaut, corps montantHT et motif | 200 écrit (CoutInterventionAchat,JournalSaisieChantier)
+AT | PATCH /api/interventions/:id/couts/:type/:coutId | materiel-intervention-chantier-ct | défaut, corps montantHT et motif | 200 écrit (CoutInterventionAchat,JournalSaisieChantier)
+AT | PATCH /api/interventions/:id/statut | curative-sans-chantier-branche | défaut, corps statut=ANNULEE et motif | 200 écrit (Intervention,InterventionAffectation,JournalSaisieChantier,PlanningEvent,_PlanningEventIntervenants)
+AT | PATCH /api/interventions/:id/statut | curative-sans-chantier-branche | défaut, corps statut=EN_COURS | 200 écrit (Intervention,JournalSaisieChantier)
+AT | PATCH /api/interventions/:id/statut | intervention-affectee-tech | défaut, corps statut=ANNULEE et motif | 200 écrit (Intervention,InterventionAffectation,JournalSaisieChantier,PlanningEvent,_PlanningEventIntervenants)
+AT | PATCH /api/interventions/:id/statut | intervention-affectee-tech | défaut, corps statut=TERMINEE et motif sans signature | 200 écrit (Intervention,JournalSaisieChantier)
+AT | PATCH /api/interventions/:id/statut | intervention-annulee | défaut, corps statut=EN_COURS | 409 « Transition impossible : ANNULEE vers EN_COURS. » inchangé
+AT | PATCH /api/interventions/:id/statut | intervention-autre | défaut, corps statut=ANNULEE et motif | 200 écrit (Intervention,JournalSaisieChantier)
+AT | PATCH /api/interventions/:id/statut | intervention-autre | défaut, corps statut=PLANIFIEE | 200 écrit (Intervention,JournalSaisieChantier)
+AT | PATCH /api/interventions/:id/statut | intervention-chantier-ct | défaut, corps statut=ANNULEE et motif | 200 écrit (Intervention,InterventionAffectation,JournalSaisieChantier,PlanningEvent,_PlanningEventIntervenants)
+AT | PATCH /api/interventions/:id/statut | intervention-chantier-ct | défaut, corps statut=EN_COURS | 200 écrit (Intervention,JournalSaisieChantier)
+AT | PATCH /api/interventions/:id/statut | intervention-creee-ct | défaut, corps statut=ANNULEE et motif | 200 écrit (Intervention,JournalSaisieChantier)
+AT | PATCH /api/interventions/:id/statut | intervention-creee-ct | défaut, corps statut=PLANIFIEE | 200 écrit (Intervention,JournalSaisieChantier)
+AT | PATCH /api/interventions/:id/statut | intervention-terminee-motif | défaut, corps statut=EN_COURS | 409 « Transition impossible : TERMINEE vers EN_COURS. » inchangé
+AT | PATCH /api/interventions/:id/statut | intervention-terminee-signee | défaut, corps statut=EN_COURS | 409 « Transition impossible : TERMINEE vers EN_COURS. » inchangé
+AT | PATCH /api/interventions/:id/statut | visite-contrat | défaut, corps statut=ANNULEE et motif | 200 écrit (Intervention,JournalSaisieChantier)
+AT | PATCH /api/interventions/:id/statut | visite-contrat | défaut, corps statut=PLANIFIEE | 200 écrit (Intervention,JournalSaisieChantier)
+AT | PATCH /api/planning/events/:id | affectation-chantier-ct | défaut | 200 écrit (PlanningEvent)
+AT | PATCH /api/planning/events/:id | affectation-evenement | défaut | 200 écrit (PlanningEvent)
+AT | PATCH /api/planning/events/:id | projection-intervention-chantier-ct | défaut | 200 écrit (InterventionAffectation,PlanningEvent)
+AT | PATCH /api/users/:id/acces-finance | compte-administrateur | défaut | 403 « Accès réservé au super administrateur » inchangé
+AT | PATCH /api/users/:id/acces-finance | compte-commercial | défaut | 403 « Accès réservé au super administrateur » inchangé
+AT | PATCH /api/users/:id/acces-finance | compte-superadmin | défaut | 403 « Accès réservé au super administrateur » inchangé
+AT | PATCH /api/users/:id/acces-finance | compte-systeme | défaut | 403 « Accès réservé au super administrateur » inchangé
+AT | PATCH /api/users/:id/acces-finance | compte-technicien | défaut | 403 « Accès réservé au super administrateur » inchangé
+AT | PATCH /api/users/:id/actif | compte-administrateur | défaut | 403 « Accès réservé aux administrateurs » inchangé
+AT | PATCH /api/users/:id/actif | compte-commercial | défaut | 403 « Accès réservé aux administrateurs » inchangé
+AT | PATCH /api/users/:id/actif | compte-superadmin | défaut | 403 « Accès réservé aux administrateurs » inchangé
+AT | PATCH /api/users/:id/actif | compte-systeme | défaut | 403 « Accès réservé aux administrateurs » inchangé
+AT | PATCH /api/users/:id/actif | compte-technicien | défaut | 403 « Accès réservé aux administrateurs » inchangé
+AT | PATCH /api/users/:id/est-commercial | compte-administrateur | défaut | 403 « Accès réservé aux administrateurs » inchangé
+AT | PATCH /api/users/:id/est-commercial | compte-commercial | défaut | 403 « Accès réservé aux administrateurs » inchangé
+AT | PATCH /api/users/:id/est-commercial | compte-superadmin | défaut | 403 « Accès réservé aux administrateurs » inchangé
+AT | PATCH /api/users/:id/est-commercial | compte-systeme | défaut | 403 « Accès réservé aux administrateurs » inchangé
+AT | PATCH /api/users/:id/est-commercial | compte-technicien | défaut | 403 « Accès réservé aux administrateurs » inchangé
+AT | PATCH /api/users/:id/responsable-hierarchique | compte-administrateur | défaut, corps responsable=RESP | 403 « Accès réservé aux administrateurs » inchangé
+AT | PATCH /api/users/:id/responsable-hierarchique | compte-administrateur | défaut, corps responsable=SA | 403 « Accès réservé aux administrateurs » inchangé
+AT | PATCH /api/users/:id/responsable-hierarchique | compte-commercial | défaut, corps responsable=RESP | 403 « Accès réservé aux administrateurs » inchangé
+AT | PATCH /api/users/:id/responsable-hierarchique | compte-commercial | défaut, corps responsable=SA | 403 « Accès réservé aux administrateurs » inchangé
+AT | PATCH /api/users/:id/responsable-hierarchique | compte-superadmin | défaut, corps responsable=RESP | 403 « Accès réservé aux administrateurs » inchangé
+AT | PATCH /api/users/:id/responsable-hierarchique | compte-superadmin | défaut, corps responsable=SA | 403 « Accès réservé aux administrateurs » inchangé
+AT | PATCH /api/users/:id/responsable-hierarchique | compte-systeme | défaut, corps responsable=RESP | 403 « Accès réservé aux administrateurs » inchangé
+AT | PATCH /api/users/:id/responsable-hierarchique | compte-systeme | défaut, corps responsable=SA | 403 « Accès réservé aux administrateurs » inchangé
+AT | PATCH /api/users/:id/responsable-hierarchique | compte-technicien | défaut, corps responsable=RESP | 403 « Accès réservé aux administrateurs » inchangé
+AT | PATCH /api/users/:id/responsable-hierarchique | compte-technicien | défaut, corps responsable=SA | 403 « Accès réservé aux administrateurs » inchangé
+AT | PATCH /api/users/:id/role | compte-administrateur | défaut, corps role=DIRECTEUR | 403 « Accès réservé aux administrateurs » inchangé
+AT | PATCH /api/users/:id/role | compte-administrateur | défaut, corps role=SUPERADMIN | 403 « Accès réservé aux administrateurs » inchangé
+AT | PATCH /api/users/:id/role | compte-commercial | défaut, corps role=DIRECTEUR | 403 « Accès réservé aux administrateurs » inchangé
+AT | PATCH /api/users/:id/role | compte-commercial | défaut, corps role=SUPERADMIN | 403 « Accès réservé aux administrateurs » inchangé
+AT | PATCH /api/users/:id/role | compte-superadmin | défaut, corps role=DIRECTEUR | 403 « Accès réservé aux administrateurs » inchangé
+AT | PATCH /api/users/:id/role | compte-superadmin | défaut, corps role=SUPERADMIN | 403 « Accès réservé aux administrateurs » inchangé
+AT | PATCH /api/users/:id/role | compte-systeme | défaut, corps role=DIRECTEUR | 403 « Accès réservé aux administrateurs » inchangé
+AT | PATCH /api/users/:id/role | compte-systeme | défaut, corps role=SUPERADMIN | 403 « Accès réservé aux administrateurs » inchangé
+AT | PATCH /api/users/:id/role | compte-technicien | défaut, corps role=DIRECTEUR | 403 « Accès réservé aux administrateurs » inchangé
+AT | PATCH /api/users/:id/role | compte-technicien | défaut, corps role=SUPERADMIN | 403 « Accès réservé aux administrateurs » inchangé
+AT | POST /api/achats | chantierId=chantier-ac | défaut, corps achat | 403 « Permission requise : chantiers:write » inchangé
+AT | POST /api/achats | chantierId=chantier-ad | défaut, corps achat | 403 « Permission requise : chantiers:write » inchangé
+AT | POST /api/achats | chantierId=chantier-annule | défaut, corps achat | 403 « Permission requise : chantiers:write » inchangé
+AT | POST /api/achats | chantierId=chantier-autre | défaut, corps achat | 403 « Permission requise : chantiers:write » inchangé
+AT | POST /api/achats | chantierId=chantier-com | défaut, corps achat | 403 « Permission requise : chantiers:write » inchangé
+AT | POST /api/achats | chantierId=chantier-com-titulaire | défaut, corps achat | 403 « Permission requise : chantiers:write » inchangé
+AT | POST /api/achats | chantierId=chantier-cpt | défaut, corps achat | 403 « Permission requise : chantiers:write » inchangé
+AT | POST /api/achats | chantierId=chantier-ct | défaut, corps achat | 403 « Permission requise : chantiers:write » inchangé
+AT | POST /api/achats | chantierId=chantier-ct-branche-resp | défaut, corps achat | 403 « Permission requise : chantiers:write » inchangé
+AT | POST /api/achats | chantierId=chantier-dc | défaut, corps achat | 403 « Permission requise : chantiers:write » inchangé
+AT | POST /api/achats | chantierId=chantier-dir | défaut, corps achat | 403 « Permission requise : chantiers:write » inchangé
+AT | POST /api/achats | chantierId=chantier-resp | défaut, corps achat | 403 « Permission requise : chantiers:write » inchangé
+AT | POST /api/achats | chantierId=chantier-tech-branche-resp | défaut, corps achat | 403 « Permission requise : chantiers:write » inchangé
+AT | POST /api/achats | chantierId=chantier-termine | défaut, corps achat | 403 « Permission requise : chantiers:write » inchangé
+AT | POST /api/admin/api-keys/:id/revoke | cle-active | défaut | 403 « Accès réservé au super administrateur » inchangé
+AT | POST /api/clients/:clientId/equipements/:id/archiver | equipement-autre-client | défaut | 403 « Accès réservé aux administrateurs » inchangé
+AT | POST /api/clients/:clientId/equipements/:id/archiver | equipement-client-actif | défaut | 403 « Accès réservé aux administrateurs » inchangé
+AT | POST /api/contrats-maintenance/:id/generer-intervention | contrat-actif | défaut | 403 « Accès réservé aux administrateurs » inchangé
+AT | POST /api/devis | clientId=client-actif | défaut, corps client, objet et ligne | 403 « Permission requise : devis:write » inchangé
+AT | POST /api/devis | clientId=client-desactive | défaut, corps client, objet et ligne | 403 « Permission requise : devis:write » inchangé
+AT | POST /api/devis/:id/convertir | devis-brouillon | défaut, corps cible=CHANTIER | 403 « Permission requise : devis:write » inchangé
+AT | POST /api/devis/:id/convertir | devis-brouillon | défaut, corps cible=CONTRAT | 403 « Permission requise : devis:write » inchangé
+AT | POST /api/devis/:id/convertir | devis-brouillon | défaut, corps cible=INTERVENTION | 403 « Permission requise : devis:write » inchangé
+AT | POST /api/devis/:id/convertir | devis-converti | défaut, corps cible=CHANTIER | 403 « Permission requise : devis:write » inchangé
+AT | POST /api/devis/:id/convertir | devis-converti | défaut, corps cible=CONTRAT | 403 « Permission requise : devis:write » inchangé
+AT | POST /api/devis/:id/convertir | devis-converti | défaut, corps cible=INTERVENTION | 403 « Permission requise : devis:write » inchangé
+AT | POST /api/devis/:id/convertir | devis-signe | défaut, corps cible=CHANTIER | 403 « Permission requise : devis:write » inchangé
+AT | POST /api/devis/:id/convertir | devis-signe | défaut, corps cible=CONTRAT | 403 « Permission requise : devis:write » inchangé
+AT | POST /api/devis/:id/convertir | devis-signe | défaut, corps cible=INTERVENTION | 403 « Permission requise : devis:write » inchangé
+AT | POST /api/devis/:id/duplication | devis-brouillon | défaut | 403 « Permission requise : devis:write » inchangé
+AT | POST /api/devis/:id/duplication | devis-converti | défaut | 403 « Permission requise : devis:write » inchangé
+AT | POST /api/devis/:id/duplication | devis-signe | défaut | 403 « Permission requise : devis:write » inchangé
+AT | POST /api/devis/:id/revisions | devis-brouillon | défaut | 403 « Permission requise : devis:write » inchangé
+AT | POST /api/devis/:id/revisions | devis-converti | défaut | 403 « Permission requise : devis:write » inchangé
+AT | POST /api/devis/:id/revisions | devis-signe | défaut | 403 « Permission requise : devis:write » inchangé
+AT | POST /api/factures/:id/emettre | avoir-emis | défaut | 403 « Accès réservé aux administrateurs » inchangé
+AT | POST /api/factures/:id/emettre | facture-brouillon | défaut | 403 « Accès réservé aux administrateurs » inchangé
+AT | POST /api/factures/:id/emettre | facture-emise | défaut | 403 « Accès réservé aux administrateurs » inchangé
+AT | POST /api/heures | chantierId=chantier-ac | défaut, corps heures | 403 « Permission requise : chantiers:write » inchangé
+AT | POST /api/heures | chantierId=chantier-ad | défaut, corps heures | 403 « Permission requise : chantiers:write » inchangé
+AT | POST /api/heures | chantierId=chantier-annule | défaut, corps heures | 403 « Permission requise : chantiers:write » inchangé
+AT | POST /api/heures | chantierId=chantier-autre | défaut, corps heures | 403 « Permission requise : chantiers:write » inchangé
+AT | POST /api/heures | chantierId=chantier-com | défaut, corps heures | 403 « Permission requise : chantiers:write » inchangé
+AT | POST /api/heures | chantierId=chantier-com-titulaire | défaut, corps heures | 403 « Permission requise : chantiers:write » inchangé
+AT | POST /api/heures | chantierId=chantier-cpt | défaut, corps heures | 403 « Permission requise : chantiers:write » inchangé
+AT | POST /api/heures | chantierId=chantier-ct | défaut, corps heures | 403 « Permission requise : chantiers:write » inchangé
+AT | POST /api/heures | chantierId=chantier-ct-branche-resp | défaut, corps heures | 403 « Permission requise : chantiers:write » inchangé
+AT | POST /api/heures | chantierId=chantier-dc | défaut, corps heures | 403 « Permission requise : chantiers:write » inchangé
+AT | POST /api/heures | chantierId=chantier-dir | défaut, corps heures | 403 « Permission requise : chantiers:write » inchangé
+AT | POST /api/heures | chantierId=chantier-resp | défaut, corps heures | 403 « Permission requise : chantiers:write » inchangé
+AT | POST /api/heures | chantierId=chantier-tech-branche-resp | défaut, corps heures | 403 « Permission requise : chantiers:write » inchangé
+AT | POST /api/heures | chantierId=chantier-termine | défaut, corps heures | 403 « Permission requise : chantiers:write » inchangé
+AT | POST /api/interventions/:id/envois | curative-sans-chantier-branche | défaut, corps destinataire, messagerie | 409 « Aucun compte rendu à envoyer. » inchangé
+AT | POST /api/interventions/:id/envois | intervention-affectee-tech | défaut, corps destinataire, messagerie | 201 écrit (EnvoiDocument)
+AT | POST /api/interventions/:id/envois | intervention-annulee | défaut, corps destinataire, messagerie | 409 « Une intervention annulée ne s’envoie pas. » inchangé
+AT | POST /api/interventions/:id/envois | intervention-autre | défaut, corps destinataire, messagerie | 409 « Aucun compte rendu à envoyer. » inchangé
+AT | POST /api/interventions/:id/envois | intervention-chantier-ct | défaut, corps destinataire, messagerie | 409 « Aucun compte rendu à envoyer. » inchangé
+AT | POST /api/interventions/:id/envois | intervention-creee-ct | défaut, corps destinataire, messagerie | 409 « Aucun compte rendu à envoyer. » inchangé
+AT | POST /api/interventions/:id/envois | intervention-terminee-motif | défaut, corps destinataire, messagerie | 201 écrit (EnvoiDocument)
+AT | POST /api/interventions/:id/envois | intervention-terminee-signee | défaut, corps destinataire, messagerie | 201 écrit (EnvoiDocument)
+AT | POST /api/interventions/:id/envois | visite-contrat | défaut, corps destinataire, messagerie | 409 « Aucun compte rendu à envoyer. » inchangé
+AT | POST /api/interventions/:id/rapports | curative-sans-chantier-branche | défaut, corps contenu et clé d’envoi | 409 « Un compte rendu s’ajoute pendant que l’intervention est en cours. » inchangé
+AT | POST /api/interventions/:id/rapports | intervention-affectee-tech | défaut, corps contenu et clé d’envoi | 201 écrit (InterventionRapport,JournalSaisieChantier)
+AT | POST /api/interventions/:id/rapports | intervention-annulee | défaut, corps contenu et clé d’envoi | 409 « Un compte rendu s’ajoute pendant que l’intervention est en cours. » inchangé
+AT | POST /api/interventions/:id/rapports | intervention-autre | défaut, corps contenu et clé d’envoi | 409 « Un compte rendu s’ajoute pendant que l’intervention est en cours. » inchangé
+AT | POST /api/interventions/:id/rapports | intervention-chantier-ct | défaut, corps contenu et clé d’envoi | 409 « Un compte rendu s’ajoute pendant que l’intervention est en cours. » inchangé
+AT | POST /api/interventions/:id/rapports | intervention-creee-ct | défaut, corps contenu et clé d’envoi | 409 « Un compte rendu s’ajoute pendant que l’intervention est en cours. » inchangé
+AT | POST /api/interventions/:id/rapports | intervention-terminee-motif | défaut, corps contenu et clé d’envoi | 409 « Un compte rendu s’ajoute pendant que l’intervention est en cours. » inchangé
+AT | POST /api/interventions/:id/rapports | intervention-terminee-signee | défaut, corps contenu et clé d’envoi | 409 « Un compte rendu s’ajoute pendant que l’intervention est en cours. » inchangé
+AT | POST /api/interventions/:id/rapports | visite-contrat | défaut, corps contenu et clé d’envoi | 409 « Un compte rendu s’ajoute pendant que l’intervention est en cours. » inchangé
+AT | POST /api/interventions/:id/remise-a-planifier | curative-sans-chantier-branche | défaut, corps motif | 200 écrit (Intervention,InterventionAffectation,JournalSaisieChantier,PlanningEvent,_PlanningEventIntervenants)
+AT | POST /api/interventions/:id/remise-a-planifier | intervention-affectee-tech | défaut, corps motif | 409 « Seule une intervention planifiée se remet « à planifier » : celle-ci est en cours. » inchangé
+AT | POST /api/interventions/:id/remise-a-planifier | intervention-annulee | défaut, corps motif | 409 « Seule une intervention planifiée se remet « à planifier » : celle-ci est annulée. » inchangé
+AT | POST /api/interventions/:id/remise-a-planifier | intervention-autre | défaut, corps motif | 409 « Seule une intervention planifiée se remet « à planifier » : celle-ci est déjà à planifier. » inchangé
+AT | POST /api/interventions/:id/remise-a-planifier | intervention-chantier-ct | défaut, corps motif | 409 « Remise impossible : cette intervention porte déjà 0 saisie(s) d’heures du technicien et 1 achat(s) de matériel non archivés. Une intervention commencée ne se remet pas à planifier : déplacez son créneau au planning, ou terminez-la et, si une suite est nécessaire, créez sa suite, une intervention liée. » inchangé
+AT | POST /api/interventions/:id/remise-a-planifier | intervention-creee-ct | défaut, corps motif | 409 « Seule une intervention planifiée se remet « à planifier » : celle-ci est déjà à planifier. » inchangé
+AT | POST /api/interventions/:id/remise-a-planifier | intervention-terminee-motif | défaut, corps motif | 409 « Seule une intervention planifiée se remet « à planifier » : celle-ci est terminée. » inchangé
+AT | POST /api/interventions/:id/remise-a-planifier | intervention-terminee-signee | défaut, corps motif | 409 « Seule une intervention planifiée se remet « à planifier » : celle-ci est terminée. » inchangé
+AT | POST /api/interventions/:id/remise-a-planifier | visite-contrat | défaut, corps motif | 409 « Seule une intervention planifiée se remet « à planifier » : celle-ci est déjà à planifier. » inchangé
+AT | POST /api/interventions/:id/suites | curative-sans-chantier-branche | défaut | 201 écrit (Intervention,JournalSaisieChantier,SequenceIntervention)
+AT | POST /api/interventions/:id/suites | intervention-affectee-tech | défaut | 201 écrit (Intervention,JournalSaisieChantier,SequenceIntervention)
+AT | POST /api/interventions/:id/suites | intervention-annulee | défaut | 409 « Une intervention annulée n’a pas de suite. » inchangé
+AT | POST /api/interventions/:id/suites | intervention-autre | défaut | 201 écrit (Intervention,JournalSaisieChantier,SequenceIntervention)
+AT | POST /api/interventions/:id/suites | intervention-chantier-ct | défaut | 201 écrit (Intervention,JournalSaisieChantier,SequenceIntervention)
+AT | POST /api/interventions/:id/suites | intervention-creee-ct | défaut | 201 écrit (Intervention,JournalSaisieChantier,SequenceIntervention)
+AT | POST /api/interventions/:id/suites | intervention-terminee-motif | défaut | 201 écrit (Intervention,JournalSaisieChantier,SequenceIntervention)
+AT | POST /api/interventions/:id/suites | intervention-terminee-signee | défaut | 201 écrit (Intervention,JournalSaisieChantier,SequenceIntervention)
+AT | POST /api/interventions/:id/suites | visite-contrat | défaut | 201 écrit (Intervention,JournalSaisieChantier,SequenceIntervention)
+AT | POST /api/interventions/rapports/:rapportId/signature | rapport-cloture-motif | défaut, corps signataire, confirmation et tracé | 201 écrit (InterventionSignature,JournalSaisieChantier)
+AT | POST /api/interventions/rapports/:rapportId/signature | rapport-non-signe | défaut, corps signataire, confirmation et tracé | 201 écrit (InterventionSignature,JournalSaisieChantier)
+AT | POST /api/interventions/rapports/:rapportId/signature | rapport-signe | défaut, corps signataire, confirmation et tracé | 409 « Ce compte rendu est déjà signé. » inchangé
+AT | POST /api/mentions-legales/:version/publier | version-brouillon | défaut | 403 « Accès réservé aux administrateurs » inchangé
+AT | POST /api/mentions-legales/:version/publier | version-publiee | défaut | 403 « Accès réservé aux administrateurs » inchangé
+AT | PUT /api/intervenants/:id/compte | fiche-libre | défaut, corps compte=TECH-SANS-FICHE | 403 « Accès réservé aux administrateurs » inchangé
+AT | PUT /api/intervenants/:id/compte | fiche-tech | défaut, corps compte=TECH-SANS-FICHE | 403 « Accès réservé aux administrateurs » inchangé
+AT | PUT /api/interventions/:id/a-suivre | curative-sans-chantier-branche | défaut, corps aSuivre=non | 409 « Seule une intervention terminée porte la marque « à suivre ». » inchangé
+AT | PUT /api/interventions/:id/a-suivre | curative-sans-chantier-branche | défaut, corps aSuivre=oui | 409 « Seule une intervention terminée porte la marque « à suivre ». » inchangé
+AT | PUT /api/interventions/:id/a-suivre | intervention-affectee-tech | défaut, corps aSuivre=non | 409 « Seule une intervention terminée porte la marque « à suivre ». » inchangé
+AT | PUT /api/interventions/:id/a-suivre | intervention-affectee-tech | défaut, corps aSuivre=oui | 409 « Seule une intervention terminée porte la marque « à suivre ». » inchangé
+AT | PUT /api/interventions/:id/a-suivre | intervention-annulee | défaut, corps aSuivre=non | 409 « Seule une intervention terminée porte la marque « à suivre ». » inchangé
+AT | PUT /api/interventions/:id/a-suivre | intervention-annulee | défaut, corps aSuivre=oui | 409 « Seule une intervention terminée porte la marque « à suivre ». » inchangé
+AT | PUT /api/interventions/:id/a-suivre | intervention-autre | défaut, corps aSuivre=non | 409 « Seule une intervention terminée porte la marque « à suivre ». » inchangé
+AT | PUT /api/interventions/:id/a-suivre | intervention-autre | défaut, corps aSuivre=oui | 409 « Seule une intervention terminée porte la marque « à suivre ». » inchangé
+AT | PUT /api/interventions/:id/a-suivre | intervention-chantier-ct | défaut, corps aSuivre=non | 409 « Seule une intervention terminée porte la marque « à suivre ». » inchangé
+AT | PUT /api/interventions/:id/a-suivre | intervention-chantier-ct | défaut, corps aSuivre=oui | 409 « Seule une intervention terminée porte la marque « à suivre ». » inchangé
+AT | PUT /api/interventions/:id/a-suivre | intervention-creee-ct | défaut, corps aSuivre=non | 409 « Seule une intervention terminée porte la marque « à suivre ». » inchangé
+AT | PUT /api/interventions/:id/a-suivre | intervention-creee-ct | défaut, corps aSuivre=oui | 409 « Seule une intervention terminée porte la marque « à suivre ». » inchangé
+AT | PUT /api/interventions/:id/a-suivre | intervention-terminee-motif | défaut, corps aSuivre=non | 200 inchangé
+AT | PUT /api/interventions/:id/a-suivre | intervention-terminee-motif | défaut, corps aSuivre=oui | 200 écrit (Intervention,JournalSaisieChantier)
+AT | PUT /api/interventions/:id/a-suivre | intervention-terminee-signee | défaut, corps aSuivre=non | 200 inchangé
+AT | PUT /api/interventions/:id/a-suivre | intervention-terminee-signee | défaut, corps aSuivre=oui | 200 écrit (Intervention,JournalSaisieChantier)
+AT | PUT /api/interventions/:id/a-suivre | visite-contrat | défaut, corps aSuivre=non | 409 « Seule une intervention terminée porte la marque « à suivre ». » inchangé
+AT | PUT /api/interventions/:id/a-suivre | visite-contrat | défaut, corps aSuivre=oui | 409 « Seule une intervention terminée porte la marque « à suivre ». » inchangé
 COM | DELETE /api/catalogue/:family/:id | prestation-catalogue | défaut | 403 « Accès réservé aux administrateurs » inchangé
 COM | DELETE /api/categories/:id | categorie | défaut | 403 « Accès non autorisé pour un compte commercial. » inchangé
 COM | DELETE /api/clients/:id | client-actif | défaut | 403 « Accès réservé aux administrateurs » inchangé

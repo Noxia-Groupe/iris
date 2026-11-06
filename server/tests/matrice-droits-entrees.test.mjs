@@ -3,7 +3,7 @@
 // matrice enregistrée en exécutant l'API avant tout changement »).
 //
 // Tests seuls : ce fichier enregistre le comportement actuel, sans rien corriger (cadrage §1 et §7). Pour chaque
-// route de session, chaque compte (les dix types et leurs variantes, server/tests/matrice-droits/comptes.mjs) et
+// route de session, chaque compte (les onze types, assistante technique comprise, et leurs variantes, server/tests/matrice-droits/comptes.mjs) et
 // chaque cible nommée de la famille de la route (server/tests/matrice-droits/donnees.mjs), il enregistre la réponse
 // à l'ENTRÉE : code, et message exact d'un refus. S'y ajoutent les refus à l'authentification (401), les 15 routes
 // du planning avec le module désactivé (§2.5), le lien public du planning, et les écritures sans corps ni

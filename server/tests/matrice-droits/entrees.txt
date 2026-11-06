@@ -2184,6 +2184,671 @@ ANONYME | PUT /api/parametres | — | défaut | 401 « Authentification requise 
 ANONYME | PUT /api/parametres/remuneration | — | défaut | 401 « Authentification requise »
 ANONYME | PUT /api/planning/types/:id | inexistant | défaut | 401 « Authentification requise »
 ANONYME | PUT /api/users/:id/permissions | inexistant | défaut | 401 « Authentification requise »
+AT | DELETE /api/achats/:id | achat-archive-chantier-ct | défaut | 403 « Permission requise : chantiers:archive »
+AT | DELETE /api/achats/:id | achat-chantier-autre | défaut | 403 « Permission requise : chantiers:archive »
+AT | DELETE /api/achats/:id | achat-chantier-ct | défaut | 403 « Permission requise : chantiers:archive »
+AT | DELETE /api/achats/:id | achat-chantier-ct-branche-resp | défaut | 403 « Permission requise : chantiers:archive »
+AT | DELETE /api/achats/:id | achat-chantier-termine | défaut | 403 « Permission requise : chantiers:archive »
+AT | DELETE /api/achats/:id | inexistant | défaut | 403 « Permission requise : chantiers:archive »
+AT | DELETE /api/catalogue/:family/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | DELETE /api/categories/:id | inexistant | défaut | 500 « Error deleting categorie »
+AT | DELETE /api/chantiers/:id | chantier-ac | défaut | 403 « Accès réservé aux administrateurs »
+AT | DELETE /api/chantiers/:id | chantier-ad | défaut | 403 « Accès réservé aux administrateurs »
+AT | DELETE /api/chantiers/:id | chantier-annule | défaut | 403 « Accès réservé aux administrateurs »
+AT | DELETE /api/chantiers/:id | chantier-autre | défaut | 403 « Accès réservé aux administrateurs »
+AT | DELETE /api/chantiers/:id | chantier-com | défaut | 403 « Accès réservé aux administrateurs »
+AT | DELETE /api/chantiers/:id | chantier-com-titulaire | défaut | 403 « Accès réservé aux administrateurs »
+AT | DELETE /api/chantiers/:id | chantier-cpt | défaut | 403 « Accès réservé aux administrateurs »
+AT | DELETE /api/chantiers/:id | chantier-ct | défaut | 403 « Accès réservé aux administrateurs »
+AT | DELETE /api/chantiers/:id | chantier-ct-branche-resp | défaut | 403 « Accès réservé aux administrateurs »
+AT | DELETE /api/chantiers/:id | chantier-dc | défaut | 403 « Accès réservé aux administrateurs »
+AT | DELETE /api/chantiers/:id | chantier-dir | défaut | 403 « Accès réservé aux administrateurs »
+AT | DELETE /api/chantiers/:id | chantier-resp | défaut | 403 « Accès réservé aux administrateurs »
+AT | DELETE /api/chantiers/:id | chantier-tech-branche-resp | défaut | 403 « Accès réservé aux administrateurs »
+AT | DELETE /api/chantiers/:id | chantier-termine | défaut | 403 « Accès réservé aux administrateurs »
+AT | DELETE /api/chantiers/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | DELETE /api/clients/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | DELETE /api/company/logo | — | défaut | 403 « Accès réservé au super administrateur » inchangé
+AT | DELETE /api/comptabilite/regles/:cle | cle=CLIENT | défaut | 403 « Accès réservé aux administrateurs »
+AT | DELETE /api/comptabilite/tva/:taux | taux=20 | défaut | 403 « Accès réservé aux administrateurs »
+AT | DELETE /api/fournisseurs/:id | inexistant | défaut | 500 « Error deleting fournisseur »
+AT | DELETE /api/heures/:id | heure-archivee-chantier-ct | défaut | 403 « Permission requise : chantiers:archive »
+AT | DELETE /api/heures/:id | heure-chantier-autre | défaut | 403 « Permission requise : chantiers:archive »
+AT | DELETE /api/heures/:id | heure-chantier-ct | défaut | 403 « Permission requise : chantiers:archive »
+AT | DELETE /api/heures/:id | heure-chantier-ct-branche-resp | défaut | 403 « Permission requise : chantiers:archive »
+AT | DELETE /api/heures/:id | heure-chantier-termine | défaut | 403 « Permission requise : chantiers:archive »
+AT | DELETE /api/heures/:id | inexistant | défaut | 403 « Permission requise : chantiers:archive »
+AT | DELETE /api/intervenants/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | DELETE /api/planning/events/:id | inexistant | défaut | 404 « Affectation introuvable. »
+AT | DELETE /api/planning/events/:id | inexistant | planningActif=non | 403 PLANNING_DESACTIVE « Le module Planning est désactivé par l'administration. »
+AT | DELETE /api/planning/types/:id | inexistant | défaut | 500 « Error deleting planning type »
+AT | DELETE /api/planning/types/:id | inexistant | planningActif=non | 403 PLANNING_DESACTIVE « Le module Planning est désactivé par l'administration. »
+AT | DELETE /api/users/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/achats | — | défaut | 200
+AT | GET /api/admin/api-keys | — | défaut | 403 « Accès réservé au super administrateur »
+AT | GET /api/admin/api-scopes | — | défaut | 403 « Accès réservé au super administrateur »
+AT | GET /api/catalogue/:family | family=prestations | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/catalogue/categories | — | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/categories | — | défaut | 200
+AT | GET /api/chantiers | — | défaut | 200
+AT | GET /api/chantiers/:id | chantier-ac | défaut | 200
+AT | GET /api/chantiers/:id | chantier-ad | défaut | 200
+AT | GET /api/chantiers/:id | chantier-annule | défaut | 200
+AT | GET /api/chantiers/:id | chantier-autre | défaut | 200
+AT | GET /api/chantiers/:id | chantier-com | défaut | 200
+AT | GET /api/chantiers/:id | chantier-com-titulaire | défaut | 200
+AT | GET /api/chantiers/:id | chantier-cpt | défaut | 200
+AT | GET /api/chantiers/:id | chantier-ct | défaut | 200
+AT | GET /api/chantiers/:id | chantier-ct-branche-resp | défaut | 200
+AT | GET /api/chantiers/:id | chantier-dc | défaut | 200
+AT | GET /api/chantiers/:id | chantier-dir | défaut | 200
+AT | GET /api/chantiers/:id | chantier-resp | défaut | 200
+AT | GET /api/chantiers/:id | chantier-tech-branche-resp | défaut | 200
+AT | GET /api/chantiers/:id | chantier-termine | défaut | 200
+AT | GET /api/chantiers/:id | inexistant | défaut | 404 « Chantier introuvable »
+AT | GET /api/chantiers/:id/document.pdf | chantier-ac | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/chantiers/:id/document.pdf | chantier-ad | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/chantiers/:id/document.pdf | chantier-annule | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/chantiers/:id/document.pdf | chantier-autre | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/chantiers/:id/document.pdf | chantier-com | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/chantiers/:id/document.pdf | chantier-com-titulaire | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/chantiers/:id/document.pdf | chantier-cpt | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/chantiers/:id/document.pdf | chantier-ct | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/chantiers/:id/document.pdf | chantier-ct-branche-resp | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/chantiers/:id/document.pdf | chantier-dc | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/chantiers/:id/document.pdf | chantier-dir | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/chantiers/:id/document.pdf | chantier-resp | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/chantiers/:id/document.pdf | chantier-tech-branche-resp | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/chantiers/:id/document.pdf | chantier-termine | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/chantiers/:id/document.pdf | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/chantiers/:id/envois | chantier-ac | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/chantiers/:id/envois | chantier-ad | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/chantiers/:id/envois | chantier-annule | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/chantiers/:id/envois | chantier-autre | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/chantiers/:id/envois | chantier-com | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/chantiers/:id/envois | chantier-com-titulaire | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/chantiers/:id/envois | chantier-cpt | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/chantiers/:id/envois | chantier-ct | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/chantiers/:id/envois | chantier-ct-branche-resp | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/chantiers/:id/envois | chantier-dc | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/chantiers/:id/envois | chantier-dir | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/chantiers/:id/envois | chantier-resp | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/chantiers/:id/envois | chantier-tech-branche-resp | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/chantiers/:id/envois | chantier-termine | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/chantiers/:id/envois | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/chantiers/:id/journal-saisies | chantier-ac | défaut | 200
+AT | GET /api/chantiers/:id/journal-saisies | chantier-ad | défaut | 200
+AT | GET /api/chantiers/:id/journal-saisies | chantier-annule | défaut | 404 « Chantier introuvable »
+AT | GET /api/chantiers/:id/journal-saisies | chantier-autre | défaut | 200
+AT | GET /api/chantiers/:id/journal-saisies | chantier-com | défaut | 200
+AT | GET /api/chantiers/:id/journal-saisies | chantier-com-titulaire | défaut | 200
+AT | GET /api/chantiers/:id/journal-saisies | chantier-cpt | défaut | 200
+AT | GET /api/chantiers/:id/journal-saisies | chantier-ct | défaut | 200
+AT | GET /api/chantiers/:id/journal-saisies | chantier-ct-branche-resp | défaut | 200
+AT | GET /api/chantiers/:id/journal-saisies | chantier-dc | défaut | 200
+AT | GET /api/chantiers/:id/journal-saisies | chantier-dir | défaut | 200
+AT | GET /api/chantiers/:id/journal-saisies | chantier-resp | défaut | 200
+AT | GET /api/chantiers/:id/journal-saisies | chantier-tech-branche-resp | défaut | 200
+AT | GET /api/chantiers/:id/journal-saisies | chantier-termine | défaut | 200
+AT | GET /api/chantiers/:id/journal-saisies | inexistant | défaut | 404 « Chantier introuvable »
+AT | GET /api/clients | — | défaut | 200
+AT | GET /api/clients/:clientId/equipements | client-actif | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/clients/:clientId/equipements | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/clients/:clientId/equipements | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/clients/:id | client-actif | défaut | 200
+AT | GET /api/clients/:id | client-desactive | défaut | 200
+AT | GET /api/clients/:id | inexistant | défaut | 404 « Client introuvable. »
+AT | GET /api/clients/:id/chantiers | client-actif | défaut | 200
+AT | GET /api/clients/:id/chantiers | client-desactive | défaut | 200
+AT | GET /api/clients/:id/chantiers | inexistant | défaut | 404 « Client introuvable. »
+AT | GET /api/commerciaux | — | défaut | 200
+AT | GET /api/company | — | défaut | 200
+AT | GET /api/company/logo | — | défaut | 404 « Aucun logo enregistré. »
+AT | GET /api/comptabilite | — | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/comptabilite/comptes/:id/journal | compte-comptable-clients | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/comptabilite/comptes/:id/journal | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/comptabilite/regles/journal | — | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/conducteurs | — | défaut | 200
+AT | GET /api/contrats-maintenance | — | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/contrats-maintenance/:id/document.pdf | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/contrats-maintenance/:id/document.pdf | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/contrats-maintenance/:id/journal-saisies | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/contrats-maintenance/:id/journal-saisies | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/devis | — | défaut | 403 « Permission requise : devis:read »
+AT | GET /api/devis/:id/document.pdf | devis-brouillon | défaut | 403 « Permission requise : devis:read »
+AT | GET /api/devis/:id/document.pdf | devis-converti | défaut | 403 « Permission requise : devis:read »
+AT | GET /api/devis/:id/document.pdf | devis-signe | défaut | 403 « Permission requise : devis:read »
+AT | GET /api/devis/:id/document.pdf | inexistant | défaut | 403 « Permission requise : devis:read »
+AT | GET /api/devis/:id/envois | devis-brouillon | défaut | 403 « Permission requise : devis:read »
+AT | GET /api/devis/:id/envois | devis-converti | défaut | 403 « Permission requise : devis:read »
+AT | GET /api/devis/:id/envois | devis-signe | défaut | 403 « Permission requise : devis:read »
+AT | GET /api/devis/:id/envois | inexistant | défaut | 403 « Permission requise : devis:read »
+AT | GET /api/devis/a-convertir | — | défaut | 403 « Permission requise : devis:read »
+AT | GET /api/devis/catalogue | — | défaut | 403 « Permission requise : devis:write »
+AT | GET /api/facturation/prete-a-facturer | — | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/factures | — | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/factures/:id/document.pdf | avoir-emis | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/factures/:id/document.pdf | facture-brouillon | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/factures/:id/document.pdf | facture-emise | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/factures/:id/document.pdf | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/factures/:id/envois | avoir-emis | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/factures/:id/envois | facture-brouillon | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/factures/:id/envois | facture-emise | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/factures/:id/envois | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/factures/:id/journal | avoir-emis | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/factures/:id/journal | facture-brouillon | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/factures/:id/journal | facture-emise | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/factures/:id/journal | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/factures/:id/tracabilite | avoir-emis | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/factures/:id/tracabilite | facture-brouillon | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/factures/:id/tracabilite | facture-emise | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/factures/:id/tracabilite | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/factures/a-regler | — | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/factures/chronologie | — | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/factures/export-comptable.csv | — | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/fournisseurs | — | défaut | 200
+AT | GET /api/heures | — | défaut | 200
+AT | GET /api/intervenants | — | défaut | 200
+AT | GET /api/interventions | — | défaut | 200
+AT | GET /api/interventions/:id | curative-sans-chantier-branche | défaut | 200
+AT | GET /api/interventions/:id | inexistant | défaut | 404 « Intervention introuvable. »
+AT | GET /api/interventions/:id | intervention-affectee-tech | défaut | 200
+AT | GET /api/interventions/:id | intervention-annulee | défaut | 404 « Intervention introuvable. »
+AT | GET /api/interventions/:id | intervention-autre | défaut | 200
+AT | GET /api/interventions/:id | intervention-chantier-ct | défaut | 200
+AT | GET /api/interventions/:id | intervention-creee-ct | défaut | 200
+AT | GET /api/interventions/:id | intervention-terminee-motif | défaut | 200
+AT | GET /api/interventions/:id | intervention-terminee-signee | défaut | 200
+AT | GET /api/interventions/:id | visite-contrat | défaut | 200
+AT | GET /api/interventions/:id/couts | curative-sans-chantier-branche | défaut | 200
+AT | GET /api/interventions/:id/couts | inexistant | défaut | 404 « Intervention introuvable. »
+AT | GET /api/interventions/:id/couts | intervention-affectee-tech | défaut | 200
+AT | GET /api/interventions/:id/couts | intervention-annulee | défaut | 200
+AT | GET /api/interventions/:id/couts | intervention-autre | défaut | 200
+AT | GET /api/interventions/:id/couts | intervention-chantier-ct | défaut | 200
+AT | GET /api/interventions/:id/couts | intervention-creee-ct | défaut | 200
+AT | GET /api/interventions/:id/couts | intervention-terminee-motif | défaut | 200
+AT | GET /api/interventions/:id/couts | intervention-terminee-signee | défaut | 200
+AT | GET /api/interventions/:id/couts | visite-contrat | défaut | 200
+AT | GET /api/interventions/:id/document.pdf | curative-sans-chantier-branche | défaut | 409 « Aucun compte rendu à imprimer. »
+AT | GET /api/interventions/:id/document.pdf | inexistant | défaut | 404 « Intervention introuvable. »
+AT | GET /api/interventions/:id/document.pdf | intervention-affectee-tech | défaut | 200
+AT | GET /api/interventions/:id/document.pdf | intervention-annulee | défaut | 404 « Intervention introuvable. »
+AT | GET /api/interventions/:id/document.pdf | intervention-autre | défaut | 409 « Aucun compte rendu à imprimer. »
+AT | GET /api/interventions/:id/document.pdf | intervention-chantier-ct | défaut | 409 « Aucun compte rendu à imprimer. »
+AT | GET /api/interventions/:id/document.pdf | intervention-creee-ct | défaut | 409 « Aucun compte rendu à imprimer. »
+AT | GET /api/interventions/:id/document.pdf | intervention-terminee-motif | défaut | 200
+AT | GET /api/interventions/:id/document.pdf | intervention-terminee-signee | défaut | 200
+AT | GET /api/interventions/:id/document.pdf | visite-contrat | défaut | 409 « Aucun compte rendu à imprimer. »
+AT | GET /api/interventions/:id/envois | curative-sans-chantier-branche | défaut | 409 « Aucun compte rendu à envoyer. »
+AT | GET /api/interventions/:id/envois | inexistant | défaut | 404 « Intervention introuvable. »
+AT | GET /api/interventions/:id/envois | intervention-affectee-tech | défaut | 200
+AT | GET /api/interventions/:id/envois | intervention-annulee | défaut | 409 « Aucun compte rendu à envoyer. »
+AT | GET /api/interventions/:id/envois | intervention-autre | défaut | 409 « Aucun compte rendu à envoyer. »
+AT | GET /api/interventions/:id/envois | intervention-chantier-ct | défaut | 409 « Aucun compte rendu à envoyer. »
+AT | GET /api/interventions/:id/envois | intervention-creee-ct | défaut | 409 « Aucun compte rendu à envoyer. »
+AT | GET /api/interventions/:id/envois | intervention-terminee-motif | défaut | 200
+AT | GET /api/interventions/:id/envois | intervention-terminee-signee | défaut | 200
+AT | GET /api/interventions/:id/envois | visite-contrat | défaut | 409 « Aucun compte rendu à envoyer. »
+AT | GET /api/interventions/:id/facture-temps-passe | curative-sans-chantier-branche | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/interventions/:id/facture-temps-passe | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/interventions/:id/facture-temps-passe | intervention-affectee-tech | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/interventions/:id/facture-temps-passe | intervention-annulee | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/interventions/:id/facture-temps-passe | intervention-autre | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/interventions/:id/facture-temps-passe | intervention-chantier-ct | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/interventions/:id/facture-temps-passe | intervention-creee-ct | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/interventions/:id/facture-temps-passe | intervention-terminee-motif | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/interventions/:id/facture-temps-passe | intervention-terminee-signee | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/interventions/:id/facture-temps-passe | visite-contrat | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/interventions/:id/journal-saisies | curative-sans-chantier-branche | défaut | 200
+AT | GET /api/interventions/:id/journal-saisies | inexistant | défaut | 404 « Intervention introuvable. »
+AT | GET /api/interventions/:id/journal-saisies | intervention-affectee-tech | défaut | 200
+AT | GET /api/interventions/:id/journal-saisies | intervention-annulee | défaut | 200
+AT | GET /api/interventions/:id/journal-saisies | intervention-autre | défaut | 200
+AT | GET /api/interventions/:id/journal-saisies | intervention-chantier-ct | défaut | 200
+AT | GET /api/interventions/:id/journal-saisies | intervention-creee-ct | défaut | 200
+AT | GET /api/interventions/:id/journal-saisies | intervention-terminee-motif | défaut | 200
+AT | GET /api/interventions/:id/journal-saisies | intervention-terminee-signee | défaut | 200
+AT | GET /api/interventions/:id/journal-saisies | visite-contrat | défaut | 200
+AT | GET /api/interventions/journee | — | défaut | 200
+AT | GET /api/journal-administration | — | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/journal-administration/export.csv | — | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/me | — | défaut | 200
+AT | GET /api/mentions-legales | — | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/modules | — | défaut | 200
+AT | GET /api/parametres | — | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/parametres/remuneration | — | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/planning/chantiers | — | défaut | 200
+AT | GET /api/planning/chantiers | — | planningActif=non | 403 PLANNING_DESACTIVE « Le module Planning est désactivé par l'administration. »
+AT | GET /api/planning/events | — | défaut | 200
+AT | GET /api/planning/events | — | planningActif=non | 403 PLANNING_DESACTIVE « Le module Planning est désactivé par l'administration. »
+AT | GET /api/planning/interventions-a-planifier | — | défaut | 200
+AT | GET /api/planning/interventions-a-planifier | — | planningActif=non | 403 PLANNING_DESACTIVE « Le module Planning est désactivé par l'administration. »
+AT | GET /api/planning/share | — | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/planning/share | — | planningActif=non | 403 « Accès réservé aux administrateurs »
+AT | GET /api/planning/types | — | défaut | 200
+AT | GET /api/planning/types | — | planningActif=non | 403 PLANNING_DESACTIVE « Le module Planning est désactivé par l'administration. »
+AT | GET /api/registry/companies | — | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/reglements | — | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/stats/chantiers-repartition | — | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/stats/commerciaux | — | défaut | 403 « Accès réservé »
+AT | GET /api/stats/conducteurs | — | défaut | 403 « Accès réservé au suivi Travaux. »
+AT | GET /api/stats/conducteurs/assiduite | — | défaut | 403 « Accès réservé au suivi Travaux. »
+AT | GET /api/stats/fournisseurs | — | défaut | 403 « Accès réservé au suivi Travaux. »
+AT | GET /api/stats/global | — | défaut | 200
+AT | GET /api/stats/intervenants | — | défaut | 403 « Accès réservé au suivi Travaux. »
+AT | GET /api/stats/types-chantiers | — | défaut | 403 « Accès réservé au suivi Travaux. »
+AT | GET /api/users | — | défaut | 403 « Accès réservé aux administrateurs »
+AT | PATCH /api/achats/:id | achat-archive-chantier-ct | défaut | 403 « Permission requise : chantiers:write »
+AT | PATCH /api/achats/:id | achat-chantier-autre | défaut | 403 « Permission requise : chantiers:write »
+AT | PATCH /api/achats/:id | achat-chantier-ct | défaut | 403 « Permission requise : chantiers:write »
+AT | PATCH /api/achats/:id | achat-chantier-ct-branche-resp | défaut | 403 « Permission requise : chantiers:write »
+AT | PATCH /api/achats/:id | achat-chantier-termine | défaut | 403 « Permission requise : chantiers:write »
+AT | PATCH /api/achats/:id | inexistant | défaut | 403 « Permission requise : chantiers:write »
+AT | PATCH /api/chantiers/:id | chantier-ac | défaut | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. »
+AT | PATCH /api/chantiers/:id | chantier-ad | défaut | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. »
+AT | PATCH /api/chantiers/:id | chantier-annule | défaut | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. »
+AT | PATCH /api/chantiers/:id | chantier-autre | défaut | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. »
+AT | PATCH /api/chantiers/:id | chantier-com | défaut | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. »
+AT | PATCH /api/chantiers/:id | chantier-com-titulaire | défaut | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. »
+AT | PATCH /api/chantiers/:id | chantier-cpt | défaut | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. »
+AT | PATCH /api/chantiers/:id | chantier-ct | défaut | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. »
+AT | PATCH /api/chantiers/:id | chantier-ct-branche-resp | défaut | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. »
+AT | PATCH /api/chantiers/:id | chantier-dc | défaut | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. »
+AT | PATCH /api/chantiers/:id | chantier-dir | défaut | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. »
+AT | PATCH /api/chantiers/:id | chantier-resp | défaut | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. »
+AT | PATCH /api/chantiers/:id | chantier-tech-branche-resp | défaut | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. »
+AT | PATCH /api/chantiers/:id | chantier-termine | défaut | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. »
+AT | PATCH /api/chantiers/:id | inexistant | défaut | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. »
+AT | PATCH /api/chantiers/:id/commercial | chantier-ac | défaut | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. »
+AT | PATCH /api/chantiers/:id/commercial | chantier-ad | défaut | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. »
+AT | PATCH /api/chantiers/:id/commercial | chantier-annule | défaut | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. »
+AT | PATCH /api/chantiers/:id/commercial | chantier-autre | défaut | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. »
+AT | PATCH /api/chantiers/:id/commercial | chantier-com | défaut | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. »
+AT | PATCH /api/chantiers/:id/commercial | chantier-com-titulaire | défaut | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. »
+AT | PATCH /api/chantiers/:id/commercial | chantier-cpt | défaut | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. »
+AT | PATCH /api/chantiers/:id/commercial | chantier-ct | défaut | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. »
+AT | PATCH /api/chantiers/:id/commercial | chantier-ct-branche-resp | défaut | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. »
+AT | PATCH /api/chantiers/:id/commercial | chantier-dc | défaut | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. »
+AT | PATCH /api/chantiers/:id/commercial | chantier-dir | défaut | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. »
+AT | PATCH /api/chantiers/:id/commercial | chantier-resp | défaut | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. »
+AT | PATCH /api/chantiers/:id/commercial | chantier-tech-branche-resp | défaut | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. »
+AT | PATCH /api/chantiers/:id/commercial | chantier-termine | défaut | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. »
+AT | PATCH /api/chantiers/:id/commercial | inexistant | défaut | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. »
+AT | PATCH /api/chantiers/:id/encaisse | chantier-ac | défaut | 403 « Accès réservé aux administrateurs »
+AT | PATCH /api/chantiers/:id/encaisse | chantier-ad | défaut | 403 « Accès réservé aux administrateurs »
+AT | PATCH /api/chantiers/:id/encaisse | chantier-annule | défaut | 403 « Accès réservé aux administrateurs »
+AT | PATCH /api/chantiers/:id/encaisse | chantier-autre | défaut | 403 « Accès réservé aux administrateurs »
+AT | PATCH /api/chantiers/:id/encaisse | chantier-com | défaut | 403 « Accès réservé aux administrateurs »
+AT | PATCH /api/chantiers/:id/encaisse | chantier-com-titulaire | défaut | 403 « Accès réservé aux administrateurs »
+AT | PATCH /api/chantiers/:id/encaisse | chantier-cpt | défaut | 403 « Accès réservé aux administrateurs »
+AT | PATCH /api/chantiers/:id/encaisse | chantier-ct | défaut | 403 « Accès réservé aux administrateurs »
+AT | PATCH /api/chantiers/:id/encaisse | chantier-ct-branche-resp | défaut | 403 « Accès réservé aux administrateurs »
+AT | PATCH /api/chantiers/:id/encaisse | chantier-dc | défaut | 403 « Accès réservé aux administrateurs »
+AT | PATCH /api/chantiers/:id/encaisse | chantier-dir | défaut | 403 « Accès réservé aux administrateurs »
+AT | PATCH /api/chantiers/:id/encaisse | chantier-resp | défaut | 403 « Accès réservé aux administrateurs »
+AT | PATCH /api/chantiers/:id/encaisse | chantier-tech-branche-resp | défaut | 403 « Accès réservé aux administrateurs »
+AT | PATCH /api/chantiers/:id/encaisse | chantier-termine | défaut | 403 « Accès réservé aux administrateurs »
+AT | PATCH /api/chantiers/:id/encaisse | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | PATCH /api/chantiers/:id/statut | chantier-ac | défaut | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. »
+AT | PATCH /api/chantiers/:id/statut | chantier-ad | défaut | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. »
+AT | PATCH /api/chantiers/:id/statut | chantier-annule | défaut | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. »
+AT | PATCH /api/chantiers/:id/statut | chantier-autre | défaut | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. »
+AT | PATCH /api/chantiers/:id/statut | chantier-com | défaut | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. »
+AT | PATCH /api/chantiers/:id/statut | chantier-com-titulaire | défaut | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. »
+AT | PATCH /api/chantiers/:id/statut | chantier-cpt | défaut | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. »
+AT | PATCH /api/chantiers/:id/statut | chantier-ct | défaut | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. »
+AT | PATCH /api/chantiers/:id/statut | chantier-ct-branche-resp | défaut | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. »
+AT | PATCH /api/chantiers/:id/statut | chantier-dc | défaut | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. »
+AT | PATCH /api/chantiers/:id/statut | chantier-dir | défaut | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. »
+AT | PATCH /api/chantiers/:id/statut | chantier-resp | défaut | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. »
+AT | PATCH /api/chantiers/:id/statut | chantier-tech-branche-resp | défaut | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. »
+AT | PATCH /api/chantiers/:id/statut | chantier-termine | défaut | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. »
+AT | PATCH /api/chantiers/:id/statut | inexistant | défaut | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. »
+AT | PATCH /api/comptabilite/comptes/:id | compte-comptable-clients | défaut | 403 « Accès réservé aux administrateurs »
+AT | PATCH /api/comptabilite/comptes/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | PATCH /api/comptabilite/comptes/:id/activation | compte-comptable-clients | défaut | 403 « Accès réservé aux administrateurs »
+AT | PATCH /api/comptabilite/comptes/:id/activation | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | PATCH /api/contrats-maintenance/:id | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
+AT | PATCH /api/contrats-maintenance/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | PATCH /api/contrats-maintenance/:id/statut | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
+AT | PATCH /api/contrats-maintenance/:id/statut | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | PATCH /api/devis/:id | devis-brouillon | défaut | 403 « Permission requise : devis:write »
+AT | PATCH /api/devis/:id | devis-converti | défaut | 403 « Permission requise : devis:write »
+AT | PATCH /api/devis/:id | devis-signe | défaut | 403 « Permission requise : devis:write »
+AT | PATCH /api/devis/:id | inexistant | défaut | 403 « Permission requise : devis:write »
+AT | PATCH /api/heures/:id | heure-archivee-chantier-ct | défaut | 403 « Permission requise : chantiers:write »
+AT | PATCH /api/heures/:id | heure-chantier-autre | défaut | 403 « Permission requise : chantiers:write »
+AT | PATCH /api/heures/:id | heure-chantier-ct | défaut | 403 « Permission requise : chantiers:write »
+AT | PATCH /api/heures/:id | heure-chantier-ct-branche-resp | défaut | 403 « Permission requise : chantiers:write »
+AT | PATCH /api/heures/:id | heure-chantier-termine | défaut | 403 « Permission requise : chantiers:write »
+AT | PATCH /api/heures/:id | inexistant | défaut | 403 « Permission requise : chantiers:write »
+AT | PATCH /api/interventions/:id/couts/:type/:coutId | heures-tech-intervention-affectee | défaut | 403 « Accès non autorisé. »
+AT | PATCH /api/interventions/:id/couts/:type/:coutId | heures-tech-sous-intervention-autre | défaut | 403 « Accès non autorisé. »
+AT | PATCH /api/interventions/:id/couts/:type/:coutId | inexistant | défaut | 403 « Accès non autorisé. »
+AT | PATCH /api/interventions/:id/couts/:type/:coutId | materiel-intervention-affectee | défaut | 400 validation-avant-droit
+AT | PATCH /api/interventions/:id/couts/:type/:coutId | materiel-intervention-chantier-ct | défaut | 400 validation-avant-droit
+AT | PATCH /api/interventions/:id/statut | curative-sans-chantier-branche | défaut | 400 validation-avant-droit
+AT | PATCH /api/interventions/:id/statut | inexistant | défaut | 400 validation-avant-droit
+AT | PATCH /api/interventions/:id/statut | intervention-affectee-tech | défaut | 400 validation-avant-droit
+AT | PATCH /api/interventions/:id/statut | intervention-annulee | défaut | 400 validation-avant-droit
+AT | PATCH /api/interventions/:id/statut | intervention-autre | défaut | 400 validation-avant-droit
+AT | PATCH /api/interventions/:id/statut | intervention-chantier-ct | défaut | 400 validation-avant-droit
+AT | PATCH /api/interventions/:id/statut | intervention-creee-ct | défaut | 400 validation-avant-droit
+AT | PATCH /api/interventions/:id/statut | intervention-terminee-motif | défaut | 400 validation-avant-droit
+AT | PATCH /api/interventions/:id/statut | intervention-terminee-signee | défaut | 400 validation-avant-droit
+AT | PATCH /api/interventions/:id/statut | visite-contrat | défaut | 400 validation-avant-droit
+AT | PATCH /api/planning/events/:id | inexistant | défaut | 404 « Affectation introuvable. »
+AT | PATCH /api/planning/events/:id | inexistant | planningActif=non | 403 PLANNING_DESACTIVE « Le module Planning est désactivé par l'administration. »
+AT | PATCH /api/planning/share | — | défaut | 403 « Accès réservé aux administrateurs » inchangé
+AT | PATCH /api/planning/share | — | planningActif=non | 403 « Accès réservé aux administrateurs » inchangé
+AT | PATCH /api/users/:id/acces-finance | inexistant | défaut | 403 « Accès réservé au super administrateur »
+AT | PATCH /api/users/:id/actif | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | PATCH /api/users/:id/est-commercial | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | PATCH /api/users/:id/responsable-hierarchique | compte-administrateur | défaut | 403 « Accès réservé aux administrateurs »
+AT | PATCH /api/users/:id/responsable-hierarchique | compte-commercial | défaut | 403 « Accès réservé aux administrateurs »
+AT | PATCH /api/users/:id/responsable-hierarchique | compte-superadmin | défaut | 403 « Accès réservé aux administrateurs »
+AT | PATCH /api/users/:id/responsable-hierarchique | compte-systeme | défaut | 403 « Accès réservé aux administrateurs »
+AT | PATCH /api/users/:id/responsable-hierarchique | compte-technicien | défaut | 403 « Accès réservé aux administrateurs »
+AT | PATCH /api/users/:id/responsable-hierarchique | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | PATCH /api/users/:id/role | compte-administrateur | défaut | 403 « Accès réservé aux administrateurs »
+AT | PATCH /api/users/:id/role | compte-commercial | défaut | 403 « Accès réservé aux administrateurs »
+AT | PATCH /api/users/:id/role | compte-superadmin | défaut | 403 « Accès réservé aux administrateurs »
+AT | PATCH /api/users/:id/role | compte-systeme | défaut | 403 « Accès réservé aux administrateurs »
+AT | PATCH /api/users/:id/role | compte-technicien | défaut | 403 « Accès réservé aux administrateurs »
+AT | PATCH /api/users/:id/role | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/achats | — | défaut | 403 « Permission requise : chantiers:write »
+AT | POST /api/achats/:id/restaurer | achat-archive-chantier-ct | défaut | 403 « Permission requise : chantiers:archive »
+AT | POST /api/achats/:id/restaurer | achat-chantier-autre | défaut | 403 « Permission requise : chantiers:archive »
+AT | POST /api/achats/:id/restaurer | achat-chantier-ct | défaut | 403 « Permission requise : chantiers:archive »
+AT | POST /api/achats/:id/restaurer | achat-chantier-ct-branche-resp | défaut | 403 « Permission requise : chantiers:archive »
+AT | POST /api/achats/:id/restaurer | achat-chantier-termine | défaut | 403 « Permission requise : chantiers:archive »
+AT | POST /api/achats/:id/restaurer | inexistant | défaut | 403 « Permission requise : chantiers:archive »
+AT | POST /api/admin/api-keys | — | défaut | 403 « Accès réservé au super administrateur »
+AT | POST /api/admin/api-keys/:id/revoke | inexistant | défaut | 403 « Accès réservé au super administrateur »
+AT | POST /api/catalogue/:family | family=prestations | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/catalogue/categories | — | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/categories | — | défaut | 400
+AT | POST /api/chantiers | — | défaut | 410 « Un chantier est créé uniquement par conversion d’un devis accepté. »
+AT | POST /api/chantiers/:id/analyze | chantier-ac | défaut | 410 « L'analyse IA de chantier n'est pas encore disponible. »
+AT | POST /api/chantiers/:id/analyze | chantier-ad | défaut | 410 « L'analyse IA de chantier n'est pas encore disponible. »
+AT | POST /api/chantiers/:id/analyze | chantier-annule | défaut | 410 « L'analyse IA de chantier n'est pas encore disponible. »
+AT | POST /api/chantiers/:id/analyze | chantier-autre | défaut | 410 « L'analyse IA de chantier n'est pas encore disponible. »
+AT | POST /api/chantiers/:id/analyze | chantier-com | défaut | 410 « L'analyse IA de chantier n'est pas encore disponible. »
+AT | POST /api/chantiers/:id/analyze | chantier-com-titulaire | défaut | 410 « L'analyse IA de chantier n'est pas encore disponible. »
+AT | POST /api/chantiers/:id/analyze | chantier-cpt | défaut | 410 « L'analyse IA de chantier n'est pas encore disponible. »
+AT | POST /api/chantiers/:id/analyze | chantier-ct | défaut | 410 « L'analyse IA de chantier n'est pas encore disponible. »
+AT | POST /api/chantiers/:id/analyze | chantier-ct-branche-resp | défaut | 410 « L'analyse IA de chantier n'est pas encore disponible. »
+AT | POST /api/chantiers/:id/analyze | chantier-dc | défaut | 410 « L'analyse IA de chantier n'est pas encore disponible. »
+AT | POST /api/chantiers/:id/analyze | chantier-dir | défaut | 410 « L'analyse IA de chantier n'est pas encore disponible. »
+AT | POST /api/chantiers/:id/analyze | chantier-resp | défaut | 410 « L'analyse IA de chantier n'est pas encore disponible. »
+AT | POST /api/chantiers/:id/analyze | chantier-tech-branche-resp | défaut | 410 « L'analyse IA de chantier n'est pas encore disponible. »
+AT | POST /api/chantiers/:id/analyze | chantier-termine | défaut | 410 « L'analyse IA de chantier n'est pas encore disponible. »
+AT | POST /api/chantiers/:id/analyze | inexistant | défaut | 410 « L'analyse IA de chantier n'est pas encore disponible. »
+AT | POST /api/chantiers/:id/envois | chantier-ac | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/chantiers/:id/envois | chantier-ad | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/chantiers/:id/envois | chantier-annule | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/chantiers/:id/envois | chantier-autre | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/chantiers/:id/envois | chantier-com | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/chantiers/:id/envois | chantier-com-titulaire | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/chantiers/:id/envois | chantier-cpt | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/chantiers/:id/envois | chantier-ct | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/chantiers/:id/envois | chantier-ct-branche-resp | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/chantiers/:id/envois | chantier-dc | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/chantiers/:id/envois | chantier-dir | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/chantiers/:id/envois | chantier-resp | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/chantiers/:id/envois | chantier-tech-branche-resp | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/chantiers/:id/envois | chantier-termine | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/chantiers/:id/envois | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/clients | — | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/clients/:clientId/contacts | client-actif | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/clients/:clientId/contacts | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/clients/:clientId/contacts | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/clients/:clientId/equipements | client-actif | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/clients/:clientId/equipements | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/clients/:clientId/equipements | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/clients/:clientId/equipements/:id/archiver | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/clients/:clientId/sites | client-actif | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/clients/:clientId/sites | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/clients/:clientId/sites | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/comptabilite/comptes | — | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/comptabilite/importer | — | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/contrats-maintenance | — | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/contrats-maintenance/:id/avancer-echeance | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/contrats-maintenance/:id/avancer-echeance | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/contrats-maintenance/:id/generer-intervention | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé aux administrateurs » inchangé
+AT | POST /api/devis | — | défaut | 403 « Permission requise : devis:write »
+AT | POST /api/devis/:id/acompte | devis-brouillon | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/devis/:id/acompte | devis-converti | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/devis/:id/acompte | devis-signe | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/devis/:id/acompte | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/devis/:id/annulation | devis-brouillon | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/devis/:id/annulation | devis-converti | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/devis/:id/annulation | devis-signe | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/devis/:id/annulation | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/devis/:id/convertir | devis-brouillon | défaut | 403 « Permission requise : devis:write »
+AT | POST /api/devis/:id/convertir | devis-converti | défaut | 403 « Permission requise : devis:write »
+AT | POST /api/devis/:id/convertir | devis-signe | défaut | 403 « Permission requise : devis:write »
+AT | POST /api/devis/:id/convertir | inexistant | défaut | 403 « Permission requise : devis:write »
+AT | POST /api/devis/:id/duplication | inexistant | défaut | 403 « Permission requise : devis:write »
+AT | POST /api/devis/:id/envois | devis-brouillon | défaut | 403 « Permission requise : devis:write »
+AT | POST /api/devis/:id/envois | devis-converti | défaut | 403 « Permission requise : devis:write »
+AT | POST /api/devis/:id/envois | devis-signe | défaut | 403 « Permission requise : devis:write »
+AT | POST /api/devis/:id/envois | inexistant | défaut | 403 « Permission requise : devis:write »
+AT | POST /api/devis/:id/revisions | inexistant | défaut | 403 « Permission requise : devis:write »
+AT | POST /api/devis/:id/signature | devis-brouillon | défaut | 403 « Permission requise : devis:write »
+AT | POST /api/devis/:id/signature | devis-converti | défaut | 403 « Permission requise : devis:write »
+AT | POST /api/devis/:id/signature | devis-signe | défaut | 403 « Permission requise : devis:write »
+AT | POST /api/devis/:id/signature | inexistant | défaut | 403 « Permission requise : devis:write »
+AT | POST /api/factures | — | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/factures/:id/annuler | avoir-emis | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/factures/:id/annuler | facture-brouillon | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/factures/:id/annuler | facture-emise | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/factures/:id/annuler | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/factures/:id/avoirs | avoir-emis | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/factures/:id/avoirs | facture-brouillon | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/factures/:id/avoirs | facture-emise | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/factures/:id/avoirs | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/factures/:id/emettre | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/factures/:id/envois | avoir-emis | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/factures/:id/envois | facture-brouillon | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/factures/:id/envois | facture-emise | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/factures/:id/envois | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/factures/:id/regler | avoir-emis | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/factures/:id/regler | facture-brouillon | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/factures/:id/regler | facture-emise | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/factures/:id/regler | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/fournisseurs | — | défaut | 400
+AT | POST /api/heures | — | défaut | 403 « Permission requise : chantiers:write »
+AT | POST /api/heures/:id/restaurer | heure-archivee-chantier-ct | défaut | 403 « Permission requise : chantiers:archive »
+AT | POST /api/heures/:id/restaurer | heure-chantier-autre | défaut | 403 « Permission requise : chantiers:archive »
+AT | POST /api/heures/:id/restaurer | heure-chantier-ct | défaut | 403 « Permission requise : chantiers:archive »
+AT | POST /api/heures/:id/restaurer | heure-chantier-ct-branche-resp | défaut | 403 « Permission requise : chantiers:archive »
+AT | POST /api/heures/:id/restaurer | heure-chantier-termine | défaut | 403 « Permission requise : chantiers:archive »
+AT | POST /api/heures/:id/restaurer | inexistant | défaut | 403 « Permission requise : chantiers:archive »
+AT | POST /api/intervenants | — | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/interventions | — | défaut | 400
+AT | POST /api/interventions/:id/couts/:type/:coutId/:action | heures-tech-intervention-affectee | défaut | 400
+AT | POST /api/interventions/:id/couts/:type/:coutId/:action | heures-tech-sous-intervention-autre | défaut | 404 « Coût introuvable. »
+AT | POST /api/interventions/:id/couts/:type/:coutId/:action | inexistant | défaut | 404 « Coût introuvable. »
+AT | POST /api/interventions/:id/couts/:type/:coutId/:action | materiel-intervention-affectee | défaut | 400
+AT | POST /api/interventions/:id/couts/:type/:coutId/:action | materiel-intervention-chantier-ct | défaut | 400
+AT | POST /api/interventions/:id/couts/achats | curative-sans-chantier-branche | défaut | 400
+AT | POST /api/interventions/:id/couts/achats | inexistant | défaut | 404 « Intervention introuvable. »
+AT | POST /api/interventions/:id/couts/achats | intervention-affectee-tech | défaut | 400
+AT | POST /api/interventions/:id/couts/achats | intervention-annulee | défaut | 409 « Cette intervention ne peut pas recevoir de coûts. »
+AT | POST /api/interventions/:id/couts/achats | intervention-autre | défaut | 400
+AT | POST /api/interventions/:id/couts/achats | intervention-chantier-ct | défaut | 400
+AT | POST /api/interventions/:id/couts/achats | intervention-creee-ct | défaut | 400
+AT | POST /api/interventions/:id/couts/achats | intervention-terminee-motif | défaut | 400
+AT | POST /api/interventions/:id/couts/achats | intervention-terminee-signee | défaut | 400
+AT | POST /api/interventions/:id/couts/achats | visite-contrat | défaut | 400
+AT | POST /api/interventions/:id/couts/heures | curative-sans-chantier-branche | défaut | 403 « Saisie d’heures réservée au technicien affecté. »
+AT | POST /api/interventions/:id/couts/heures | inexistant | défaut | 404 « Intervention introuvable. »
+AT | POST /api/interventions/:id/couts/heures | intervention-affectee-tech | défaut | 403 « Saisie d’heures réservée au technicien affecté. »
+AT | POST /api/interventions/:id/couts/heures | intervention-annulee | défaut | 403 « Saisie d’heures réservée au technicien affecté. »
+AT | POST /api/interventions/:id/couts/heures | intervention-autre | défaut | 403 « Saisie d’heures réservée au technicien affecté. »
+AT | POST /api/interventions/:id/couts/heures | intervention-chantier-ct | défaut | 403 « Saisie d’heures réservée au technicien affecté. »
+AT | POST /api/interventions/:id/couts/heures | intervention-creee-ct | défaut | 403 « Saisie d’heures réservée au technicien affecté. »
+AT | POST /api/interventions/:id/couts/heures | intervention-terminee-motif | défaut | 403 « Saisie d’heures réservée au technicien affecté. »
+AT | POST /api/interventions/:id/couts/heures | intervention-terminee-signee | défaut | 403 « Saisie d’heures réservée au technicien affecté. »
+AT | POST /api/interventions/:id/couts/heures | visite-contrat | défaut | 403 « Saisie d’heures réservée au technicien affecté. »
+AT | POST /api/interventions/:id/envois | curative-sans-chantier-branche | défaut | 400 validation-avant-droit
+AT | POST /api/interventions/:id/envois | inexistant | défaut | 400 validation-avant-droit
+AT | POST /api/interventions/:id/envois | intervention-affectee-tech | défaut | 400 validation-avant-droit
+AT | POST /api/interventions/:id/envois | intervention-annulee | défaut | 400 validation-avant-droit
+AT | POST /api/interventions/:id/envois | intervention-autre | défaut | 400 validation-avant-droit
+AT | POST /api/interventions/:id/envois | intervention-chantier-ct | défaut | 400 validation-avant-droit
+AT | POST /api/interventions/:id/envois | intervention-creee-ct | défaut | 400 validation-avant-droit
+AT | POST /api/interventions/:id/envois | intervention-terminee-motif | défaut | 400 validation-avant-droit
+AT | POST /api/interventions/:id/envois | intervention-terminee-signee | défaut | 400 validation-avant-droit
+AT | POST /api/interventions/:id/envois | visite-contrat | défaut | 400 validation-avant-droit
+AT | POST /api/interventions/:id/facture-temps-passe | curative-sans-chantier-branche | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/interventions/:id/facture-temps-passe | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/interventions/:id/facture-temps-passe | intervention-affectee-tech | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/interventions/:id/facture-temps-passe | intervention-annulee | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/interventions/:id/facture-temps-passe | intervention-autre | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/interventions/:id/facture-temps-passe | intervention-chantier-ct | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/interventions/:id/facture-temps-passe | intervention-creee-ct | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/interventions/:id/facture-temps-passe | intervention-terminee-motif | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/interventions/:id/facture-temps-passe | intervention-terminee-signee | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/interventions/:id/facture-temps-passe | visite-contrat | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/interventions/:id/rapports | curative-sans-chantier-branche | défaut | 400 validation-avant-droit
+AT | POST /api/interventions/:id/rapports | inexistant | défaut | 400 validation-avant-droit
+AT | POST /api/interventions/:id/rapports | intervention-affectee-tech | défaut | 400 validation-avant-droit
+AT | POST /api/interventions/:id/rapports | intervention-annulee | défaut | 400 validation-avant-droit
+AT | POST /api/interventions/:id/rapports | intervention-autre | défaut | 400 validation-avant-droit
+AT | POST /api/interventions/:id/rapports | intervention-chantier-ct | défaut | 400 validation-avant-droit
+AT | POST /api/interventions/:id/rapports | intervention-creee-ct | défaut | 400 validation-avant-droit
+AT | POST /api/interventions/:id/rapports | intervention-terminee-motif | défaut | 400 validation-avant-droit
+AT | POST /api/interventions/:id/rapports | intervention-terminee-signee | défaut | 400 validation-avant-droit
+AT | POST /api/interventions/:id/rapports | visite-contrat | défaut | 400 validation-avant-droit
+AT | POST /api/interventions/:id/remise-a-planifier | curative-sans-chantier-branche | défaut | 400 validation-avant-droit
+AT | POST /api/interventions/:id/remise-a-planifier | curative-sans-chantier-branche | planningActif=non | 403 PLANNING_DESACTIVE « Le module Planning est désactivé par l'administration. »
+AT | POST /api/interventions/:id/remise-a-planifier | inexistant | défaut | 400 validation-avant-droit
+AT | POST /api/interventions/:id/remise-a-planifier | inexistant | planningActif=non | 403 PLANNING_DESACTIVE « Le module Planning est désactivé par l'administration. »
+AT | POST /api/interventions/:id/remise-a-planifier | intervention-affectee-tech | défaut | 400 validation-avant-droit
+AT | POST /api/interventions/:id/remise-a-planifier | intervention-affectee-tech | planningActif=non | 403 PLANNING_DESACTIVE « Le module Planning est désactivé par l'administration. »
+AT | POST /api/interventions/:id/remise-a-planifier | intervention-annulee | défaut | 400 validation-avant-droit
+AT | POST /api/interventions/:id/remise-a-planifier | intervention-annulee | planningActif=non | 403 PLANNING_DESACTIVE « Le module Planning est désactivé par l'administration. »
+AT | POST /api/interventions/:id/remise-a-planifier | intervention-autre | défaut | 400 validation-avant-droit
+AT | POST /api/interventions/:id/remise-a-planifier | intervention-autre | planningActif=non | 403 PLANNING_DESACTIVE « Le module Planning est désactivé par l'administration. »
+AT | POST /api/interventions/:id/remise-a-planifier | intervention-chantier-ct | défaut | 400 validation-avant-droit
+AT | POST /api/interventions/:id/remise-a-planifier | intervention-chantier-ct | planningActif=non | 403 PLANNING_DESACTIVE « Le module Planning est désactivé par l'administration. »
+AT | POST /api/interventions/:id/remise-a-planifier | intervention-creee-ct | défaut | 400 validation-avant-droit
+AT | POST /api/interventions/:id/remise-a-planifier | intervention-creee-ct | planningActif=non | 403 PLANNING_DESACTIVE « Le module Planning est désactivé par l'administration. »
+AT | POST /api/interventions/:id/remise-a-planifier | intervention-terminee-motif | défaut | 400 validation-avant-droit
+AT | POST /api/interventions/:id/remise-a-planifier | intervention-terminee-motif | planningActif=non | 403 PLANNING_DESACTIVE « Le module Planning est désactivé par l'administration. »
+AT | POST /api/interventions/:id/remise-a-planifier | intervention-terminee-signee | défaut | 400 validation-avant-droit
+AT | POST /api/interventions/:id/remise-a-planifier | intervention-terminee-signee | planningActif=non | 403 PLANNING_DESACTIVE « Le module Planning est désactivé par l'administration. »
+AT | POST /api/interventions/:id/remise-a-planifier | visite-contrat | défaut | 400 validation-avant-droit
+AT | POST /api/interventions/:id/remise-a-planifier | visite-contrat | planningActif=non | 403 PLANNING_DESACTIVE « Le module Planning est désactivé par l'administration. »
+AT | POST /api/interventions/:id/suites | inexistant | défaut | 404 « Intervention introuvable. »
+AT | POST /api/interventions/rapports/:rapportId/signature | inexistant | défaut | 400 validation-avant-droit
+AT | POST /api/interventions/rapports/:rapportId/signature | rapport-cloture-motif | défaut | 400 validation-avant-droit
+AT | POST /api/interventions/rapports/:rapportId/signature | rapport-non-signe | défaut | 400 validation-avant-droit
+AT | POST /api/interventions/rapports/:rapportId/signature | rapport-signe | défaut | 400 validation-avant-droit
+AT | POST /api/mentions-legales | — | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/mentions-legales/:version/publier | version=999 | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/planning/events | — | défaut | 400
+AT | POST /api/planning/events | — | planningActif=non | 403 PLANNING_DESACTIVE « Le module Planning est désactivé par l'administration. »
+AT | POST /api/planning/share | — | défaut | 403 « Accès réservé aux administrateurs » inchangé
+AT | POST /api/planning/share | — | planningActif=non | 403 « Accès réservé aux administrateurs » inchangé
+AT | POST /api/planning/types | — | défaut | 400
+AT | POST /api/planning/types | — | planningActif=non | 403 PLANNING_DESACTIVE « Le module Planning est désactivé par l'administration. »
+AT | POST /api/reglements | — | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/reglements/:id/contrepasser | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/reglements/:id/contrepasser | reglement | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/users | — | défaut | 403 « Accès réservé aux administrateurs »
+AT | PUT /api/catalogue/:family/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | PUT /api/catalogue/:family/:id | prestation-catalogue | défaut | 403 « Accès réservé aux administrateurs »
+AT | PUT /api/categories/:id | categorie | défaut | 200
+AT | PUT /api/categories/:id | inexistant | défaut | 500 « Error updating categorie »
+AT | PUT /api/clients/:clientId/contacts/:id | contact-autre-client | défaut | 403 « Accès réservé aux administrateurs »
+AT | PUT /api/clients/:clientId/contacts/:id | contact-client-actif | défaut | 403 « Accès réservé aux administrateurs »
+AT | PUT /api/clients/:clientId/contacts/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | PUT /api/clients/:clientId/sites/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | PUT /api/clients/:clientId/sites/:id | site-autre-client | défaut | 403 « Accès réservé aux administrateurs »
+AT | PUT /api/clients/:clientId/sites/:id | site-client-actif | défaut | 403 « Accès réservé aux administrateurs »
+AT | PUT /api/clients/:id | client-actif | défaut | 403 « Accès réservé aux administrateurs »
+AT | PUT /api/clients/:id | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
+AT | PUT /api/clients/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | PUT /api/commerciaux/:id/prime-mensuelle | compte-administrateur | défaut | 403 « Accès réservé aux administrateurs »
+AT | PUT /api/commerciaux/:id/prime-mensuelle | compte-commercial | défaut | 403 « Accès réservé aux administrateurs »
+AT | PUT /api/commerciaux/:id/prime-mensuelle | compte-superadmin | défaut | 403 « Accès réservé aux administrateurs »
+AT | PUT /api/commerciaux/:id/prime-mensuelle | compte-systeme | défaut | 403 « Accès réservé aux administrateurs »
+AT | PUT /api/commerciaux/:id/prime-mensuelle | compte-technicien | défaut | 403 « Accès réservé aux administrateurs »
+AT | PUT /api/commerciaux/:id/prime-mensuelle | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | PUT /api/company | — | défaut | 403 « Accès réservé au super administrateur »
+AT | PUT /api/company/logo | — | défaut | 403 « Accès réservé au super administrateur »
+AT | PUT /api/comptabilite/regles/:cle | cle=CLIENT | défaut | 403 « Accès réservé aux administrateurs »
+AT | PUT /api/comptabilite/tva/:taux | taux=20 | défaut | 403 « Accès réservé aux administrateurs »
+AT | PUT /api/devis/:id/statut | devis-brouillon | défaut | 403 « Permission requise : devis:write »
+AT | PUT /api/devis/:id/statut | devis-converti | défaut | 403 « Permission requise : devis:write »
+AT | PUT /api/devis/:id/statut | devis-signe | défaut | 403 « Permission requise : devis:write »
+AT | PUT /api/devis/:id/statut | inexistant | défaut | 403 « Permission requise : devis:write »
+AT | PUT /api/fournisseurs/:id | fournisseur | défaut | 200
+AT | PUT /api/fournisseurs/:id | inexistant | défaut | 500 « Error updating fournisseur »
+AT | PUT /api/intervenants/:id | fiche-libre | défaut | 403 « Accès réservé aux administrateurs »
+AT | PUT /api/intervenants/:id | fiche-tech | défaut | 403 « Accès réservé aux administrateurs »
+AT | PUT /api/intervenants/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | PUT /api/intervenants/:id/compte | fiche-libre | défaut | 403 « Accès réservé aux administrateurs »
+AT | PUT /api/intervenants/:id/compte | fiche-tech | défaut | 403 « Accès réservé aux administrateurs »
+AT | PUT /api/intervenants/:id/compte | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | PUT /api/intervenants/:id/main-oeuvre | fiche-libre | défaut | 403 « Accès réservé aux administrateurs »
+AT | PUT /api/intervenants/:id/main-oeuvre | fiche-tech | défaut | 403 « Accès réservé aux administrateurs »
+AT | PUT /api/intervenants/:id/main-oeuvre | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | PUT /api/interventions/:id/a-suivre | curative-sans-chantier-branche | défaut | 400 validation-avant-droit
+AT | PUT /api/interventions/:id/a-suivre | inexistant | défaut | 400 validation-avant-droit
+AT | PUT /api/interventions/:id/a-suivre | intervention-affectee-tech | défaut | 400 validation-avant-droit
+AT | PUT /api/interventions/:id/a-suivre | intervention-annulee | défaut | 400 validation-avant-droit
+AT | PUT /api/interventions/:id/a-suivre | intervention-autre | défaut | 400 validation-avant-droit
+AT | PUT /api/interventions/:id/a-suivre | intervention-chantier-ct | défaut | 400 validation-avant-droit
+AT | PUT /api/interventions/:id/a-suivre | intervention-creee-ct | défaut | 400 validation-avant-droit
+AT | PUT /api/interventions/:id/a-suivre | intervention-terminee-motif | défaut | 400 validation-avant-droit
+AT | PUT /api/interventions/:id/a-suivre | intervention-terminee-signee | défaut | 400 validation-avant-droit
+AT | PUT /api/interventions/:id/a-suivre | visite-contrat | défaut | 400 validation-avant-droit
+AT | PUT /api/interventions/:id/planning | curative-sans-chantier-branche | défaut | 400
+AT | PUT /api/interventions/:id/planning | curative-sans-chantier-branche | planningActif=non | 403 PLANNING_DESACTIVE « Le module Planning est désactivé par l'administration. »
+AT | PUT /api/interventions/:id/planning | inexistant | défaut | 404 « Intervention introuvable. »
+AT | PUT /api/interventions/:id/planning | inexistant | planningActif=non | 403 PLANNING_DESACTIVE « Le module Planning est désactivé par l'administration. »
+AT | PUT /api/interventions/:id/planning | intervention-affectee-tech | défaut | 400
+AT | PUT /api/interventions/:id/planning | intervention-affectee-tech | planningActif=non | 403 PLANNING_DESACTIVE « Le module Planning est désactivé par l'administration. »
+AT | PUT /api/interventions/:id/planning | intervention-annulee | défaut | 409 « Cette intervention ne peut plus être planifiée. »
+AT | PUT /api/interventions/:id/planning | intervention-annulee | planningActif=non | 403 PLANNING_DESACTIVE « Le module Planning est désactivé par l'administration. »
+AT | PUT /api/interventions/:id/planning | intervention-autre | défaut | 400
+AT | PUT /api/interventions/:id/planning | intervention-autre | planningActif=non | 403 PLANNING_DESACTIVE « Le module Planning est désactivé par l'administration. »
+AT | PUT /api/interventions/:id/planning | intervention-chantier-ct | défaut | 400
+AT | PUT /api/interventions/:id/planning | intervention-chantier-ct | planningActif=non | 403 PLANNING_DESACTIVE « Le module Planning est désactivé par l'administration. »
+AT | PUT /api/interventions/:id/planning | intervention-creee-ct | défaut | 400
+AT | PUT /api/interventions/:id/planning | intervention-creee-ct | planningActif=non | 403 PLANNING_DESACTIVE « Le module Planning est désactivé par l'administration. »
+AT | PUT /api/interventions/:id/planning | intervention-terminee-motif | défaut | 409 « Cette intervention ne peut plus être planifiée. »
+AT | PUT /api/interventions/:id/planning | intervention-terminee-motif | planningActif=non | 403 PLANNING_DESACTIVE « Le module Planning est désactivé par l'administration. »
+AT | PUT /api/interventions/:id/planning | intervention-terminee-signee | défaut | 409 « Cette intervention ne peut plus être planifiée. »
+AT | PUT /api/interventions/:id/planning | intervention-terminee-signee | planningActif=non | 403 PLANNING_DESACTIVE « Le module Planning est désactivé par l'administration. »
+AT | PUT /api/interventions/:id/planning | visite-contrat | défaut | 400
+AT | PUT /api/interventions/:id/planning | visite-contrat | planningActif=non | 403 PLANNING_DESACTIVE « Le module Planning est désactivé par l'administration. »
+AT | PUT /api/journal-administration/conservation | — | défaut | 403 « Accès réservé au super administrateur »
+AT | PUT /api/me/theme | — | défaut | 200 écrit
+AT | PUT /api/modules | — | défaut | 403 « Accès réservé au super administrateur »
+AT | PUT /api/parametres | — | défaut | 403 « Accès réservé aux administrateurs »
+AT | PUT /api/parametres/remuneration | — | défaut | 403 « Accès réservé au super administrateur »
+AT | PUT /api/planning/types/:id | inexistant | défaut | 500 « Error updating planning type »
+AT | PUT /api/planning/types/:id | inexistant | planningActif=non | 403 PLANNING_DESACTIVE « Le module Planning est désactivé par l'administration. »
+AT | PUT /api/planning/types/:id | type-planning | défaut | 200
+AT | PUT /api/planning/types/:id | type-planning | planningActif=non | 403 PLANNING_DESACTIVE « Le module Planning est désactivé par l'administration. »
+AT | PUT /api/users/:id/permissions | compte-administrateur | défaut | 403 « Accès réservé au super administrateur »
+AT | PUT /api/users/:id/permissions | compte-commercial | défaut | 403 « Accès réservé au super administrateur »
+AT | PUT /api/users/:id/permissions | compte-superadmin | défaut | 403 « Accès réservé au super administrateur »
+AT | PUT /api/users/:id/permissions | compte-systeme | défaut | 403 « Accès réservé au super administrateur »
+AT | PUT /api/users/:id/permissions | compte-technicien | défaut | 403 « Accès réservé au super administrateur »
+AT | PUT /api/users/:id/permissions | inexistant | défaut | 403 « Accès réservé au super administrateur »
 COM | DELETE /api/achats/:id | achat-archive-chantier-ct | défaut | 403 « Permission requise : chantiers:archive »
 COM | DELETE /api/achats/:id | achat-chantier-autre | défaut | 403 « Permission requise : chantiers:archive »
 COM | DELETE /api/achats/:id | achat-chantier-ct | défaut | 403 « Permission requise : chantiers:archive »

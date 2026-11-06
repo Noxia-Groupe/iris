@@ -698,7 +698,10 @@ if (!TEST_DATABASE_URL) {
       }
       // Triplets « droit … » de 5b (R-B non appliquée) : CT et RESP avec le droit devis ou le scope devis:write. Le
       // directeur, qui a désormais ces droits par son type (lot « Directeur aligné sur l'administration »), n'en est plus.
-      for (const compte of ['CT', 'RESP']) {
+      // L'assistante technique y entre avec le lot AT-1 : sans devis par son type avant AT-2, elle les reçoit par un droit
+      // individuel, comme CT et RESP (N16 du cadrage : « Une permission individuelle devis:write accordée en AT-1 ouvrirait
+      // la conversion en intervention »).
+      for (const compte of ['CT', 'RESP', 'AT']) {
         for (const droit of ['droit devis', 'droit devis:write']) {
           devisG3(compte, droit, prealableDroit(compte, droit));
           conversion(compte, droit, prealableDroit(compte, droit));
@@ -707,7 +710,9 @@ if (!TEST_DATABASE_URL) {
       // §5.3 : prix d'achat prévu saisi sur une ligne. Administration : écrit, relu ; tout autre compte : refusé (403),
       // inchangé (devis/metier.ts:203-205), dont CT et RESP avec le droit devis ; le directeur l'écrit, comme l'administration.
       const corpsDevisPrixAchat = () => ({ clientId: d.clientActif, objet: 'TEST Devis au prix d’achat saisi par la matrice des montants', lignes: [ligneLibre('TEST Ligne au prix d’achat saisi par la matrice des montants', 'FOURNITURE', MONTANTS.ligne.quantite, MONTANTS.ligne.prixUnitaireHt, { prixAchatUnitaireHt: MONTANTS.prixAchatLigne })] });
-      const auteursPrixAchat = [...ADMINISTRATION.map((c) => [c, 'défaut', []]), ...DEVIS_HORS_ADMINISTRATION.map((c) => [c, 'défaut', []]), ...['CT', 'RESP'].map((c) => [c, 'droit devis', prealableDroit(c, 'droit devis')])];
+      // L'assistante technique, avec le droit devis, reste refusée sur le prix d'achat prévu en AT-1 (réponses 4 et 8 de Nelson
+      // du 06-11-2026 : ouvert par AT-2 seulement).
+      const auteursPrixAchat = [...ADMINISTRATION.map((c) => [c, 'défaut', []]), ...DEVIS_HORS_ADMINISTRATION.map((c) => [c, 'défaut', []]), ...['CT', 'RESP', 'AT'].map((c) => [c, 'droit devis', prealableDroit(c, 'droit devis')])];
       for (const [compte, contexte, prealables] of auteursPrixAchat) {
         const admis = ADMINISTRATION.includes(compte);
         ajouterGroupe(3, compte, 'POST /api/devis', 'clientId=client-actif', `${contexte}, corps ligne au prix d’achat prévu`, '/api/devis', corpsDevisPrixAchat, { prealables, code: admis ? 201 : 403, montant: admis ? { genre: 'devis', attendu: devisCree(MONTANTS.prixAchatLigne) } : null });
@@ -740,6 +745,9 @@ if (!TEST_DATABASE_URL) {
         ['DIR', 'materiel-intervention-affectee', action(coutMateriel.id, 'achats', coutMateriel.coutId)],
         ['AD-COM', 'heures-tech-prix-vente', action(id('intervention', 'intervention-affectee-tech'), 'heures', P['heures-tech-prix-vente'])],
         ['CT', 'heures-tech-chantier-ct', action(P['intervention-chantier-ct-tech'], 'heures', P['heures-tech-chantier-ct'])],
+        // Lot AT-1 : l'assistante technique archive le matériel d'une intervention hors de toute relation (SAV de toute la
+        // société) ; sa réponse porte le montant, sans taux (réponse 7 de Nelson du 06-11-2026).
+        ['AT', 'materiel-intervention-affectee', action(coutMateriel.id, 'achats', coutMateriel.coutId)],
       ]) ajouterGroupe(6, compte, 'POST /api/interventions/:id/couts/:type/:coutId/:action', cible, 'défaut, corps motif', chemin, () => ({ motif: motif('l’archivage') }), { code: 200, montant: null });
 
       // §5.2, G7 et §5.3 : fiches du catalogue écrites par l'administration ; un PUT qui omet le prix d'achat l'efface
@@ -970,8 +978,9 @@ if (!TEST_DATABASE_URL) {
       }
       assert.deepEqual(manquants, [], 'couples et triplets des 8 groupes sans cas');
       // 21 : les 10 triplets du directeur (cinq routes des devis, droit devis et devis:write) ont quitté 5b avec le lot
-      // « Directeur aligné sur l'administration », qui lui donne ces droits par son type (31 auparavant).
-      assert.equal(triplets.size, 21, 'triplets « droit … » de 5b sur les routes des 8 groupes');
+      // « Directeur aligné sur l'administration », qui lui donne ces droits par son type (31 auparavant). 31 de nouveau avec
+      // le lot « Assistante technique » (AT-1) : les 10 triplets de l'assistante technique, sans devis par son type.
+      assert.equal(triplets.size, 31, 'triplets « droit … » de 5b sur les routes des 8 groupes');
       const parGroupe = [...couples.values()].reduce((a, g) => ({ ...a, [g]: (a[g] ?? 0) + 1 }), {});
       diagnostics.push(`couples (route, compte) des 8 groupes : ${couples.size} (${Object.entries(parGroupe).map(([g, n]) => `G${g} ${n}`).join(', ')}) ; triplets « droit … » : ${triplets.size}`);
       diagnostics.push(`cas : ${cas.length} (groupes ${cas.filter((c) => c.groupe).length}, planning ${cas.filter((c) => c.planning).length}, relecture propre d’un montant ${cas.filter((c) => c.montant).length}, refus du montant vendu compris)`);
