@@ -97,7 +97,7 @@ export function AdminMarges({ isSuper, estDirecteur, parametres, setParametres, 
                 </label>
                 {/* Un directeur ne règle pas sa propre restriction (refus du serveur) : la case lui est
                     montrée sans pouvoir la changer, et n'est pas envoyée (handleParamsSubmit). */}
-                <label className={`flex items-center gap-2 w-fit ${estDirecteur ? '' : 'cursor-pointer'}`}>
+                <label className={estDirecteur ? 'flex items-center gap-2 w-fit' : 'flex items-center gap-2 cursor-pointer w-fit'}>
                   <input type="checkbox" name="rentabiliteDirecteurs" defaultChecked={parametres?.rentabiliteDirecteurs ?? true} disabled={estDirecteur} className="w-4 h-4" />
                   <span className="text-sm text-gray-700">Les directeurs (tous les chantiers)</span>
                 </label>
