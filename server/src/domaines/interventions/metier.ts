@@ -112,11 +112,16 @@ export function totalHeuresInterventionAuCentime(heures: Array<{ nbrHeures: Pris
   ).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
 }
 
+// Capacité « voit tout le SAV » : l'administration, directeur compris (décision de Nelson du
+// 24-10-2026, points 14 et 17). Aide nommée selon la capacité, que le lot de l'assistante technique
+// étendra sans nouvelle liste de types.
+export const voitToutLeSav = (role: string | undefined | null): boolean => isAdminRole(role);
+
 // Hors administration, l'accès SAV reste ancré dans une relation persistante : affectation
 // explicite pour le technicien, responsable d'affaire pour le conducteur et équipe déclarée
 // pour le responsable. Un rôle seul ne donne jamais accès à un dossier sans rattachement.
 export function getInterventionFilterForUser(authUser: { id: string; role: string; equipeIds?: string[] }) {
-  if (authUser.role === 'SUPERADMIN' || authUser.role === 'ADMIN') return {};
+  if (voitToutLeSav(authUser.role)) return {};
   const parAffectation = { affectations: { some: { intervenant: { userId: authUser.id } } } };
   if (authUser.role === 'CONDUCTEUR_TRAVAUX') {
     // Le créateur encadrant reste explicitement rattaché aux demandes SAV sans chantier :

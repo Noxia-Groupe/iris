@@ -42,7 +42,6 @@ const COMPTE_DESACTIVE = { code: 'COMPTE_DESACTIVE', error: 'Ce compte est désa
 const REFUS_ADMINISTRATION = { error: 'Accès réservé aux administrateurs' };
 const REFUS_DEVIS_READ = { error: 'Permission requise : devis:read' };
 const REFUS_COMMERCIAL = { error: 'Accès non autorisé pour un compte commercial.' };
-const REFUS_DIRECTEUR = { error: 'Accès non autorisé pour un compte directeur.' };
 const REFUS_TECHNICIEN = { error: 'Le PDF du compte rendu n’est pas ouvert au technicien.' };
 const DEVIS_INTROUVABLE = { error: 'Devis introuvable.' };
 const FACTURE_INTROUVABLE = { error: 'Facture introuvable.' };
@@ -489,7 +488,8 @@ if (!TEST_DATABASE_URL) {
         ['DIRECTEUR_COMMERCIAL', parCompte(c.directeurCommercial), lecteur],
         ['DIRECTEUR avec devis:read', parCompte(c.directeurLecteurDevis), lecteur],
         ['DIRECTEUR avec tous les droits', parCompte(c.directeurTousDroits), lecteur],
-        ['DIRECTEUR', parCompte(c.directeur), refuse],
+        // Le directeur a le droit devis par son type depuis le lot « Directeur aligné sur l'administration ».
+        ['DIRECTEUR', parCompte(c.directeur), lecteur],
         ['CONDUCTEUR_TRAVAUX', parCompte(c.conducteur), refuse],
         ['RESPONSABLE', parCompte(c.responsable), refuse],
         ['TECHNICIEN avec devis:read accordé', parCompte(c.technicienAffecte), refuse],
@@ -527,7 +527,11 @@ if (!TEST_DATABASE_URL) {
         ['SUPERADMIN', admin(), administration],
         ['ADMIN', parCompte(c.admin), administration],
         ['ADMIN commercial', parCompte(c.adminCommercial), administration],
-        ...['commercial', 'assistante', 'comptable', 'directeurCommercial', 'directeur', 'directeurTousDroits', 'conducteur', 'responsable', 'technicienAffecte'].map((cle) => [cle, parCompte(c[cle]), refuse]),
+        // Le directeur, avec ou sans droits individuels, a les droits de l'administration (lot « Directeur aligné sur
+        // l'administration », décision de Nelson du 24-10-2026, point 14).
+        ['DIRECTEUR', parCompte(c.directeur), administration],
+        ['DIRECTEUR avec tous les droits', parCompte(c.directeurTousDroits), administration],
+        ...['commercial', 'assistante', 'comptable', 'directeurCommercial', 'conducteur', 'responsable', 'technicienAffecte'].map((cle) => [cle, parCompte(c[cle]), refuse]),
       ];
       await jouerMatrice('facture', cibles, matrice, f.noms);
       // Identité de la société vidée : la facture émise s'imprime toujours, les refus restent les mêmes.
@@ -705,10 +709,11 @@ if (!TEST_DATABASE_URL) {
       for (const attendu of ['Total HT : 143,00 €', 'TVA 20 % sur 143,00 € : 28,60 €', 'Total TTC : 171,60 €']) assert.ok(plat.includes(attendu), `${attendu}\n${plat}`);
     });
 
-    // P1 et P3 : la route du compte rendu garde blockCommercial (commercial, directeur), puis le refus du technicien,
+    // P1 et P3 : la route du compte rendu garde blockCommercial (le commercial), puis le refus du technicien,
     // avant tout périmètre ; puis getInterventionFilterForUser et l'exclusion des annulées (404 « Intervention
-    // introuvable. ») ; puis 409 « Aucun compte rendu à imprimer. ».
-    test('compte rendu : 403 exacts du commercial, du directeur et du technicien avant tout périmètre ; périmètre et annulées en 404 exact ; 409 sans compte rendu', async () => {
+    // introuvable. ») ; puis 409 « Aucun compte rendu à imprimer. ». Le directeur, qui a les droits de l'administration
+    // et voit tout le SAV (voitToutLeSav), imprime comme elle (lot « Directeur aligné sur l'administration »).
+    test('compte rendu : 403 exacts du commercial et du technicien avant tout périmètre ; le directeur imprime comme l’administration ; périmètre et annulées en 404 exact ; 409 sans compte rendu', async () => {
       const c = f.comptes;
       const cibles = [['avecCompteRendu', f.avecCompteRendu.id], ['sansCompteRendu', f.sansCompteRendu.id], ['annulee', f.interventionAnnulee.id], ['savConducteur', f.savConducteur.id], ['introuvable', randomUUID()], ['identifiant d’un chantier', f.chantier.id]];
       const introuvable = [404, INTERVENTION_INTROUVABLE];
@@ -728,8 +733,8 @@ if (!TEST_DATABASE_URL) {
         ['ASSISTANTE_COMMERCIALE', parCompte(c.assistante), rien],
         ['COMPTABLE', parCompte(c.comptable), rien],
         ['COMMERCIAL', parCompte(c.commercial), Array(cibles.length).fill([403, REFUS_COMMERCIAL])],
-        ['DIRECTEUR', parCompte(c.directeur), Array(cibles.length).fill([403, REFUS_DIRECTEUR])],
-        ['DIRECTEUR avec tous les droits', parCompte(c.directeurTousDroits), Array(cibles.length).fill([403, REFUS_DIRECTEUR])],
+        ['DIRECTEUR', parCompte(c.directeur), toutVu],
+        ['DIRECTEUR avec tous les droits', parCompte(c.directeurTousDroits), toutVu],
         ['TECHNICIEN affecté', parCompte(c.technicienAffecte), Array(cibles.length).fill([403, REFUS_TECHNICIEN])],
         ['TECHNICIEN non affecté', parCompte(c.technicienNonAffecte), Array(cibles.length).fill([403, REFUS_TECHNICIEN])],
       ], f.noms);
@@ -761,17 +766,21 @@ if (!TEST_DATABASE_URL) {
       const cibles = [['contratActif', f.contratActif.id], ['contratAnnule', f.contratAnnule.id], ['introuvable', randomUUID()], ['identifiant libre', 'inexistant'], ['identifiant d’une intervention', f.avecCompteRendu.id]];
       const introuvable = [404, CONTRAT_INTROUVABLE];
       const refuse = Array(cibles.length).fill([403, REFUS_ADMINISTRATION]);
-      const nonAdministrateurs = ['commercial', 'assistante', 'comptable', 'directeurCommercial', 'directeur', 'directeurTousDroits', 'conducteur', 'responsable', 'technicienAffecte'].map((cle) => [cle, parCompte(c[cle]), refuse]);
+      // Le directeur n'en est plus : il imprime comme l'administration (lot « Directeur aligné sur l'administration »).
+      const nonAdministrateurs = ['commercial', 'assistante', 'comptable', 'directeurCommercial', 'conducteur', 'responsable', 'technicienAffecte'].map((cle) => [cle, parCompte(c[cle]), refuse]);
       await jouerMatrice('contrat', cibles, [
         ['SUPERADMIN', admin(), [200, 200, introuvable, introuvable, introuvable]],
         ['ADMIN', parCompte(c.admin), [200, 200, introuvable, introuvable, introuvable]],
         ['ADMIN commercial', parCompte(c.adminCommercial), [200, 200, introuvable, introuvable, introuvable]],
+        ['DIRECTEUR', parCompte(c.directeur), [200, 200, introuvable, introuvable, introuvable]],
+        ['DIRECTEUR avec tous les droits', parCompte(c.directeurTousDroits), [200, 200, introuvable, introuvable, introuvable]],
         ...nonAdministrateurs,
       ], f.noms);
       await avecSociete({ siret: '', ville: '' }, async () => {
         const incomplete = [409, identiteIncomplete('SIRET, ville', AVANT.contrat)];
         await jouerMatrice('contrat', cibles, [
           ['SUPERADMIN', admin(), [incomplete, incomplete, introuvable, introuvable, introuvable]],
+          ['DIRECTEUR', parCompte(c.directeur), [incomplete, incomplete, introuvable, introuvable, introuvable]],
           ...nonAdministrateurs,
         ], f.noms);
       });
@@ -785,18 +794,22 @@ if (!TEST_DATABASE_URL) {
       const cibles = [['chantier', f.chantier.id], ['chantierAnnule', f.chantierAnnule.id], ['introuvable', randomUUID()], ['identifiant libre', 'inexistant'], ['identifiant d’une intervention', f.avecCompteRendu.id]];
       const introuvable = [404, CHANTIER_INTROUVABLE];
       const refuse = Array(cibles.length).fill([403, REFUS_ADMINISTRATION]);
-      // Le titulaire du chantier, son responsable et le technicien qui y intervient restent refusés.
-      const nonAdministrateurs = ['commercial', 'assistante', 'comptable', 'directeurCommercial', 'directeur', 'directeurTousDroits', 'conducteur', 'responsable', 'technicienAffecte'].map((cle) => [cle, parCompte(c[cle]), refuse]);
+      // Le titulaire du chantier, son responsable et le technicien qui y intervient restent refusés ; le directeur imprime,
+      // comme l'administration (lot « Directeur aligné sur l'administration »).
+      const nonAdministrateurs = ['commercial', 'assistante', 'comptable', 'directeurCommercial', 'conducteur', 'responsable', 'technicienAffecte'].map((cle) => [cle, parCompte(c[cle]), refuse]);
       await jouerMatrice('chantier', cibles, [
         ['SUPERADMIN', admin(), [200, 200, introuvable, introuvable, introuvable]],
         ['ADMIN', parCompte(c.admin), [200, 200, introuvable, introuvable, introuvable]],
         ['ADMIN commercial', parCompte(c.adminCommercial), [200, 200, introuvable, introuvable, introuvable]],
+        ['DIRECTEUR', parCompte(c.directeur), [200, 200, introuvable, introuvable, introuvable]],
+        ['DIRECTEUR avec tous les droits', parCompte(c.directeurTousDroits), [200, 200, introuvable, introuvable, introuvable]],
         ...nonAdministrateurs,
       ], f.noms);
       await avecSociete({ siret: '', ville: '' }, async () => {
         const incomplete = [409, identiteIncomplete('SIRET, ville', AVANT.chantier)];
         await jouerMatrice('chantier', cibles, [
           ['SUPERADMIN', admin(), [incomplete, incomplete, introuvable, introuvable, introuvable]],
+          ['DIRECTEUR', parCompte(c.directeur), [incomplete, incomplete, introuvable, introuvable, introuvable]],
           ...nonAdministrateurs,
         ], f.noms);
       });

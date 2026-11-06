@@ -47,7 +47,6 @@ const REFUS = {
   technicienCommercial: 'Un compte technicien n’est pas autorisé à réattribuer le commercial d’une affaire. Adressez-vous à votre responsable.',
   administration: 'Accès réservé aux administrateurs',
   compteCommercial: 'Accès non autorisé pour un compte commercial.',
-  compteDirecteur: 'Accès non autorisé pour un compte directeur.',
   commercialVide: 'Un chantier doit toujours avoir un commercial rattaché.',
   commercialIntrouvable: 'Commercial introuvable.',
   heuresInvalides: 'Les heures vendues doivent être un nombre positif ou nul, d’au plus 8 chiffres avant la virgule et 2 après.',
@@ -97,7 +96,9 @@ if (!TEST_DATABASE_URL) {
     };
     // Les trois comptes de l'administration de la matrice : super administrateur (secours), administrateur, et
     // administrateur commercial (estCommercial).
-    const ADMINISTRATION = () => [['SA', admin()], ['AD', comptes.AD.auth], ['AD-COM', comptes['AD-COM'].auth]];
+    // Le directeur en fait partie depuis le lot « Directeur aligné sur l'administration » (décision de Nelson du 24-10-2026,
+    // point 14 ; réponse du 06-11-2026 sur le chantier terminé, « Oui, comme l'admin »).
+    const ADMINISTRATION = () => [['SA', admin()], ['AD', comptes.AD.auth], ['AD-COM', comptes['AD-COM'].auth], ['DIR', comptes.DIR.auth]];
 
     // --- Appels ---
     const appeler = (methode, chemin, corps, auth = admin()) => request(app)[methode](`/api${chemin}`).set(auth).send(corps ?? {});
@@ -301,7 +302,7 @@ if (!TEST_DATABASE_URL) {
       assert.deepEqual([relueEncaissee.encaisse, relueEncaissee.dateEncaissement?.toISOString()], [true, '2026-10-10T09:00:00.000Z']);
       // Hors administration, la garde de la route répond d'abord, comme avant (403), titulaire compris ; un chantier
       // inexistant reste 404.
-      for (const cle of ['CT', 'RESP', 'DC', 'AC', 'CPT', 'TECH', 'COM', 'DIR']) {
+      for (const cle of ['CT', 'RESP', 'DC', 'AC', 'CPT', 'TECH', 'COM']) {
         await refuse(() => encaisser(chantierId, { encaisse: true }, comptes[cle].auth), 403, REFUS.administration, `${cle}, affaire annulée`, chantierId);
       }
       await refuse(() => encaisser('00000000-0000-0000-0000-000000000000', { encaisse: true }), 404, REFUS.introuvable, 'chantier inexistant');
@@ -473,7 +474,6 @@ if (!TEST_DATABASE_URL) {
       const deTechnicien = await creerAnnule({ responsableId: comptes.TECH.id });
       await refuse(() => changerCommercial(deTechnicien.id, { commercialId: comptes.COM2.id }, comptes.TECH.auth), 403, REFUS.technicienCommercial, 'technicien titulaire', deTechnicien.id);
       await refuse(() => changerCommercial(chantierId, { commercialId: comptes.COM2.id }, comptes.COM.auth), 403, REFUS.compteCommercial, 'commercial', chantierId);
-      await refuse(() => changerCommercial(chantierId, { commercialId: comptes.COM2.id }, comptes.DIR.auth), 403, REFUS.compteDirecteur, 'directeur', chantierId);
     });
 
     // ------------------------------------------------------------------------------------------------------------------
@@ -622,7 +622,8 @@ if (!TEST_DATABASE_URL) {
 
     // Cadrage, point 5 : « L'administration n'est pas touchée : elle seule rouvre un chantier » ; critère : « l'administration
     // écrit toujours ». Chaque champ de la fiche et le commercial d'un chantier terminé, relus en base, par chacun des
-    // trois comptes de l'administration ; un chantier terminé et encaissé aussi. Écarte un refus étendu à l'administration.
+    // quatre comptes de l'administration, directeur compris (réponse de Nelson du 06-11-2026, « Oui, comme l'admin ») ; un
+    // chantier terminé et encaissé aussi. Écarte un refus étendu à l'administration.
     test('chantier terminé, encaissé ou non : l’administration écrit toujours chaque champ de la fiche et le commercial, journalisés comme avant', async () => {
       for (const [compte, auth] of ADMINISTRATION()) {
         for (const encaisse of [false, true]) {
@@ -646,7 +647,11 @@ if (!TEST_DATABASE_URL) {
           assert.deepEqual((await journal(chantier.id)).map((e) => e.action), ['CHANGEMENT_TITULAIRE', 'CHANGEMENT_COMMERCIAL'], quoi);
         }
       }
-      // Elle seule rouvre ; rouvert, le chantier est de nouveau modifiable par son titulaire.
+      // Elle seule rouvre, directeur compris (décision de Nelson du 24-10-2026, point 14) ; rouvert, le chantier est de
+      // nouveau modifiable par son titulaire.
+      const parDirecteur = await creerTermine();
+      assert.equal((await changerStatut(parDirecteur.id, { statut: 'EN_COURS' }, comptes.DIR.auth)).status, 200);
+      assert.equal((await ligne(parDirecteur.id)).statut, 'EN_COURS');
       const chantier = await creerTermine();
       assert.equal((await changerStatut(chantier.id, { statut: 'EN_COURS' }, comptes.AD.auth)).status, 200);
       const res = await modifierFiche(chantier.id, { nom: 'TEST nom après réouverture 285' }, comptes.CT.auth);

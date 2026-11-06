@@ -12,8 +12,10 @@ import { type Parametres, getParametres } from '../parametres/metier';
 // (suivi des dépassements), sauf du technicien, à qui aucun montant n'est montré (cf.
 // voitMontantsChantier), et permettent d'en déduire le vendu, donc la marge du jour.
 // Côté clé d'intégration, le scope finances:read. Côté session :
+//  - un directeur, si la société laisse les directeurs destinataires, bien qu'il ait les droits de
+//    l'administration (décisions de Nelson du 24-10-2026, point 17, et du 06-11-2026, « Chantiers
+//    seulement ») : il est donc testé avant elle ;
 //  - un administrateur, toujours ;
-//  - un directeur, si la société laisse les directeurs destinataires ;
 //  - le conducteur (ou responsable) du chantier, si elle laisse le conducteur destinataire ;
 //  - un responsable dont la branche hiérarchique contient ce conducteur, à tout niveau, si
 //    elle laisse la chaîne hiérarchique destinataire.
@@ -25,8 +27,8 @@ export function voitRentabilite(req: express.Request, chantier: { responsableId?
   if (cle) return cle.scopes.includes('finances:read');
   const user = (req as AuthRequest).user;
   if (!user) return false;
-  if (isAdminRole(user.role)) return true;
   if (user.role === ROLE_DIRECTEUR) return params.rentabiliteDirecteurs;
+  if (isAdminRole(user.role)) return true;
   const responsableId = chantier.responsableId;
   if (!responsableId) return false;
   if (responsableId === user.id && (user.role === 'CONDUCTEUR_TRAVAUX' || user.role === ROLE_RESPONSABLE)) return params.rentabiliteConducteur;
@@ -84,7 +86,8 @@ export const REFUS_AFFAIRE_ANNULEE_COMMERCIAL = 'Cette affaire est annulée : so
 export const REFUS_AFFAIRE_ANNULEE_STATUT = 'Cette affaire est annulée : son statut ne change plus.';
 export const REFUS_AFFAIRE_ANNULEE_ENCAISSEMENT = 'Cette affaire est annulée : elle ne peut pas être encaissée.';
 // Un chantier clôturé ne se modifie plus que par l'administration, qui seule le rouvre (décision de
-// Nelson du 02-11-2026 : « A. Non, admin seule ») : sa fiche (nom, budgets, heures vendues, dates,
+// Nelson du 02-11-2026 : « A. Non, admin seule » ; le directeur, qui a les droits de l'administration,
+// en fait partie : réponse de Nelson du 06-11-2026, « Oui, comme l'admin ») : sa fiche (nom, budgets, heures vendues, dates,
 // barème réduit, titulaire) et son commercial portent le CA et la marge validés une fois encaissé.
 // Même règle que les saisies après clôture (cf. assertChantierWritable).
 export const REFUS_CHANTIER_CLOTURE_FICHE = 'Ce chantier est clôturé : seul un administrateur peut encore le modifier.';
@@ -120,11 +123,23 @@ export const REFUS_COMMERCIAL = { technicien: REFUS_TECHNICIEN_COMMERCIAL, annul
 // Responsable dont la branche le contient.
 export function peutCloturerChantier(user: AuthRequest['user'], chantier: { responsableId: string | null; responsableRole?: string | null }): boolean {
   if (!user) return false;
-  if (isAdminRole(user.role) || user.role === ROLE_DIRECTEUR) return true;
+  if (isAdminRole(user.role)) return true;
   if (user.role === 'COMMERCIAL' || user.role === ROLE_TECHNICIEN) return false;
   if (chantier.responsableId === user.id) return true;
   return user.role === ROLE_RESPONSABLE && !!chantier.responsableId
     && chantier.responsableRole === ROLE_TECHNICIEN && user.equipeIds.includes(chantier.responsableId);
+}
+
+// Coût matériel prévu du chantier : à qui lit les prix d'achat prévus des devis ou reçoit la rentabilité
+// du chantier. Pour le directeur, qui lit ces prix avec les droits de l'administration, il suit la
+// rentabilité du chantier, comme le montant vendu (décisions de Nelson du 30-10-2026 et du 06-11-2026,
+// « Chantiers seulement »).
+export function voitCoutPrevuParPrixAchat(req: express.Request): boolean {
+  if (!(req as ApiRequest).apiKey && (req as AuthRequest).user?.role === ROLE_DIRECTEUR) return false;
+  return voitPrixAchatDevis(req);
+}
+export function voitCoutPrevu(req: express.Request, rentabilite: boolean): boolean {
+  return voitCoutPrevuParPrixAchat(req) || rentabilite;
 }
 
 // Réponse d'une écriture sur un chantier : même masquage qu'en lecture (montant vendu selon
@@ -133,7 +148,7 @@ export function peutCloturerChantier(user: AuthRequest['user'], chantier: { resp
 export async function chantierSelonRentabilite<T extends { responsableId: string | null; budgetGlobalVendu: unknown; budgetMaterielVendu: unknown; budgetMainOeuvreVendu: unknown; coutMaterielPrevu?: unknown }>(req: express.Request, chantier: T) {
   // Coût matériel prévu : à qui lit les prix d'achat prévus des devis ou reçoit la rentabilité (cf. serializeChantier).
   const rentabilite = voitRentabilite(req, chantier, await getParametres());
-  const lu = voitPrixAchatDevis(req) || rentabilite ? chantier : { ...chantier, coutMaterielPrevu: null };
+  const lu = voitCoutPrevu(req, rentabilite) ? chantier : { ...chantier, coutMaterielPrevu: null };
   const sansVendu = rentabilite ? lu : { ...lu, budgetGlobalVendu: null };
   return voitMontantsChantier(req) ? sansVendu : { ...sansVendu, budgetMaterielVendu: null, budgetMainOeuvreVendu: null, coutMaterielPrevu: null };
 }

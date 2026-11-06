@@ -39,7 +39,9 @@ import { enParallele, formaterReponse } from './outils.mjs';
 // Lecteurs administrateurs de chaque entrée (cadrage §2.2) : le super administrateur et le simple administrateur.
 // AD-COM n'est pas rejoué (D1a-3 prouve qu'il lit comme AD sur ces routes, réduction déclarée).
 export const LECTEURS_ADMINISTRATION = ['SA', 'AD'];
-const ADMINISTRATION = ['SA', 'AD', 'AD-COM'];
+// Le directeur en fait partie depuis le lot « Directeur aligné sur l'administration » (décision de Nelson du 24-10-2026,
+// point 14) : auteur d'une entrée, il n'en est pas lecteur à part, comme AD.
+const ADMINISTRATION = ['SA', 'AD', 'AD-COM', 'DIR'];
 // Auteur absent d'une entrée du journal d'administration : le démarrage (SUPERADMIN_EMAILS), comme le filtre
 // « auteur=DEMARRAGE » de la route (domaines/administration/journal.ts).
 export const AUTEUR_DEMARRAGE = 'DEMARRAGE';
@@ -123,21 +125,25 @@ export async function lireExports({ appeler, adresse, jetons, lecteurs = LECTEUR
 // (`avant` : la ligne de l'instantané pour une ligne changée, null pour une ligne nouvelle) ; `marques` ; `lectures` :
 // routes de lecture de l'entrée, chacune avec son compte refusé par défaut et sa fonction de présence.
 const parent = (ligne, colonnes) => colonnes.find(([colonne]) => ligne[colonne]);
+// Compte refusé par défaut de chaque lecture : le directeur l'était jusqu'au lot « Directeur aligné sur l'administration »,
+// qui lui donne les droits de l'administration. Il est remplacé par un compte hors administration que la garde de la
+// route refuse (403) : le conducteur (sans le droit devis, ni l'administration), et, pour l'intervention, le commercial
+// (blockCommercial), le conducteur pouvant être dans son périmètre.
 const PARENTS_ENVOI = [
-  ['devisId', 'DEVIS', 'devis', 'DIR'],
-  ['factureId', 'FACTURE', 'factures', 'DIR'],
-  ['interventionId', 'INTERVENTION', 'interventions', 'DIR'],
-  ['contratMaintenanceId', 'CONTRAT', 'contrats-maintenance', 'DIR'],
-  ['chantierId', 'CHANTIER', 'chantiers', 'DIR'],
+  ['devisId', 'DEVIS', 'devis', 'CT'],
+  ['factureId', 'FACTURE', 'factures', 'CT'],
+  ['interventionId', 'INTERVENTION', 'interventions', 'COM'],
+  ['contratMaintenanceId', 'CONTRAT', 'contrats-maintenance', 'CT'],
+  ['chantierId', 'CHANTIER', 'chantiers', 'CT'],
 ];
 const PARENTS_SAISIE = [
   // Journal du chantier : ouvert à tout compte connecté, à son périmètre (chantiers/routes.ts) ; refusé par défaut au
   // commercial, hors du périmètre des chantiers dont il n'est pas le commercial (404).
   ['chantierId', 'chantiers', 'COM'],
-  // Journal de l'intervention : le directeur est refusé par la garde (blockCommercial, 403).
-  ['interventionId', 'interventions', 'DIR'],
-  // Journal du contrat : administration seule (403 pour le directeur).
-  ['contratMaintenanceId', 'contrats-maintenance', 'DIR'],
+  // Journal de l'intervention : le commercial est refusé par la garde (blockCommercial, 403).
+  ['interventionId', 'interventions', 'COM'],
+  // Journal du contrat : administration seule (403 pour le conducteur).
+  ['contratMaintenanceId', 'contrats-maintenance', 'CT'],
 ];
 const etatIdentique = (ligne, champs) => (res) => elementsDe(res.body).some((e) => e?.id === ligne.id && champs.every(([champ, egal]) => egal(e[champ], ligne[champ])));
 const memeBooleen = (a, b) => !!a === !!b;
@@ -145,13 +151,13 @@ const memeNullite = (a, b) => (a === null || a === undefined) === (b === null ||
 
 export const TABLES_DE_JOURNAL = {
   // Journal des paramètres et des droits : liste et export, pour l'administration (403 « Accès réservé aux
-  // administrateurs » pour le directeur) ; l'export n'est lu que par SA et AD (cadrage §2.2).
+  // administrateurs » pour le conducteur) ; l'export n'est lu que par SA et AD (cadrage §2.2).
   JournalAdministration: {
     auteur: 'auteurId', sansAuteur: AUTEUR_DEMARRAGE, ajoutSeul: true,
     nature: (l) => l.type, action: (l) => l.action,
     marques: (l) => [l.concerneSuperAdmin && 'concerne un SA', l.reserveSuperAdmin && 'réservée au SA'].filter(Boolean),
     lectures: (l) => [
-      { route: 'GET /api/journal-administration', chemin: '/api/journal-administration', refuse: 'DIR', present: presentParId(l.id) },
+      { route: 'GET /api/journal-administration', chemin: '/api/journal-administration', refuse: 'CT', present: presentParId(l.id) },
       { route: 'GET /api/journal-administration/export.csv', chemin: '/api/journal-administration/export.csv', refuse: null, administrationSeule: true, finCsv: finDeLigneCsv(l) },
     ],
   },
@@ -182,17 +188,17 @@ export const TABLES_DE_JOURNAL = {
   JournalFacture: {
     auteur: 'acteurId', ajoutSeul: true,
     nature: (l, _avant, options = {}) => (options.pieces ? options.pieces.get(l.factureId) ?? 'autre pièce' : null), action: (l) => l.action,
-    lectures: (l) => [{ route: 'GET /api/factures/:id/journal', chemin: `/api/factures/${l.factureId}/journal`, refuse: 'DIR', present: presentParId(l.id) }],
+    lectures: (l) => [{ route: 'GET /api/factures/:id/journal', chemin: `/api/factures/${l.factureId}/journal`, refuse: 'CT', present: presentParId(l.id) }],
   },
   JournalCompteComptable: {
     auteur: 'auteurId', ajoutSeul: true,
     nature: () => null, action: (l) => l.action,
-    lectures: (l) => [{ route: 'GET /api/comptabilite/comptes/:id/journal', chemin: `/api/comptabilite/comptes/${l.compteId}/journal`, refuse: 'DIR', present: presentParId(l.id) }],
+    lectures: (l) => [{ route: 'GET /api/comptabilite/comptes/:id/journal', chemin: `/api/comptabilite/comptes/${l.compteId}/journal`, refuse: 'CT', present: presentParId(l.id) }],
   },
   JournalRegleComptable: {
     auteur: 'auteurId', ajoutSeul: true,
     nature: (l) => l.type, action: (l) => l.action,
-    lectures: (l) => [{ route: 'GET /api/comptabilite/regles/journal', chemin: '/api/comptabilite/regles/journal', refuse: 'DIR', present: presentParId(l.id) }],
+    lectures: (l) => [{ route: 'GET /api/comptabilite/regles/journal', chemin: '/api/comptabilite/regles/journal', refuse: 'CT', present: presentParId(l.id) }],
   },
   // Versions des mentions légales, sans auteur (écart connu, « à appliquer », passation section 4) : une version créée,
   // ou changée par une publication (la version publiée devient active, l'ancienne inactive).
@@ -205,7 +211,7 @@ export const TABLES_DE_JOURNAL = {
       if (avant.actif && !l.actif) return 'RETRAIT';
       return 'MODIFICATION';
     },
-    lectures: (l) => [{ route: 'GET /api/mentions-legales', chemin: '/api/mentions-legales', refuse: 'DIR', present: etatIdentique(l, [['actif', memeBooleen], ['publieeLe', memeNullite]]) }],
+    lectures: (l) => [{ route: 'GET /api/mentions-legales', chemin: '/api/mentions-legales', refuse: 'CT', present: etatIdentique(l, [['actif', memeBooleen], ['publieeLe', memeNullite]]) }],
   },
   // Passages de la génération des visites ; nature, le déclenchement ; action, le statut. La route n'en montre que le
   // dernier et le dernier passage automatique.
@@ -213,7 +219,7 @@ export const TABLES_DE_JOURNAL = {
     auteur: 'auteurId', ajoutSeul: false,
     nature: (l) => l.declenchement, action: (l) => l.statut,
     lectures: (l) => [{
-      route: 'GET /api/contrats-maintenance/generation-visites', chemin: '/api/contrats-maintenance/generation-visites', refuse: 'DIR',
+      route: 'GET /api/contrats-maintenance/generation-visites', chemin: '/api/contrats-maintenance/generation-visites', refuse: 'CT',
       present: (res) => res.body?.derniereExecution?.id === l.id || res.body?.derniereExecutionAutomatique?.id === l.id,
     }],
   },

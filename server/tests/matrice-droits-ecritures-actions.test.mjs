@@ -61,7 +61,8 @@ const REFERENCE = join(DOSSIER_MATRICES, 'ecritures-actions.txt');
 const REFERENCE_ENTREES = join(DOSSIER_MATRICES, 'entrees.txt');
 const SA = 'SA';
 // Comptes sans périmètre (administration) : le minimum « dans et hors du périmètre » (avenant, section 3) ne les vise pas.
-const ADMINISTRATION = ['SA', 'AD', 'AD-COM'];
+// Le directeur en fait partie depuis le lot « Directeur aligné sur l'administration » (décision de Nelson du 24-10-2026, point 14).
+const ADMINISTRATION = ['SA', 'AD', 'AD-COM', 'DIR'];
 // Réponses d'entrée qui refusent un compte avant toute cible (avenant, section 3 : « toutes leurs lignes d'entrees.txt
 // portent la même réponse 401, 403 ou 410 »).
 const REFUS_AVANT_LA_CIBLE = /^(401|403|410) /;

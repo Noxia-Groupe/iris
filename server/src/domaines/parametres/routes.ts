@@ -7,6 +7,13 @@ import { nombreDecimalNonNegatif } from '../../commun/validation';
 import { changementsJournal, journaliserAdministration, verrouillerReglage } from '../../commun/journal-administration';
 import { getParametres, validerBareme, montantPositif, getReglesRemuneration, serialiseBareme } from './metier';
 import { TempsPasseSaisieError, lireReglagePasTempsPasse, lireReglageTempsMinimum } from '../devis/tempsPasse';
+import { ROLE_DIRECTEUR } from '../../droits/roles';
+
+// Le directeur a les droits de l'administration, réglages compris, mais voit la rentabilité des
+// chantiers selon le réglage de la société (décisions du 24-10-2026, points 14 et 17) : il ne lève pas
+// lui-même cette restriction (choix par défaut, à confirmer). Renvoyer la valeur en place reste admis,
+// l'écran des réglages envoyant toutes ses cases.
+const REFUS_REGLAGE_DIRECTEUR = 'Un directeur ne règle pas la rentabilité des directeurs.';
 
 export function enregistrerRoutesParametres(app: Express): void {
   // Paramètres globaux (admin uniquement)
@@ -198,6 +205,13 @@ export function enregistrerRoutesRemunerationEtReglages(app: Express): void {
       const p = await transactionVerifiee(async (tx) => {
         await verrouillerReglage(tx, 'Parametres');
         const avant = await tx.parametres.findUnique({ where: { id: 'singleton' } });
+        // Comparé sous le verrou du réglage : une modification concurrente par l'administration n'est
+        // pas écrasée par la valeur que l'écran du directeur avait lue. Sans ligne, la valeur en place
+        // est le défaut du schéma (@default(true)).
+        if ((req as AuthRequest).user?.role === ROLE_DIRECTEUR && 'rentabiliteDirecteurs' in data
+          && data.rentabiliteDirecteurs !== (avant ? avant.rentabiliteDirecteurs : true)) {
+          throw Object.assign(new Error(REFUS_REGLAGE_DIRECTEUR), { code: 'REGLAGE_DIRECTEUR' });
+        }
         const apres = await tx.parametres.upsert({
           where: { id: 'singleton' },
           update: data,
@@ -209,6 +223,7 @@ export function enregistrerRoutesRemunerationEtReglages(app: Express): void {
       });
       res.json(decimalToNumber(p));
     } catch (error) {
+      if ((error as { code?: string })?.code === 'REGLAGE_DIRECTEUR') return res.status(403).json({ error: REFUS_REGLAGE_DIRECTEUR });
       res.status(500).json({ error: 'Error updating parametres' });
     }
   });

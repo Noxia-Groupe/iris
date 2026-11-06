@@ -101,15 +101,21 @@ const Performances = () => {
               <div className="grid grid-cols-3 gap-3 mb-4">
                 <div className="bg-gray-50 rounded-lg p-3">
                   <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">CA vendu</div>
-                  <div className="font-bold text-gray-800 mt-0.5">{fmtEuro(p.caTotal)}</div>
+                  {/* null : rentabilité non communiquée à ce compte (directeur, si la société ne la
+                      lui laisse pas, réponse de Nelson du 06-11-2026) ; « — » plutôt qu'un 0 trompeur. */}
+                  <div className="font-bold text-gray-800 mt-0.5">{p.caTotal == null ? '—' : fmtEuro(p.caTotal)}</div>
                 </div>
                 <div className="bg-gray-50 rounded-lg p-3">
                   <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Marge générée</div>
-                  <div className={`font-bold mt-0.5 ${arrondiEuro(p.margeTotal) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{fmtEuro(p.margeTotal)}</div>
+                  {p.margeTotal == null ? (
+                    <div className="font-bold text-gray-800 mt-0.5">—</div>
+                  ) : (
+                    <div className={`font-bold mt-0.5 ${arrondiEuro(p.margeTotal) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{fmtEuro(p.margeTotal)}</div>
+                  )}
                 </div>
                 <div className="bg-gray-50 rounded-lg p-3">
                   <div className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Marge %</div>
-                  <div className="font-bold text-gray-800 mt-0.5">{(p.margePct ?? 0).toFixed(1)}%</div>
+                  <div className="font-bold text-gray-800 mt-0.5">{p.margePct == null ? '—' : `${p.margePct.toFixed(1)}%`}</div>
                 </div>
               </div>
 

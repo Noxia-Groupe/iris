@@ -3,11 +3,16 @@ import { ROLE_ASSISTANTE_COMMERCIALE, ROLE_TECHNICIEN, ROLE_COMPTABLE, ROLE_DIRE
 import type { AuthRequest } from '../http/auth';
 import { API_SCOPES } from '../http/cles-api';
 
+// Droits par défaut de l'administration, partagés par l'ADMIN et le DIRECTEUR (décision de Nelson
+// du 24-10-2026, point 14). Relus à chaque requête (permissionsEffectives) : un compte existant les
+// reçoit sans migration.
+const DROITS_ADMINISTRATION = ['devis:read', 'devis:write', 'clients:read', 'chantiers:read', 'chantiers:write', 'chantiers:archive'];
+
 // Droits par défaut des types de compte. Ils restent volontairement limités aux modules
 // existants ; SAV, maintenance, facturation, banques et objectifs seront ajoutés avec
 // leurs routes métier, jamais anticipés par des accès fictifs.
 const DEFAULT_USER_PERMISSIONS: Record<string, string[]> = {
-  ADMIN: ['devis:read', 'devis:write', 'clients:read', 'chantiers:read', 'chantiers:write', 'chantiers:archive'],
+  ADMIN: DROITS_ADMINISTRATION,
   // Le conducteur saisit et corrige les écritures de son affaire. L'archivage, qui retire
   // un coût ou des heures des marges actives, est distinct et réservé par défaut aux rôles
   // d'encadrement ; il peut être accordé individuellement si l'organisation le décide.
@@ -22,9 +27,8 @@ const DEFAULT_USER_PERMISSIONS: Record<string, string[]> = {
   // Annuaire des clients (clients, contacts, sites) en consultation, par exemple pour retrouver
   // une adresse ; ni devis ni montants (décision de Nelson du 13-10-2026).
   [ROLE_TECHNICIEN]: ['chantiers:read', 'clients:read'],
-  // Lecture seule. Le droit devis peut s'accorder individuellement ; la saisie Travaux non :
-  // assertChantierWritable ne la permet qu'au conducteur, au responsable de branche et à l'administration.
-  [ROLE_DIRECTEUR]: ['chantiers:read'],
+  // Droits de l'administration (décision de Nelson du 24-10-2026, point 14), comme l'ADMIN.
+  [ROLE_DIRECTEUR]: DROITS_ADMINISTRATION,
 };
 
 // Droits jamais accordés à un technicien, ni par son type de compte ni individuellement : il ne

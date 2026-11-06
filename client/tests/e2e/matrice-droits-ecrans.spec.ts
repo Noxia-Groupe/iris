@@ -357,6 +357,42 @@ test.describe('Matrice des droits à l’écran (lot D1a-6)', () => {
     expect(entrees.filter((chemin) => !privees.includes(chemin)), 'entrée du menu qui ne mène à aucune route privée').toEqual([]);
   });
 
+  // Lot « Directeur aligné sur l'administration » (cadrage version 3, T2 du contrôle ; décision de Nelson du 24-10-2026,
+  // point 14) : à l'écran, le directeur a les menus, routes et boutons de l'administrateur, réglages par défaut. Sa
+  // référence est celle d'AD, sauf une liste FERMÉE de lignes exactes, chacune avec sa transformation : une redirection
+  // ne peut donc plus être adoptée par « cp » sans être vue ici.
+  test('directeur : ecrans-DIR.txt est ecrans-AD.txt, sauf la liste fermée des écarts (type affiché, type Administrateur non proposé)', () => {
+    const parCle = (cle: string) => new Map(lireReference(`ecrans-${cle}.txt`).map((ligne) => {
+      const champs = ligne.split(SEPARATEUR);
+      expect(champs[0], ligne).toBe(cle);
+      return [champs.slice(1, 4).join(SEPARATEUR), champs.slice(4).join(SEPARATEUR)] as const;
+    }));
+    const ad = parCle('AD');
+    const dir = parCle('DIR');
+    // Écarts déclarés : clé exacte (écran | cible | contexte) et transformation de la ligne d'AD.
+    // Second écart, choix par défaut, à confirmer (règle 5, option la plus restrictive ; miroir de
+    // refuseTypeAdminParDirecteur côté serveur) : le directeur n'attribue pas le type Administrateur, retiré de la liste
+    // « Modifier le rôle » du compte CT, et d'elle seule.
+    const ECARTS: Record<string, (ligne: string) => string> = {
+      [['menu', '—', 'défaut'].join(SEPARATEUR)]: (ligne) => ligne.replace('type affiché : Administrateur', 'type affiché : Directeur'),
+      [['administration › utilisateurs', 'compte CT', 'défaut'].join(SEPARATEUR)]: (ligne) => ligne.replace(
+        /(liste « Modifier le rôle » \(options : [^)]*?), Administrateur\)/, '$1)'),
+    };
+    expect([...dir.keys()].sort(), 'mêmes écrans, cibles et contextes qu’AD').toEqual([...ad.keys()].sort());
+    const ecarts: string[] = [];
+    for (const [cle, ligneAd] of ad) {
+      const attendu = ECARTS[cle] ? ECARTS[cle](ligneAd) : ligneAd;
+      if (ECARTS[cle] && attendu === ligneAd) ecarts.push(`${cle} : écart déclaré sans effet sur la ligne d’AD`);
+      if (dir.get(cle) !== attendu) ecarts.push(`${cle}\n  attendu ${attendu}\n  DIR     ${dir.get(cle)}`);
+    }
+    expect(ecarts, 'référence du directeur différente de celle de l’administrateur hors de la liste fermée').toEqual([]);
+    // Ce que l'écran du directeur ouvre désormais (lu dans la référence) : quelques routes témoins, accessibles.
+    for (const route of ['/admin', '/planning', '/interventions', '/devis', '/factures', '/statistiques', '/clients']) {
+      expect(dir.get([`route ${route}`, '—', 'défaut'].join(SEPARATEUR)), route).toMatch(/; accessible$/);
+    }
+    expect(dir.get(['route /administration/api', '—', 'défaut'].join(SEPARATEUR)), 'réglage du super administrateur').toBe('hors menu ; redirigée vers /');
+  });
+
   // Témoins de la garde « aucun montant » (cadrage §5, T3 du contrôle) : un par branche, que lui seul déclenche ; les
   // témoins d'un montant passent d'abord par la normalisation, qui ne laisse aucun chiffre ; et une ligne propre.
   test('garde « aucun montant » : chaque branche a son témoin, qu’elle est seule à déclencher, et une ligne propre passe', () => {

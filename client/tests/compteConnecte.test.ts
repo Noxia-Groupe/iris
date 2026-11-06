@@ -30,9 +30,11 @@ const SANS_ROLE: ReadonlyArray<readonly [string, CurrentUser | null | undefined]
   ['conducteur relu sans rôle', { id: 'ct-1', name: 'Conducteur sans rôle', email: 'ct@iris.test', permissions: ['chantiers:read', 'chantiers:write', 'clients:read'] }],
 ];
 
-// Les dix types et leur accès attendu, écrits ici à part, et non relus du code : planning (fermé au commercial, au
-// directeur, et depuis #179 au directeur commercial, à l'assistante commerciale et au comptable) ; administration (fermée
-// en plus au technicien, lot pilote 3). Ce sont les valeurs de main avant A4, que la PR ne doit pas changer.
+// Les dix types et leur accès attendu, écrits ici à part, et non relus du code : planning (fermé au commercial, et depuis
+// #179 au directeur commercial, à l'assistante commerciale et au comptable) ; administration (fermée en plus au
+// technicien, lot pilote 3). Ce sont les valeurs de main avant A4, que la PR ne doit pas changer, à une exception : le
+// directeur, fermé jusqu'ici aux deux, les a depuis le lot « Directeur aligné sur l'administration » (décision de Nelson
+// du 24-10-2026, point 14, « Tout, réglages compris »).
 const ACCES: ReadonlyArray<readonly [string, { planning: boolean; administration: boolean }]> = [
   ['SUPERADMIN', { planning: true, administration: true }],
   ['ADMIN', { planning: true, administration: true }],
@@ -40,7 +42,7 @@ const ACCES: ReadonlyArray<readonly [string, { planning: boolean; administration
   ['RESPONSABLE', { planning: true, administration: true }],
   ['TECHNICIEN', { planning: true, administration: false }],
   ['COMMERCIAL', { planning: false, administration: false }],
-  ['DIRECTEUR', { planning: false, administration: false }],
+  ['DIRECTEUR', { planning: true, administration: true }],
   ['DIRECTEUR_COMMERCIAL', { planning: false, administration: false }],
   ['ASSISTANTE_COMMERCIALE', { planning: false, administration: false }],
   ['COMPTABLE', { planning: false, administration: false }],
@@ -81,7 +83,7 @@ test('un rôle absent (vide, null ou undefined) n’ouvre ni le planning ni l’
   }
 });
 
-test('pour les dix types de compte, le planning et l’administration restent ouverts ou fermés comme avant (#206)', () => {
+test('pour les dix types de compte, le planning et l’administration restent ouverts ou fermés comme avant (#206), le directeur les ayant désormais comme l’administration', () => {
   assert.deepEqual(ACCES.map(([role]) => role).sort(), TYPES_COMPTE.map((type) => type.valeur).sort(), 'les dix types, ni plus ni moins');
   for (const [role, { planning, administration }] of ACCES) {
     assert.equal(peutConsulterPlanning(role), planning, `planning, ${role}`);

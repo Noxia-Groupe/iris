@@ -61,7 +61,8 @@ const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
 const REFERENCE = join(DOSSIER_MATRICES, 'journaux.txt');
 const REFERENCES_ECRITURES = [join(DOSSIER_MATRICES, 'ecritures-actions.txt'), join(DOSSIER_MATRICES, 'ecritures-modifications.txt')];
 const SA = 'SA';
-const ADMINISTRATION = ['SA', 'AD', 'AD-COM'];
+// Le directeur en fait partie depuis le lot « Directeur aligné sur l'administration » (décision de Nelson du 24-10-2026, point 14).
+const ADMINISTRATION = ['SA', 'AD', 'AD-COM', 'DIR'];
 const DESTINATAIRE = 'contact-matrice@iris.test';
 const TRACE = { ratio: 2, traits: [[[0.1, 0.6], [0.25, 0.3], [0.4, 0.7], [0.6, 0.35]]] };
 // JPEG 1 × 1 pixel minimal d'api.test.mjs, comme D1a-5b (corps « logo JPEG »).
@@ -463,7 +464,7 @@ if (!TEST_DATABASE_URL) {
       // Journal d'administration : comptes. Entrées fermées à un simple administrateur (§2.2) : PERMISSIONS,
       // ACCES_FINANCE et AUSSI_COMMERCIAL sur le SA, TYPE_COMPTE vers SUPERADMIN, RATTACHEMENT à un SA, création et
       // suppression d'un SA. Écarts connus de visibilité : entrées d'un SA sur un compte ordinaire, compte devenu SA.
-      for (const compte of [SA, 'AD']) {
+      for (const compte of [SA, 'AD', 'DIR']) {
         ajouter(compte, 'POST /api/users', SANS_CIBLE, 'défaut, corps compte commercial', corpsUser({}));
         ajouter(compte, 'POST /api/users', SANS_CIBLE, 'défaut, corps compte commercial, accesFinance=oui', corpsUser({ accesFinance: true }));
         ajouter(compte, 'PUT /api/commerciaux/:id/prime-mensuelle', 'compte-commercial', 'défaut, corps période et suivi administratif', () => ({ periode: '2026-09', suiviAdministratif: true }));
@@ -476,14 +477,14 @@ if (!TEST_DATABASE_URL) {
       }
       ajouter(SA, 'POST /api/users', SANS_CIBLE, 'défaut, corps role=SUPERADMIN', corpsUser({ role: 'SUPERADMIN' }));
       ajouter(SA, 'DELETE /api/users/:id', 'compte-superadmin-second', 'défaut', corpsVide);
-      ajouter('AD', 'DELETE /api/users/:id', 'compte-commercial', 'défaut', corpsVide);
+      for (const compte of ['AD', 'DIR']) ajouter(compte, 'DELETE /api/users/:id', 'compte-commercial', 'défaut', corpsVide);
       ajouter(SA, 'PATCH /api/users/:id/actif', 'compte-commercial', 'défaut', corpsVide);
-      ajouter('AD', 'PATCH /api/users/:id/actif', 'compte-technicien', 'défaut', corpsVide);
+      for (const compte of ['AD', 'DIR']) ajouter(compte, 'PATCH /api/users/:id/actif', 'compte-technicien', 'défaut', corpsVide);
       ajouter(SA, 'PATCH /api/users/:id/responsable-hierarchique', 'compte-superadmin', 'défaut, corps responsable=RESP', responsable('RESP'));
-      ajouter('AD', 'PATCH /api/users/:id/responsable-hierarchique', 'compte-commercial', 'défaut, corps responsable=RESP', responsable('RESP'));
+      for (const compte of ['AD', 'DIR']) ajouter(compte, 'PATCH /api/users/:id/responsable-hierarchique', 'compte-commercial', 'défaut, corps responsable=RESP', responsable('RESP'));
       ajouter(SA, 'PATCH /api/users/:id/responsable-hierarchique', 'compte-commercial', 'défaut, corps responsable=SA', responsable(SA));
       ajouter(SA, 'PATCH /api/users/:id/role', 'compte-commercial', 'défaut, corps role=DIRECTEUR', () => ({ role: 'DIRECTEUR' }));
-      ajouter('AD', 'PATCH /api/users/:id/role', 'compte-technicien', 'défaut, corps role=DIRECTEUR', () => ({ role: 'DIRECTEUR' }));
+      for (const compte of ['AD', 'DIR']) ajouter(compte, 'PATCH /api/users/:id/role', 'compte-technicien', 'défaut, corps role=DIRECTEUR', () => ({ role: 'DIRECTEUR' }));
       // Promotion d'un technicien relié : la fiche déliée (comptes.ts, l. 66) concerne aussi un SA.
       ajouter(SA, 'PATCH /api/users/:id/role', 'compte-technicien', 'défaut, corps role=SUPERADMIN', () => ({ role: 'SUPERADMIN' }));
       // Compte devenu SA depuis l'entrée (écart connu, « à appliquer », passation section 4) : AD rattache COM à RESP,
@@ -499,8 +500,8 @@ if (!TEST_DATABASE_URL) {
       ajouter(SA, 'PATCH /api/users/:id/acces-finance', 'compte-commercial', 'défaut, corps accesFinance=oui', () => ({ accesFinance: true }), { source: 'nouvelle' });
       ajouter(SA, 'PATCH /api/users/:id/acces-finance', 'compte-commercial', 'défaut, corps vide', corpsVide, { source: 'sans entrée' });
       ajouter(SA, 'PATCH /api/users/:id/est-commercial', 'compte-superadmin', 'défaut, corps estCommercial=oui', () => ({ estCommercial: true }), { source: 'nouvelle' });
-      ajouter('AD', 'PATCH /api/users/:id/est-commercial', 'compte-administrateur', 'défaut, corps estCommercial=oui', () => ({ estCommercial: true }), { source: 'nouvelle' });
-      for (const compte of [SA, 'AD']) ajouter(compte, 'PATCH /api/users/:id/est-commercial', compte === SA ? 'compte-superadmin' : 'compte-administrateur', 'défaut, corps vide', corpsVide, { source: 'sans entrée' });
+      for (const compte of ['AD', 'DIR']) ajouter(compte, 'PATCH /api/users/:id/est-commercial', 'compte-administrateur', 'défaut, corps estCommercial=oui', () => ({ estCommercial: true }), { source: 'nouvelle' });
+      for (const compte of [SA, 'AD', 'DIR']) ajouter(compte, 'PATCH /api/users/:id/est-commercial', compte === SA ? 'compte-superadmin' : 'compte-administrateur', 'défaut, corps vide', corpsVide, { source: 'sans entrée' });
 
       // Clés d'intégration (réservées au SA) : l'entrée du journal et l'historique des clés.
       ajouter(SA, 'POST /api/admin/api-keys', SANS_CIBLE, 'défaut, corps nom et scope', () => ({ nom: 'TEST Clé créée par la matrice des journaux', scopes: ['clients:read'] }));
@@ -518,7 +519,7 @@ if (!TEST_DATABASE_URL) {
       ajouter(SA, 'PUT /api/journal-administration/conservation', SANS_CIBLE, 'défaut, corps durée de conservation changée', () => ({ jours: 30 }));
 
       // Chantier : client, titulaire, commercial, encaissement (journal des saisies du chantier), envoi du rapport.
-      for (const compte of [SA, 'AD']) {
+      for (const compte of [SA, 'AD', 'DIR']) {
         ajouter(compte, 'PATCH /api/chantiers/:id', 'chantier-autre', 'défaut, corps clientId=client-second seul', () => ({ clientId: d.clientSecond }));
         ajouter(compte, 'PATCH /api/chantiers/:id/encaisse', 'chantier-ct', 'défaut, corps encaisse=oui', () => ({ encaisse: true }));
         // Retrait de l'encaissement : chantier-ct encaissé juste avant par SA (préalable, sans cible propre).
@@ -527,19 +528,19 @@ if (!TEST_DATABASE_URL) {
         });
         ajouter(compte, 'POST /api/chantiers/:id/envois', 'chantier-ct', 'défaut, corps destinataire, messagerie', () => ({ destinataire: DESTINATAIRE }));
       }
-      for (const compte of [SA, 'AD', 'CT']) {
+      for (const compte of [SA, 'AD', 'DIR', 'CT']) {
         ajouter(compte, 'PATCH /api/chantiers/:id', 'chantier-ct', 'défaut, corps responsableId=autre conducteur', () => ({ responsableId: C['CT-N1'].id }));
         // Le commercial devient COM : le compte refusé du journal du chantier est alors le technicien.
         ajouter(compte, 'PATCH /api/chantiers/:id/commercial', 'chantier-ct', 'défaut, corps commercialId=COM', () => ({ commercialId: C.COM.id }), { refuses: { 'GET /api/chantiers/:id/journal-saisies': 'TECH' } });
         // Clôture d'un chantier : aucune entrée, sans décision (N1 de l'audit des droits de #453), question à Nelson.
         ajouter(compte, 'PATCH /api/chantiers/:id/statut', 'chantier-ct', 'défaut, corps statut=TERMINE', () => ({ statut: 'TERMINE' }), { source: 'sans entrée' });
       }
-      for (const compte of [SA, 'AD']) ajouter(compte, 'PATCH /api/chantiers/:id/statut', 'chantier-termine', 'défaut, corps statut=EN_COURS', () => ({ statut: 'EN_COURS' }), { source: 'sans entrée' });
+      for (const compte of [SA, 'AD', 'DIR']) ajouter(compte, 'PATCH /api/chantiers/:id/statut', 'chantier-termine', 'défaut, corps statut=EN_COURS', () => ({ statut: 'EN_COURS' }), { source: 'sans entrée' });
 
       // Saisies Travaux (montants relus en base, §2.4).
       const achat = (nom) => id('achat', nom);
       const heure = (nom) => id('heure', nom);
-      for (const compte of [SA, 'AD', 'CT']) {
+      for (const compte of [SA, 'AD', 'DIR', 'CT']) {
         ajouter(compte, 'POST /api/achats', 'chantierId=chantier-ct', 'défaut, corps achat', () => ({ chantierId: id('chantier', 'chantier-ct'), categorieId: d.categorie, fournisseurId: d.fournisseur, date: d.hier, description: 'TEST Achat de la matrice des journaux', montantHT: MONTANTS.achatCree }), {
           montant: montantTravaux('AchatReel', null, ['montantHT'], async () => ({ montantHT: MONTANTS.achatCree })),
         });
@@ -560,17 +561,17 @@ if (!TEST_DATABASE_URL) {
         });
       }
       // Archivage : par l'administration, et par le responsable sur le chantier de sa branche (le conducteur n'archive pas).
-      for (const [compte, nomAchat, nomHeure] of [[SA, 'achat-chantier-ct', 'heure-chantier-ct'], ['AD', 'achat-chantier-ct', 'heure-chantier-ct'], ['RESP', 'achat-chantier-ct-branche-resp', 'heure-chantier-ct-branche-resp']]) {
+      for (const [compte, nomAchat, nomHeure] of [[SA, 'achat-chantier-ct', 'heure-chantier-ct'], ['AD', 'achat-chantier-ct', 'heure-chantier-ct'], ['DIR', 'achat-chantier-ct', 'heure-chantier-ct'], ['RESP', 'achat-chantier-ct-branche-resp', 'heure-chantier-ct-branche-resp']]) {
         ajouter(compte, 'DELETE /api/achats/:id', nomAchat, 'défaut, corps motif d’archivage', () => ({ motifArchivage: motif('archivage') }), { montant: montantTravaux('AchatReel', achat(nomAchat), ['montantHT'], inchange(['montantHT'])) });
         ajouter(compte, 'DELETE /api/heures/:id', nomHeure, 'défaut, corps motif d’archivage', () => ({ motifArchivage: motif('archivage') }), { montant: montantTravaux('PointageHeure', heure(nomHeure), ['nbrHeures', 'tauxHoraireApplique'], inchange(['nbrHeures', 'tauxHoraireApplique'])) });
       }
-      for (const compte of [SA, 'AD']) {
+      for (const compte of [SA, 'AD', 'DIR']) {
         ajouter(compte, 'POST /api/achats/:id/restaurer', 'achat-archive-chantier-ct', 'défaut, corps motif de restauration', () => ({ motifRestauration: motif('restauration') }), { montant: montantTravaux('AchatReel', achat('achat-archive-chantier-ct'), ['montantHT'], inchange(['montantHT'])) });
         ajouter(compte, 'POST /api/heures/:id/restaurer', 'heure-archivee-chantier-ct', 'défaut, corps motif de restauration', () => ({ motifRestauration: motif('restauration') }), { montant: montantTravaux('PointageHeure', heure('heure-archivee-chantier-ct'), ['nbrHeures', 'tauxHoraireApplique'], inchange(['nbrHeures', 'tauxHoraireApplique'])) });
       }
 
       // Interventions SAV : journal des saisies de l'intervention.
-      for (const compte of [SA, 'AD', 'CT']) {
+      for (const compte of [SA, 'AD', 'DIR', 'CT']) {
         ajouter(compte, 'POST /api/interventions', 'chantierId=chantier-ct', 'défaut, corps client, titre et chantier', () => ({ clientId: d.clientActif, titre: 'TEST Intervention créée par la matrice des journaux', chantierId: id('chantier', 'chantier-ct') }));
         ajouter(compte, 'PATCH /api/interventions/:id/statut', 'intervention-creee-ct', 'défaut, corps statut=ANNULEE et motif', () => ({ statut: 'ANNULEE', motif: motif('annulation') }));
         ajouter(compte, 'PATCH /api/interventions/:id/statut', 'intervention-chantier-ct', 'défaut, corps statut=EN_COURS', () => ({ statut: 'EN_COURS' }));
@@ -580,18 +581,18 @@ if (!TEST_DATABASE_URL) {
         ajouter(compte, 'PUT /api/interventions/:id/planning', 'intervention-creee-ct', 'défaut, corps jour, créneau et fiche libre', () => ({ dateDebut: d.demain, creneau: 'JOURNEE', intervenantIds: [d.ficheLibre] }));
         ajouter(compte, 'POST /api/interventions/:id/envois', 'intervention-terminee-signee', 'défaut, corps destinataire, messagerie', () => ({ destinataire: DESTINATAIRE }));
       }
-      for (const compte of [SA, 'AD', 'TECH']) {
+      for (const compte of [SA, 'AD', 'DIR', 'TECH']) {
         ajouter(compte, 'PATCH /api/interventions/:id/statut', 'intervention-affectee-tech', 'défaut, corps statut=TERMINEE et motif sans signature', () => ({ statut: 'TERMINEE', motifSansSignature: 'CLIENT_ABSENT' }));
         ajouter(compte, 'POST /api/interventions/:id/rapports', 'intervention-affectee-tech', 'défaut, corps contenu et clé d’envoi', () => ({ contenu: 'TEST Compte rendu de la matrice des journaux.', cleEnvoi: randomUUID() }));
         ajouter(compte, 'POST /api/interventions/rapports/:rapportId/signature', 'rapport-non-signe', 'défaut, corps signataire, confirmation et tracé', () => ({ signataire: 'TEST Signataire de la matrice', confirme: true, trace: TRACE }));
         ajouter(compte, 'PUT /api/interventions/:id/a-suivre', 'intervention-a-suivre', 'défaut, corps aSuivre=non', () => ({ aSuivre: false }));
       }
-      for (const compte of [SA, 'AD']) ajouter(compte, 'POST /api/interventions/:id/remise-a-planifier', 'curative-sans-chantier-branche', 'défaut, corps motif', () => ({ motif: motif('remise à planifier') }));
+      for (const compte of [SA, 'AD', 'DIR']) ajouter(compte, 'POST /api/interventions/:id/remise-a-planifier', 'curative-sans-chantier-branche', 'défaut, corps motif', () => ({ motif: motif('remise à planifier') }));
 
       // Coûts SAV (montants relus en base, §2.4) : matériel de l'encadrement, heures du technicien affecté.
       const cout = (nom) => cibleDe('cout-sav', nom).ids;
       const CHAMPS_HEURES_SAV = ['nbrHeures', 'tauxHoraireApplique', 'prixVenteHoraireApplique'];
-      for (const compte of [SA, 'AD', 'CT']) {
+      for (const compte of [SA, 'AD', 'DIR', 'CT']) {
         ajouter(compte, 'POST /api/interventions/:id/couts/achats', 'intervention-chantier-ct', 'défaut, corps date, description, montantHT et fournisseur', () => ({ date: d.aujourdhui, description: 'TEST Matériel SAV de la matrice des journaux', montantHT: MONTANTS.materielSavCree, fournisseurId: d.fournisseur }), {
           montant: montantTravaux('CoutInterventionAchat', null, ['montantHT'], async () => ({ montantHT: MONTANTS.materielSavCree })),
         });
@@ -614,10 +615,10 @@ if (!TEST_DATABASE_URL) {
       const montantCout = (nom) => (cout(nom).type === 'achats'
         ? montantTravaux('CoutInterventionAchat', cout(nom).coutId, ['montantHT'], inchange(['montantHT']))
         : montantTravaux('CoutInterventionHeure', cout(nom).coutId, CHAMPS_HEURES_SAV, inchange(CHAMPS_HEURES_SAV)));
-      for (const [compte, nom] of [[SA, 'heures-tech-intervention-affectee'], ['AD', 'materiel-intervention-affectee'], ['CT', 'materiel-intervention-chantier-ct']]) {
+      for (const [compte, nom] of [[SA, 'heures-tech-intervention-affectee'], ['AD', 'materiel-intervention-affectee'], ['DIR', 'materiel-intervention-affectee'], ['CT', 'materiel-intervention-chantier-ct']]) {
         ajouter(compte, ROUTE_ACTION, nom, 'défaut, corps motif', () => ({ motif: motif('archivage') }), { montant: montantCout(nom) });
       }
-      for (const [compte, nom, auteurArchivage] of [['AD', 'heures-tech-intervention-affectee', SA], [SA, 'materiel-intervention-affectee', 'AD']]) {
+      for (const [compte, nom, auteurArchivage] of [['AD', 'heures-tech-intervention-affectee', SA], ['DIR', 'heures-tech-intervention-affectee', SA], [SA, 'materiel-intervention-affectee', 'AD']]) {
         const { id: interventionId, coutId, type } = cout(nom);
         const cheminCout = `/api/interventions/${interventionId}/couts/${type ?? 'heures'}/${coutId}`;
         ajouter(compte, ROUTE_ACTION, `${nom}, restauration`, `archivé par ${auteurArchivage}, puis corps motif`, () => ({ motif: motif('restauration') }), {
@@ -629,7 +630,7 @@ if (!TEST_DATABASE_URL) {
       // Contrats de maintenance : journal des saisies du contrat, envoi, génération d'une visite, avancement de
       // l'échéance d'un contrat dont la visite est terminée (T1 de l'audit des montants de #440, N5 de son audit des
       // droits).
-      for (const compte of [SA, 'AD']) {
+      for (const compte of [SA, 'AD', 'DIR']) {
         ajouter(compte, 'POST /api/contrats-maintenance', 'clientId=client-actif', 'défaut, corps titre, périodicité, durée et début', () => ({ clientId: d.clientActif, titre: 'TEST Contrat créé par la matrice des journaux', periodiciteMois: 12, dureePrevisionnelleMinutes: 60, dateDebut: d.aujourdhui }));
         ajouter(compte, 'PATCH /api/contrats-maintenance/:id', 'contrat-actif', 'défaut, corps note de couverture et motif', () => ({ noteCouverture: 'TEST Note de couverture de la matrice des journaux', motif: motif('couverture') }));
         ajouter(compte, 'PATCH /api/contrats-maintenance/:id/statut', 'contrat-actif', 'défaut, corps statut=SUSPENDU et motif', () => ({ statut: 'SUSPENDU', motif: motif('suspension') }));
@@ -640,19 +641,19 @@ if (!TEST_DATABASE_URL) {
 
       // Devis : conversions (le chantier n'écrit aucune entrée, écart connu ; l'intervention déjà issue du devis est
       // rattachée au chantier, avec son entrée), envoi.
-      for (const compte of [SA, 'AD']) {
+      for (const compte of [SA, 'AD', 'DIR']) {
         ajouter(compte, 'POST /api/devis/:id/convertir', 'devis-signe', 'défaut, corps cible=CONTRAT', () => ({ cible: 'CONTRAT', periodiciteMois: 12, dureePrevisionnelleMinutes: 60, dateDebut: d.aujourdhui }));
         ajouter(compte, 'POST /api/devis/:id/convertir', 'devis-signe', 'défaut, corps cible=INTERVENTION', () => ({ cible: 'INTERVENTION' }));
         ajouter(compte, 'POST /api/devis/:id/convertir', 'devis-signe', 'défaut, corps cible=CHANTIER', () => ({ cible: 'CHANTIER' }), { source: 'sans entrée' });
         ajouter(compte, 'POST /api/devis/:id/convertir', 'devis-converti-intervention', 'défaut, corps cible=CHANTIER', () => ({ cible: 'CHANTIER' }), { source: 'nouvelle' });
       }
-      for (const compte of [SA, 'AD', 'COM']) ajouter(compte, 'POST /api/devis/:id/envois', 'devis-brouillon', 'défaut, corps destinataire, messagerie', () => ({ destinataire: DESTINATAIRE }));
+      for (const compte of [SA, 'AD', 'DIR', 'COM']) ajouter(compte, 'POST /api/devis/:id/envois', 'devis-brouillon', 'défaut, corps destinataire, messagerie', () => ({ destinataire: DESTINATAIRE }));
 
       // Facture : l'entrée de l'émission, jouée en 5a, lue ici (cadrage §2.1).
-      for (const compte of [SA, 'AD']) ajouter(compte, 'POST /api/factures/:id/emettre', 'facture-brouillon', 'défaut', corpsVide);
+      for (const compte of [SA, 'AD', 'DIR']) ajouter(compte, 'POST /api/factures/:id/emettre', 'facture-brouillon', 'défaut', corpsVide);
 
       // Comptabilité : journal d'un compte, journal des règles ; création et import de comptes sans entrée (écart connu).
-      for (const compte of [SA, 'AD']) {
+      for (const compte of [SA, 'AD', 'DIR']) {
         ajouter(compte, 'PATCH /api/comptabilite/comptes/:id', 'compte-comptable-clients', 'défaut, corps libellé, motif et version', () => ({ libelle: 'TEST Clients matrice des journaux renommé', motif: motif('renommage'), expectedUpdatedAt: d.compta.compteClientsMaj }));
         ajouter(compte, 'PUT /api/comptabilite/regles/:cle', 'cle=CLIENT', 'défaut, corps autre compte client, version et motif', () => ({ compteId: d.compta.clientsBis, expectedValeur: d.compta.regleClientValeur, expectedUpdatedAt: d.compta.regleClientMaj, motif: motif('remappage') }));
         ajouter(compte, 'DELETE /api/comptabilite/regles/:cle', 'cle=CLIENT', 'défaut, corps version et motif', () => ({ expectedValeur: d.compta.regleClientValeur, expectedUpdatedAt: d.compta.regleClientMaj, motif: motif('retrait') }));
@@ -668,9 +669,11 @@ if (!TEST_DATABASE_URL) {
       }
 
       // Génération des visites (§2.3) : l'anticipation réglée à trente jours par AD (son entrée, lue ici), puis le
-      // passage manuel de chaque administrateur, le réglage posé par AD en préalable. Témoin du réglage vide : AD et DIR.
-      ajouter('AD', 'PUT /api/parametres', SANS_CIBLE, 'défaut, corps anticipationVisitesJours=trente', () => ({ anticipationVisitesJours: 30 }), { source: 'génération' });
-      for (const compte of ['AD', 'DIR']) ajouter(compte, 'POST /api/contrats-maintenance/generation-visites', SANS_CIBLE, 'anticipation vide, témoin de la matrice des entrées', corpsVide, { source: 'génération' });
+      // passage manuel de chaque administrateur, le réglage posé par AD en préalable. Témoin du réglage vide : AD et DIR,
+      // administrateurs (409), et CT, compte refusé (403), qui remplace le directeur depuis qu'il a les droits de
+      // l'administration (lot « Directeur aligné sur l'administration »).
+      for (const compte of ['AD', 'DIR']) ajouter(compte, 'PUT /api/parametres', SANS_CIBLE, 'défaut, corps anticipationVisitesJours=trente', () => ({ anticipationVisitesJours: 30 }), { source: 'génération' });
+      for (const compte of ['AD', 'DIR', 'CT']) ajouter(compte, 'POST /api/contrats-maintenance/generation-visites', SANS_CIBLE, 'anticipation vide, témoin de la matrice des entrées', corpsVide, { source: 'génération' });
       for (const compte of ADMINISTRATION) {
         ajouter(compte, 'POST /api/contrats-maintenance/generation-visites', SANS_CIBLE, CONTEXTE_GENERATION, corpsVide, { source: 'génération', prealables: [REGLAGE_GENERATION()] });
       }
@@ -702,6 +705,8 @@ if (!TEST_DATABASE_URL) {
       }
     });
 
+    // Le directeur, qui a les droits de l'administration depuis le lot « Directeur aligné sur l'administration », est joué
+    // comme AD, à chacun de ses cas : la colonne DIR de journaux.txt est celle d'AD.
     // Cadrage de 5c, §3 : « Un test de couverture relit ecritures-actions.txt et ecritures-modifications.txt : chaque
     // couple (route, corps) qui y écrit une table de journal doit avoir son cas en 5c. Une route qui commencerait à
     // journaliser serait ainsi signalée. » ; §2.1 : « Les auteurs sont SA, AD et un compte hors administration, choisis
@@ -713,7 +718,7 @@ if (!TEST_DATABASE_URL) {
         const [route, contexte] = cle.split(SEPARATEUR);
         const joues = cas.filter((c) => c.route === route && c.couple === contexte);
         const auteurs = new Set(joues.map((c) => c.compte));
-        for (const compte of [SA, 'AD']) if (ecrivains.has(compte) && !auteurs.has(compte)) manquants.push(`${cle} : ${compte}`);
+        for (const compte of [SA, 'AD', 'DIR']) if (ecrivains.has(compte) && !auteurs.has(compte)) manquants.push(`${cle} : ${compte}`);
         const horsAdministration = [...ecrivains].filter((c) => !ADMINISTRATION.includes(c));
         if (horsAdministration.length && !horsAdministration.some((c) => auteurs.has(c))) manquants.push(`${cle} : un compte parmi ${horsAdministration.join(', ')}`);
         for (const c of joues) if (!ecrivains.has(c.compte)) manquants.push(`${cle} : ${c.compte} n’écrit pas ce couple en 5a ou 5b`);
@@ -867,7 +872,7 @@ if (!TEST_DATABASE_URL) {
           assert.ok(deLEntree.length, `${route} sur ${cible} : entrée ${nature} absente`);
           for (const l of deLEntree) assert.match(l.entree, /, (concerne un SA|réservée au SA)/, `${route} sur ${cible} : ${l.entree} sans marque`);
           for (const routeLecture of JA) {
-            assert.deepEqual(deLEntree.filter((l) => l.route === routeLecture).map((l) => `${l.lecteur} ${l.verdict}`).sort(), [...(routeLecture === JA[0] ? ['DIR 403 « Accès réservé aux administrateurs »'] : []), 'AD 200 absente', 'SA 200 visible'].sort(), `${route} sur ${cible}, ${nature}, ${routeLecture}`);
+            assert.deepEqual(deLEntree.filter((l) => l.route === routeLecture).map((l) => `${l.lecteur} ${l.verdict}`).sort(), [...(routeLecture === JA[0] ? ['CT 403 « Accès réservé aux administrateurs »'] : []), 'AD 200 absente', 'SA 200 visible'].sort(), `${route} sur ${cible}, ${nature}, ${routeLecture}`);
           }
         }
       }
@@ -917,15 +922,17 @@ if (!TEST_DATABASE_URL) {
       }
       for (const compte of COMPTES_JOUES.filter((c) => !ADMINISTRATION.includes(c))) assert.equal(reponseDe(compte, route, SANS_CIBLE, CONTEXTE_GENERATION), '403 « Accès réservé aux administrateurs » inchangé ; aucune entrée', compte);
       assert.equal(reponseDe('AD', route, SANS_CIBLE, 'anticipation vide, témoin de la matrice des entrées'), '409 « La génération automatique des visites est désactivée : réglez d’abord son anticipation. » inchangé ; aucune entrée');
-      assert.equal(reponseDe('DIR', route, SANS_CIBLE, 'anticipation vide, témoin de la matrice des entrées'), '403 « Accès réservé aux administrateurs » inchangé ; aucune entrée');
+      assert.equal(reponseDe('DIR', route, SANS_CIBLE, 'anticipation vide, témoin de la matrice des entrées'), '409 « La génération automatique des visites est désactivée : réglez d’abord son anticipation. » inchangé ; aucune entrée');
+      assert.equal(reponseDe('CT', route, SANS_CIBLE, 'anticipation vide, témoin de la matrice des entrées'), '403 « Accès réservé aux administrateurs » inchangé ; aucune entrée');
       assert.equal(reponseDe(AUTEUR_SYSTEME, 'passage automatique', SANS_CIBLE, 'anticipation vide'), 'aucun passage inchangé ; aucune entrée');
       const automatique = reponseDe(AUTEUR_SYSTEME, 'passage automatique', SANS_CIBLE, CONTEXTE_GENERATION);
       for (const entree of ['ExecutionGenerationVisites AUTOMATIQUE REUSSIE par SYSTEME', 'JournalSaisieChantier INTERVENTION CREATION_CONTRAT par SYSTEME', 'JournalSaisieChantier CONTRAT AVANCEMENT_ECHEANCE par SYSTEME']) assert.ok(automatique.includes(entree), `passage automatique : ${entree} absente de « ${automatique} »`);
-      // Les entrées du compte système sont lues par SA et AD, et refusées au directeur.
+      // Les entrées du compte système sont lues par SA et AD, et refusées au compte témoin de chaque lecture (CT, ou COM
+      // pour l'intervention), qui remplace le directeur depuis le lot « Directeur aligné sur l'administration ».
       const lues = lecturesDuCas(AUTEUR_SYSTEME, 'passage automatique', SANS_CIBLE, CONTEXTE_GENERATION);
       assert.ok(lues.length >= 9, `lectures des entrées du passage automatique : ${lues.length}`);
       for (const l of lues) {
-        if (l.lecteur === 'DIR') assert.match(l.verdict, /^403 « /, `${l.lecteur} ${l.route} ${l.entree}`);
+        if (!['SA', 'AD'].includes(l.lecteur)) assert.match(l.verdict, /^403 « /, `${l.lecteur} ${l.route} ${l.entree}`);
         else assert.equal(l.verdict, '200 visible', `${l.lecteur} ${l.route} ${l.entree}`);
       }
     });

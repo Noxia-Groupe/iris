@@ -724,7 +724,8 @@ if (!TEST_DATABASE_URL) {
       const formes = new Map();
       for (const compte of COMPTES_JOUES) {
         const res = await appeler(appli.adresse, 'GET', `/api/interventions/${intervention.id}/facture-temps-passe`, { jeton: comptes[compte].jeton });
-        if (!['SA', 'AD', 'AD-COM'].includes(compte)) { assert.equal(res.status, 403, `${compte} : ${res.status}`); continue; }
+        // Le directeur a les droits de l'administration (lot « Directeur aligné sur l'administration »).
+        if (!['SA', 'AD', 'AD-COM', 'DIR'].includes(compte)) { assert.equal(res.status, 403, `${compte} : ${res.status}`); continue; }
         assert.equal(res.status, 200, `${compte} : ${res.status} ${JSON.stringify(res.body)?.slice(0, 200)}`);
         const { objets } = parcourir(res.body, registre);
         const { champs } = presences(res.body, registre);

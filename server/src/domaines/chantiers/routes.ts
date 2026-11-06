@@ -4,7 +4,7 @@ import { Prisma } from '@prisma/client';
 import { prisma, transactionVerifiee } from '../../db';
 import { ROLE_TECHNICIEN, ROLE_RESPONSABLE, ROLE_DIRECTEUR, isAdminRole } from '../../droits/roles';
 import { perimetreChantiers } from '../../droits/perimetres';
-import { voitMontantsChantier, voitCoutMainOeuvre, voitPrixAchatDevis, saisieSelonDroits } from '../../droits/visibilite';
+import { voitMontantsChantier, voitCoutMainOeuvre, saisieSelonDroits } from '../../droits/visibilite';
 import { type AuthRequest, requireAuth } from '../../http/auth';
 import { blockCommercial, requireAdmin } from '../../http/gardes';
 import { paramId } from '../../http/requete';
@@ -18,7 +18,7 @@ import { normaliserNumeroDevis, erreurNumeroDevis, numeroDevisDejaPris } from '.
 import { sanitizeTypes, refusTitulaire, refusCommercial, journaliserChangementChantier, compteAuJournal } from './metier';
 import {
   voitRentabilite, REFUS_TECHNICIEN_COMMERCIAL, REFUS_TECHNICIEN_CLOTURE, peutCloturerChantier,
-  chantierSelonRentabilite, RefusChantier, refusEcritureChantier, REFUS_FICHE, REFUS_COMMERCIAL, REFUS_AFFAIRE_ANNULEE_STATUT,
+  chantierSelonRentabilite, voitCoutPrevuParPrixAchat, RefusChantier, refusEcritureChantier, REFUS_FICHE, REFUS_COMMERCIAL, REFUS_AFFAIRE_ANNULEE_STATUT,
 } from './droits';
 import { contexteSuivi, serializeChantier } from './suivi';
 import { avecCoutsSuites } from './coutsSuites';
@@ -78,7 +78,8 @@ const listerChantiers: express.RequestHandler = async (req, res) => {
     const montantsVisibles = voitMontantsChantier(req);
     const user = (req as AuthRequest).user;
     const coutMainOeuvreVisible = voitCoutMainOeuvre(req);
-    const prixAchatVisible = voitPrixAchatDevis(req);
+    // Coût prévu : par la lecture des prix d'achat, sauf pour le directeur, chez qui il suit la rentabilité.
+    const prixAchatVisible = voitCoutPrevuParPrixAchat(req);
     res.json(chantiers.map((c: any, i) => serializeChantier(avecDroitDeCloture(user, c), params, visibles[i], contexte, montantsVisibles, coutMainOeuvreVisible, prixAchatVisible)));
   } catch (error) {
     res.status(500).json({ error: 'Error fetching chantiers' });
@@ -92,9 +93,9 @@ const listerChantiers: express.RequestHandler = async (req, res) => {
 // non 403) : même règle qu'à la lecture, on ne révèle pas l'existence du chantier.
 class ChangementClientRefuse extends Error {}
 
-// Sur un chantier, la clôture est le seul geste d'écriture du directeur (décision de Nelson
-// du 14-10-2026) : cette route n'exclut que le commercial. Rouvrir reste réservé à
-// l'administration.
+// Clôture : cette route n'exclut que le commercial (décision de Nelson du 14-10-2026, pour la clôture
+// par les directeurs). Rouvrir reste réservé à l'administration, dont le directeur fait partie depuis
+// la décision de Nelson du 24-10-2026 (point 14).
 const blockCommercialSeulement: express.RequestHandler = (req, res, next) => {
   if ((req as AuthRequest).user?.role === 'COMMERCIAL') {
     res.status(403).json({ error: 'Accès non autorisé pour un compte commercial.' });
@@ -145,7 +146,7 @@ export function enregistrerRoutesChantiers(app: Express): void {
         }
       });
       // 404 (et non 403) pour un chantier auquel on n'est pas rattaché : on ne révèle pas son existence.
-      // Un directeur lit toutes les fiches, comme un administrateur, sans pouvoir les modifier.
+      // Un directeur lit toutes les fiches : il a les droits de l'administration (décision du 24-10-2026).
       const isOwner = !!chantier && (
         authUser.role === ROLE_DIRECTEUR ||
         chantier.commercialId === authUser.id ||
@@ -164,7 +165,7 @@ export function enregistrerRoutesChantiers(app: Express): void {
       const { factures, ...chantierSansFactures } = chantier;
       const [chantierAvecSuites] = await avecCoutsSuites([chantierSansFactures]);
       const contexte = await contexteSuivi(canSeeMarge && params.margeCommercialeActive);
-      const detail = serializeChantier(avecDroitDeCloture(authUser, chantierAvecSuites), params, canSeeMarge, contexte, voitMontantsChantier(req), voitCoutMainOeuvre(req), voitPrixAchatDevis(req)) as Record<string, unknown>;
+      const detail = serializeChantier(avecDroitDeCloture(authUser, chantierAvecSuites), params, canSeeMarge, contexte, voitMontantsChantier(req), voitCoutMainOeuvre(req), voitCoutPrevuParPrixAchat(req)) as Record<string, unknown>;
       if (canSeeMarge) {
         // Les montants sont positifs en base : seul le type AVOIR en inverse le sens. Une
         // facture annulée est visible mais ne contribue plus, son avoir la neutralise.
@@ -471,10 +472,9 @@ export function enregistrerRoutesChantiers(app: Express): void {
     }
   });
 
-  // Affectation du commercial sur un chantier déjà créé — modifiable par l'admin ou par
-  // le conducteur responsable du chantier (pas par le commercial lui-même, ni par un tiers,
-  // ni par un directeur resté responsable d'anciens chantiers : le commercial rattaché
-  // alimente les commissions).
+  // Affectation du commercial sur un chantier déjà créé — modifiable par l'administration (directeur
+  // compris) ou par le conducteur responsable du chantier (pas par le commercial lui-même, ni par un
+  // tiers : le commercial rattaché alimente les commissions).
   app.patch('/api/chantiers/:id/commercial', requireAuth, blockCommercial, async (req, res) => {
     try {
       const authUser = (req as AuthRequest).user!;

@@ -563,7 +563,9 @@ if (!TEST_DATABASE_URL) {
         technicienAffecte: [403, 403, 403, 403],
         technicienNonAffecte: [403, 403, 403, 403],
         commercial: [403, 403, 403, 403],
-        directeur: [403, 403, 403, 403],
+        // Le directeur a les droits de l'administration et voit tout le SAV (lot « Directeur aligné sur l'administration »,
+        // décision de Nelson du 24-10-2026, points 14 et 17) : comme l'administrateur, sans affectation ni rattachement.
+        directeur: [200, 409, 404, 404],
         directeurCommercial: [404, 404, 404, 404],
         assistanteCommerciale: [404, 404, 404, 404],
         comptable: [404, 404, 404, 404],

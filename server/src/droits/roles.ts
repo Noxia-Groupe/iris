@@ -11,9 +11,12 @@ export const ROLE_TECHNICIEN = 'TECHNICIEN';
 export const ROLE_COMPTABLE = 'COMPTABLE';
 export const ROLE_DIRECTEUR_COMMERCIAL = 'DIRECTEUR_COMMERCIAL';
 export const ROLE_RESPONSABLE = 'RESPONSABLE';
-// DIRECTEUR : pilotage de toute la société sans administration ni paramétrage. Il voit
-// tous les chantiers (non annulés), leur rentabilité et leurs alertes si la société l'a
-// laissé destinataire (Parametres.rentabiliteDirecteurs), et ne saisit rien.
+// DIRECTEUR : direction de la société. Il a les droits de l'administration, paramètres et gestion
+// des comptes compris, hors réglages réservés au SUPERADMIN (décision de Nelson du 24-10-2026,
+// point 14, « Tout, réglages compris »). Il garde ses particularités (point 17) : périmètre de toute
+// la société, clôture des chantiers, et rentabilité des chantiers selon le réglage de la société
+// (Parametres.rentabiliteDirecteurs, cf. voitRentabilite), qui ne masque que les chantiers (réponse
+// de Nelson du 06-11-2026, « Chantiers seulement »).
 export const ROLE_DIRECTEUR = 'DIRECTEUR';
 // Compte système (décision de Nelson du 22-10-2026, lot pilote 5) : auteur des écritures
 // automatiques, comme la génération des visites. Créé par la migration, il ne se connecte jamais
@@ -25,11 +28,23 @@ export const COMPTE_SYSTEME_ID = '00000000-0000-4000-8000-000000000001';
 export const NOM_COMPTE_SYSTEME = 'Iris (automatique)';
 export const EMAIL_COMPTE_SYSTEME = 'systeme@iris.invalid';
 
+// Types de compte qui ont les droits de l'administration : une seule liste, lue par isAdminRole et
+// par les aides de capacité (périmètre SAV, écrans). Le lot de l'assistante technique ajoutera ses
+// propres capacités sans élargir cette liste.
+export const TYPES_ADMINISTRATION: readonly string[] = [ROLE_SUPERADMIN, 'ADMIN', ROLE_DIRECTEUR];
+
 export function isAdminRole(role: string | undefined | null): boolean {
-  return role === 'ADMIN' || role === ROLE_SUPERADMIN;
+  return !!role && TYPES_ADMINISTRATION.includes(role);
 }
 export function isSuperAdminRole(role: string | undefined | null): boolean {
   return role === ROLE_SUPERADMIN;
+}
+
+// « Aussi commercial » : réservé aux types ADMIN et SUPERADMIN (décision 7 de la proposition de
+// droits, #182), seuls connus de COMMERCIAL_OR_FILTER ; le directeur, qui a pourtant les droits de
+// l'administration, n'est pas marqué commercial.
+export function peutEtreAussiCommercial(role: string | undefined | null): boolean {
+  return role === 'ADMIN' || role === ROLE_SUPERADMIN;
 }
 
 // Un administrateur peut être marqué "estCommercial" : il garde alors tous les droits
@@ -39,7 +54,7 @@ export function isSuperAdminRole(role: string | undefined | null): boolean {
 // COMMERCIAL. isCommercialLike() et COMMERCIAL_OR_FILTER couvrent les deux cas partout où
 // l'appli devait jusqu'ici filtrer strictement sur role === 'COMMERCIAL'.
 export function isCommercialLike(u: { role: string; estCommercial?: boolean | null }): boolean {
-  return u.role === 'COMMERCIAL' || (isAdminRole(u.role) && !!u.estCommercial);
+  return u.role === 'COMMERCIAL' || (peutEtreAussiCommercial(u.role) && !!u.estCommercial);
 }
 export const COMMERCIAL_OR_FILTER = [
   { role: 'COMMERCIAL' },

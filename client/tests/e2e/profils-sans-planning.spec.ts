@@ -13,12 +13,14 @@ function jetonPour(userId: string) {
 
 // #179, décision 11 de la proposition de droits : le directeur commercial, l'assistante commerciale
 // et le comptable n'ont ni le planning ni l'administration (référentiels des achats). Le menu ne
-// les leur propose plus, et leurs adresses ramènent à l'accueil. Le conducteur garde les deux.
-test('le directeur commercial, l’assistante commerciale et le comptable n’ont ni planning ni administration', async ({ browser, request, session }) => {
+// les leur propose plus, et leurs adresses ramènent à l'accueil. Le conducteur garde les deux, et le directeur, qui les
+// avait perdus comme le commercial, les a depuis le lot « Directeur aligné sur l'administration » (décision de Nelson du
+// 24-10-2026, point 14) : deux témoins.
+test('le directeur commercial, l’assistante commerciale et le comptable n’ont ni planning ni administration ; le conducteur et le directeur les ont', async ({ browser, request, session }) => {
   const headers = { Authorization: `Bearer ${session.token}` };
   const suffixe = `${Date.now()}-${Math.round(Math.random() * 1e6)}`;
   const fenetres: string[] = [];
-  for (const [role, cle] of [['DIRECTEUR_COMMERCIAL', 'dc'], ['ASSISTANTE_COMMERCIALE', 'ac'], ['COMPTABLE', 'cpt'], ['CONDUCTEUR_TRAVAUX', 'temoin']] as const) {
+  for (const [role, cle] of [['DIRECTEUR_COMMERCIAL', 'dc'], ['ASSISTANTE_COMMERCIALE', 'ac'], ['COMPTABLE', 'cpt'], ['CONDUCTEUR_TRAVAUX', 'temoin'], ['DIRECTEUR', 'directeur']] as const) {
     const nom = `Profil 179 ${cle} ${suffixe}`;
     const creation = await request.post(`${api}/users`, { headers, data: { email: `profil179.${cle}.${suffixe}@iris.test`, name: nom, role } });
     expect(creation.status(), await creation.text()).toBe(201);
@@ -34,7 +36,7 @@ test('le directeur commercial, l’assistante commerciale et le comptable n’on
       await page.goto('/', { waitUntil: 'networkidle' });
       const menu = page.locator('#menu-principal');
       await expect(menu).toContainText(nom);
-      const temoin = role === 'CONDUCTEUR_TRAVAUX';
+      const temoin = role === 'CONDUCTEUR_TRAVAUX' || role === 'DIRECTEUR';
       await expect(menu.getByRole('link', { name: 'Planning', exact: true }), role).toHaveCount(temoin ? 1 : 0);
       await expect(menu.getByRole('link', { name: 'Administration', exact: true }), role).toHaveCount(temoin ? 1 : 0);
       // Les adresses tapées à la main ramènent à l'accueil, sans appel au planning.

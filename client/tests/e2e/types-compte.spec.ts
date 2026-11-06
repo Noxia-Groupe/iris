@@ -152,4 +152,89 @@ test.describe('Types de compte : une seule liste et un seul libellé (#203)', ()
     const page = await connexion(conducteur);
     await verifierTypeAffiche(page, 'Conducteur de travaux');
   });
+
+  // Lot « Directeur aligné sur l'administration » (cadrage version 3) : le directeur a les droits de l'administration
+  // (décision de Nelson du 24-10-2026, point 14), hors réglages du super administrateur ; son type garde son libellé
+  // « Directeur » ; « aussi commercial » reste réservé aux types Administrateur et Super administrateur (décision 7 de
+  // #182). Il ouvre les quatre pages qui affichent son type (statistiques et administration comprises, qui le
+  // redirigeaient jusqu'ici). Il n'attribue pas le type Administrateur, qui lèverait sa restriction de rentabilité
+  // (choix par défaut, à confirmer, règle 5, option la plus restrictive ; miroir de refuseTypeAdminParDirecteur côté
+  // serveur) : huit types à la création et sur la ligne d'un compte d'un autre type ; la ligne d'un compte déjà
+  // administrateur garde l'option « Administrateur », pour l'afficher. La case « aussi commercial » ne lui est jamais
+  // proposée pour un compte directeur, ni à la création, ni dans le tableau.
+  // Lectures écartées : « Administrateur » retiré de toutes les lignes (la ligne administrateur l'afficherait mal) ; laissé
+  // dans la création ou sur la ligne d'un autre type.
+  test('un directeur voit huit types, sans « Super administrateur » ni « Administrateur », sauf sur la ligne d’un administrateur, qui l’affiche ; son type affiché « Directeur » ; la case « aussi commercial » n’existe pas pour un compte directeur', async ({ connexion, request, session }) => {
+    test.slow();
+    const headers = { Authorization: `Bearer ${session.token}` };
+    const suffixe = `${Date.now()}`;
+    const creer = async (cle: string, role: string) => {
+      const reponse = await request.post(`${api}/users`, { headers, data: { email: `types-compte.dir.${cle}.${suffixe}@iris.test`, name: `Types compte ${cle} DIR ${suffixe}`, role } });
+      expect(reponse.status(), await reponse.text()).toBe(201);
+      return reponse.json() as Promise<Compte>;
+    };
+    const SANS_ADMINISTRATION = SANS_SUPERADMIN.filter(([valeur]) => valeur !== 'ADMIN');
+    expect(SANS_ADMINISTRATION).toHaveLength(8);
+    const directeur = await creer('directeur', 'DIRECTEUR');
+    const autreDirecteur = await creer('autre-directeur', 'DIRECTEUR');
+    const administrateur = await creer('administrateur', 'ADMIN');
+    const cible = await creer('cible', 'CONDUCTEUR_TRAVAUX');
+
+    const page = await connexion(directeur);
+    await verifierTypeAffiche(page, 'Directeur');
+    await page.getByRole('button', { name: 'Utilisateurs', exact: true }).click();
+    const formulaire = page.locator('form').filter({ has: page.getByRole('button', { name: 'Autoriser', exact: true }) });
+    const typeNouveau = formulaire.locator('select[name="role"]');
+    // Création : huit types, sans « Administrateur ».
+    await verifierTypesProposes(typeNouveau, SANS_ADMINISTRATION);
+    await expect(typeNouveau.locator('option[value="ADMIN"]')).toHaveCount(0);
+    // Ligne d'un conducteur et d'un autre directeur : les mêmes huit types, son type lu.
+    const ligne = (compte: Compte) => page.locator('tr').filter({ hasText: compte.email }).getByRole('combobox', { name: 'Modifier le rôle' });
+    for (const [compte, libelle] of [[cible, 'Conducteur de travaux'], [autreDirecteur, 'Directeur']] as const) {
+      await verifierTypesProposes(ligne(compte), SANS_ADMINISTRATION);
+      await expect(ligne(compte).locator('option:checked'), compte.email).toHaveText(libelle);
+    }
+    // Ligne d'un administrateur : l'option « Administrateur » reste, pour afficher son type.
+    await verifierTypesProposes(ligne(administrateur), SANS_SUPERADMIN);
+    await expect(ligne(administrateur).locator('option:checked')).toHaveText('Administrateur');
+    await expect(page.locator('option[value="SUPERADMIN"]')).toHaveCount(0);
+    // Sa propre ligne : son type lu « Directeur », sans modification possible.
+    const typePropre = page.locator('tr').filter({ hasText: directeur.email }).locator('select').first();
+    await expect(typePropre).toBeDisabled();
+    await expect(typePropre.locator('option:checked')).toHaveText('Directeur');
+
+    // « Aussi commercial » à la création : aucun des huit types proposés au directeur ne l'ouvre, le type Directeur compris.
+    const caseCreation = formulaire.getByRole('checkbox', { name: /^Commercial \(affectation aux chantiers/ });
+    for (const [, libelle] of SANS_ADMINISTRATION) {
+      await typeNouveau.selectOption({ label: libelle });
+      await expect(caseCreation, libelle).toHaveCount(0);
+    }
+    // Un compte directeur autorisé par le directeur : créé sans la marque, relu par l'API.
+    await typeNouveau.selectOption({ label: 'Directeur' });
+    const email = `types-compte.dir.cree.${suffixe}@iris.test`;
+    await formulaire.locator('input[name="email"]').fill(email);
+    await formulaire.locator('input[name="name"]').fill(`Types compte directeur créé ${suffixe}`);
+    const ajout = page.waitForResponse((r) => r.url().endsWith('/api/users') && r.request().method() === 'POST');
+    await formulaire.getByRole('button', { name: 'Autoriser', exact: true }).click();
+    const reponseAjout = await ajout;
+    expect(reponseAjout.status()).toBe(201);
+    expect(reponseAjout.request().postDataJSON()).toMatchObject({ email, role: 'DIRECTEUR' });
+    const comptes = await (await request.get(`${api}/users`, { headers })).json() as Array<Compte & { estCommercial: boolean }>;
+    expect(comptes.find((compte) => compte.email === email)).toMatchObject({ role: 'DIRECTEUR', estCommercial: false });
+
+    // Dans le tableau : la case existe pour l'administrateur (témoin), pas pour un directeur.
+    await expect(page.getByRole('checkbox', { name: `Commercial — ${administrateur.name}` })).toHaveCount(1);
+    for (const compte of [directeur, autreDirecteur]) {
+      await expect(page.getByRole('checkbox', { name: `Commercial — ${compte.name}` }), compte.email).toHaveCount(0);
+    }
+
+    // Témoin de la création, chez l'administrateur : « Administrateur » proposé, et la case « aussi commercial » s'ouvre.
+    const pageAdmin = await connexion(administrateur);
+    await pageAdmin.goto('/admin', { waitUntil: 'networkidle' });
+    await pageAdmin.getByRole('button', { name: 'Utilisateurs', exact: true }).click();
+    const formulaireAdmin = pageAdmin.locator('form').filter({ has: pageAdmin.getByRole('button', { name: 'Autoriser', exact: true }) });
+    await verifierTypesProposes(formulaireAdmin.locator('select[name="role"]'), SANS_SUPERADMIN);
+    await formulaireAdmin.locator('select[name="role"]').selectOption({ label: 'Administrateur' });
+    await expect(formulaireAdmin.getByRole('checkbox', { name: /^Commercial \(affectation aux chantiers/ })).toHaveCount(1);
+  });
 });

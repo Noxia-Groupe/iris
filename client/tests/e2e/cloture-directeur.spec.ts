@@ -24,9 +24,11 @@ async function pageDe(browser: Browser, compte: Compte) {
   return page;
 }
 
-// Décision de Nelson (14-10-2026) : un directeur peut clôturer n'importe quel chantier ; il ne le
-// rouvre pas. Un conducteur clôture l'affaire dont il est chargé, pas celle d'un autre.
-test('un directeur clôture le chantier d’un conducteur depuis la liste ; un autre conducteur ne le peut pas', async ({ allerSurPageAdmin, creerClient, request, session, browser }) => {
+// Décision de Nelson (14-10-2026) : un directeur peut clôturer n'importe quel chantier. Depuis le lot « Directeur aligné
+// sur l'administration » (décision de Nelson du 24-10-2026, point 14, qui remplace « sans réouverture (seule
+// l'administration rouvre) »), il le rouvre aussi, comme l'administration. Un conducteur clôture l'affaire dont il est
+// chargé, pas celle d'un autre, et ne rouvre pas.
+test('un directeur clôture le chantier d’un conducteur depuis la liste, puis le rouvre comme l’administration ; un autre conducteur ne le peut pas', async ({ allerSurPageAdmin, creerClient, request, session, browser }) => {
   test.slow();
   const headers = { Authorization: `Bearer ${session.token}` };
   const envoyer = async (methode: 'post' | 'patch' | 'put', path: string, data: object) => {
@@ -68,21 +70,27 @@ test('un directeur clôture le chantier d’un conducteur depuis la liste ; un a
     const relu = await (await request.get(`${api}/chantiers/${chantier.id}`, { headers })).json() as { statut: string; dateFin: string | null };
     expect(relu.statut).toBe('TERMINE');
     expect(relu.dateFin).not.toBeNull();
-    // Le directeur ne rouvre pas : le chantier clôturé figure dans la section repliée des
-    // chantiers terminés, sans bouton « Réouvrir », et l'API le refuse.
+    // Le chantier clôturé figure dans la section repliée des chantiers terminés : le directeur y voit
+    // « Réouvrir », comme l'administration (témoin sur la même ligne), et le rouvre depuis la liste.
     const archives = (page: typeof vueDirecteur) => page.getByRole('button', { name: /Chantiers Terminés \/ Archivés/ });
+    const vueAdmin = await allerSurPageAdmin('/chantiers');
+    await archives(vueAdmin).click();
+    await expect(vueAdmin.locator(`tr[data-chantier="${chantier.id}"]`).getByRole('button', { name: 'Réouvrir' })).toBeVisible();
     await vueDirecteur.reload({ waitUntil: 'networkidle' });
     await archives(vueDirecteur).click();
     const ligneTerminee = vueDirecteur.locator(`tr[data-chantier="${chantier.id}"]`);
     await expect(ligneTerminee).toBeVisible();
     await expect(ligneTerminee.getByRole('button', { name: 'Clôturer' })).toHaveCount(0);
-    await expect(ligneTerminee.getByRole('button', { name: 'Réouvrir' })).toHaveCount(0);
-    const reouverture = await request.patch(`${api}/chantiers/${chantier.id}/statut`, { headers: { Authorization: `Bearer ${jetonPour(directeur.id)}` }, data: { statut: 'EN_COURS' } });
-    expect(reouverture.status()).toBe(403);
-    // Témoin : l'administration, elle, voit le bouton sur la même ligne.
-    const vueAdmin = await allerSurPageAdmin('/chantiers');
-    await archives(vueAdmin).click();
-    await expect(vueAdmin.locator(`tr[data-chantier="${chantier.id}"]`).getByRole('button', { name: 'Réouvrir' })).toBeVisible();
+    // Témoin : le conducteur titulaire, hors administration, ne rouvre pas (API, message inchangé).
+    const refusConducteur = await request.patch(`${api}/chantiers/${chantier.id}/statut`, { headers: { Authorization: `Bearer ${jetonPour(conducteur.id)}` }, data: { statut: 'EN_COURS' } });
+    expect(refusConducteur.status()).toBe(403);
+    expect((await refusConducteur.json()).error).toBe('Seul un administrateur peut réouvrir un chantier clôturé.');
+    vueDirecteur.once('dialog', (dialog) => void dialog.accept());
+    const reouverture = vueDirecteur.waitForResponse((r) => r.url().endsWith(`/api/chantiers/${chantier.id}/statut`) && r.request().method() === 'PATCH');
+    await ligneTerminee.getByRole('button', { name: 'Réouvrir' }).click();
+    expect((await reouverture).status()).toBe(200);
+    const rouvert = await (await request.get(`${api}/chantiers/${chantier.id}`, { headers })).json() as { statut: string };
+    expect(rouvert.statut).toBe('EN_COURS');
   } finally {
     for (const contexte of contextes) await contexte.close().catch(() => undefined);
   }

@@ -14,7 +14,7 @@ import { decimalToNumber } from '../../commun/montants';
 import { nombreDecimalNonNegatif, motifCorrectionValide, motifRestaurationValide } from '../../commun/validation';
 import { valeurJournal } from '../../commun/journal-administration';
 import { CHANTIER_LITE_SELECT, journaliserChangementChantier } from './metier';
-import { requireTravauxWrite, requireTravauxArchive, RefusChantier, REFUS_AFFAIRE_ANNULEE_ENCAISSEMENT } from './droits';
+import { requireTravauxWrite, requireTravauxArchive, RefusChantier, REFUS_AFFAIRE_ANNULEE_ENCAISSEMENT, chantierSelonRentabilite } from './droits';
 
 // Un chantier clôturé (TERMINE) devient en lecture seule pour les conducteurs : ils ne
 // peuvent plus y ajouter d'heures ou de dépenses ; un admin garde un accès total (c'est
@@ -420,7 +420,8 @@ export function enregistrerRoutesSaisiesTravaux(app: Express): void {
         return tx.chantier.update({ where: { id }, data: { encaisse, dateEncaissement } });
       });
       if (!chantier) return res.status(404).json({ error: 'Chantier introuvable' });
-      res.json(decimalToNumber(chantier));
+      // Même masquage qu'en lecture : un directeur sans la rentabilité n'y lit ni vendu ni coût prévu.
+      res.json(await chantierSelonRentabilite(req, decimalToNumber(chantier)));
     } catch (error) {
       if (error instanceof RefusChantier) return res.status(error.statut).json({ error: error.message });
       res.status(500).json({ error: 'Error updating encaissement' });

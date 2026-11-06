@@ -1,5 +1,5 @@
 import type { RefObject } from 'react';
-import { isAdminRole, isSuperAdminRole, ROLE_TECHNICIEN, typesCompteProposes } from '../roles';
+import { isAdminRole, isSuperAdminRole, peutEtreAussiCommercial, ROLE_ADMIN, ROLE_TECHNICIEN, typesCompteProposes } from '../roles';
 import type { CurrentUser } from '../lib/droits';
 import { DROITS_DEVIS, droitsApresBasculeDevis, etatDroitDevis } from '../lib/droitDevis';
 import { ChoixResponsable, type CompteResume } from './ChoixResponsable';
@@ -12,9 +12,10 @@ const DROIT_TRAVAUX_ARCHIVAGE = 'chantiers:archive';
 // est porté par accesFinance).
 const DROITS_INTERDITS_TECHNICIEN = ['devis:read', 'devis:write', DROIT_TRAVAUX_CORRECTION, DROIT_TRAVAUX_ARCHIVAGE];
 
-export function AdminUtilisateurs({ user, isSuper, users, newUserRole, setNewUserRole, peutGererCompte, comptesParId, derniereListeOuverte, responsablesProposables, handleRoleChange, handleResponsableHierarchique, handleToggleEstCommercial, handleToggleAccesFinance, handleTogglePermission, enregistrerPermissions, handleToggleActif, handleAddUser, handleDeleteUser }: {
+export function AdminUtilisateurs({ user, isSuper, estDirecteur, users, newUserRole, setNewUserRole, peutGererCompte, comptesParId, derniereListeOuverte, responsablesProposables, handleRoleChange, handleResponsableHierarchique, handleToggleEstCommercial, handleToggleAccesFinance, handleTogglePermission, enregistrerPermissions, handleToggleActif, handleAddUser, handleDeleteUser }: {
   user: CurrentUser | null;
   isSuper: boolean;
+  estDirecteur: boolean;
   users: any[];
   newUserRole: string;
   setNewUserRole: React.Dispatch<React.SetStateAction<string>>;
@@ -44,9 +45,9 @@ export function AdminUtilisateurs({ user, isSuper, users, newUserRole, setNewUse
           <p className="mb-6 text-sm text-gray-600">
             <strong>Responsable hiérarchique</strong> : un compte <strong>Responsable</strong> voit les chantiers de toute
             sa branche — ses collaborateurs directs, puis les leurs — et, si la société le laisse (onglet « Marges &amp;
-            Commissions »), leur rentabilité. Un compte <strong>Directeur</strong> voit tous les chantiers et, si la
-            société le laisse, leur rentabilité ; il clôture tout chantier en cours, sans rien administrer ni modifier
-            d'autre sur les chantiers (seule l'administration rouvre un chantier).
+            Commissions »), leur rentabilité. Un compte <strong>Directeur</strong> a les droits de l'administration,
+            paramètres et comptes compris, hors réglages du super administrateur ; il voit la rentabilité des
+            chantiers si la société le laisse.
           </p>
 
           <div className="mb-8 p-4 bg-gray-50 border rounded">
@@ -63,12 +64,14 @@ export function AdminUtilisateurs({ user, isSuper, users, newUserRole, setNewUse
               <div className="form-group mb-0">
                 <label className="form-label">Rôle d'accès</label>
                 <select name="role" value={newUserRole} onChange={(e) => setNewUserRole(e.target.value)} className="form-input">
-                  {/* Seul un super administrateur peut en désigner un autre (typesCompteProposes). */}
-                  {typesCompteProposes(isSuper).map((type) => <option key={type.valeur} value={type.valeur}>{type.libelle}</option>)}
+                  {/* Seul un super administrateur peut en désigner un autre, et un directeur n'attribue pas le type
+                      Administrateur (typesCompteProposes). */}
+                  {typesCompteProposes(isSuper, estDirecteur).map((type) => <option key={type.valeur} value={type.valeur}>{type.libelle}</option>)}
                 </select>
               </div>
               <div className="form-group mb-0 md:col-span-2 flex flex-wrap gap-3">
-                {isAdminRole(newUserRole) && (
+                {/* « Aussi commercial » : types ADMIN et SUPERADMIN seulement, pas le directeur (#182). */}
+                {peutEtreAussiCommercial(newUserRole) && (
                   <label className="flex items-center gap-2 text-sm font-medium px-3 py-2.5 bg-white border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors w-fit">
                     <input type="checkbox" name="estCommercial" className="w-4 h-4" />
                     Commercial (affectation aux chantiers et statistiques dans « Mes commerciaux »)
@@ -150,7 +153,8 @@ export function AdminUtilisateurs({ user, isSuper, users, newUserRole, setNewUse
                             ? MESSAGE_COMPTE_SUPERADMIN
                             : 'Modifier le rôle'}
                       >
-                        {typesCompteProposes(isSuper).map((type) => <option key={type.valeur} value={type.valeur}>{type.libelle}</option>)}
+                        {/* Un compte déjà administrateur garde son type affiché ; un directeur ne le redonne pas. */}
+                        {typesCompteProposes(isSuper, estDirecteur && u.role !== ROLE_ADMIN).map((type) => <option key={type.valeur} value={type.valeur}>{type.libelle}</option>)}
                       </select>
                     </td>
                     <td className="px-4 py-4">
@@ -166,7 +170,7 @@ export function AdminUtilisateurs({ user, isSuper, users, newUserRole, setNewUse
                       />
                     </td>
                     <td className="px-4 py-4">
-                      {isAdminRole(u.role) ? (
+                      {peutEtreAussiCommercial(u.role) ? (
                         <label className="flex items-center gap-2 cursor-pointer w-fit">
                           <input
                             type="checkbox"

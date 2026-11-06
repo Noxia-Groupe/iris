@@ -56,7 +56,11 @@ export const TYPES_MONTANTS = {
 export const VALEURS_DERIVEES = { chantier: ['metrics.alertes'] };
 
 // Comptes de la référence (comptes.mjs) et clés de la matrice des données (« CLE <scope> », « CLE <scope>+finances:read »).
-const ADMIN = ['SA', 'AD', 'AD-COM'];
+// Le directeur a les droits de l'administration depuis le lot « Directeur aligné sur l'administration » (décision de Nelson
+// du 24-10-2026, point 14) : il voit ce qu'elle voit, sauf la rentabilité des chantiers quand la société ne la lui laisse
+// pas (rentabiliteDirecteurs=non ; réponse de Nelson du 06-11-2026, « Chantiers seulement »), réglage ajouté plus bas aux
+// montants des chantiers qu'elle lui masque.
+const ADMIN = ['SA', 'AD', 'AD-COM', 'DIR'];
 
 // Une entrée : type d'objet, chemins du champ dans l'objet (un seul, sauf les instantanés du journal, avant et
 // après), règle, source dans le code, comptes qui le voient (un au moins doit l'avoir présent) et comptes qui ne le
@@ -67,7 +71,7 @@ const ADMIN = ['SA', 'AD', 'AD-COM'];
 const M = (type, chemins, regle, source, { voit, masque = [], reglages = [], cible = null, routes = null, inatteignable = null }) => ({
   type, chemins: Array.isArray(chemins) ? chemins : [chemins], regle, source, voit, masque, reglages, cible, routes, inatteignable,
 });
-const RENTABILITE = 'voitRentabilite : administration ; directeur si rentabiliteDirecteurs ; titulaire conducteur ou responsable si rentabiliteConducteur ; responsable de la branche du titulaire si rentabiliteHierarchie ; clé portant finances:read';
+const RENTABILITE = 'voitRentabilite : directeur si rentabiliteDirecteurs (testé avant l’administration) ; administration ; titulaire conducteur ou responsable si rentabiliteConducteur ; responsable de la branche du titulaire si rentabiliteHierarchie ; clé portant finances:read';
 const MONTANTS_CHANTIER = 'voitMontantsChantier : tout compte sauf le technicien ; toute clé';
 const COUT_MO = 'voitCoutMainOeuvre : administration ; toute clé';
 const MARGE = `${RENTABILITE} ; et margeCommercialeActive`;
@@ -76,13 +80,15 @@ const SRC_SERIALISE = 'chantiers/suivi.ts:226-239 (serializeChantier)';
 export const MONTANTS_MASQUES = [
   // --- Chantier : liste, fiche, clé chantiers:read ---
   M('chantier', 'budgetGlobalVendu', RENTABILITE, `${SRC_SERIALISE}, l.233 ; chantiers/droits.ts:23-35`, {
-    voit: [...ADMIN, 'DIR', 'CT', 'RESP', 'CLE chantiers:read+finances:read'], masque: ['COM', 'DC', 'AC', 'CPT', 'TECH', 'CLE chantiers:read'],
+    voit: [...ADMIN, 'CT', 'RESP', 'CLE chantiers:read+finances:read'], masque: ['COM', 'DC', 'AC', 'CPT', 'TECH', 'CLE chantiers:read'],
     reglages: ['rentabiliteConducteur=non', 'rentabiliteDirecteurs=non', 'rentabiliteHierarchie=non'],
   }),
   M('chantier', 'budgetMaterielVendu', MONTANTS_CHANTIER, 'chantiers/droits.ts:61 (chantierSansMontants) ; droits/visibilite.ts:11-14', { voit: [...ADMIN, 'CT', 'COM'], masque: ['TECH'] }),
   M('chantier', 'budgetMainOeuvreVendu', MONTANTS_CHANTIER, 'chantiers/droits.ts:62 (chantierSansMontants)', { voit: [...ADMIN, 'CT', 'COM'], masque: ['TECH'] }),
-  M('chantier', 'coutMaterielPrevu', `(voitPrixAchatDevis ou ${RENTABILITE}) et ${MONTANTS_CHANTIER}`, `${SRC_SERIALISE}, l.234`, {
-    voit: [...ADMIN, 'CT', 'CLE chantiers:read+finances:read'], masque: ['COM', 'TECH', 'CLE chantiers:read'], reglages: ['rentabiliteConducteur=non'],
+  // Le directeur lit le coût prévu par la rentabilité, et non par les prix d'achat (voitCoutPrevuParPrixAchat ; décisions
+  // de Nelson du 30-10-2026 et du 06-11-2026) : il le perd avec rentabiliteDirecteurs=non.
+  M('chantier', 'coutMaterielPrevu', `(voitCoutPrevuParPrixAchat ou ${RENTABILITE}) et ${MONTANTS_CHANTIER}`, `${SRC_SERIALISE}, l.234 ; chantiers/droits.ts (voitCoutPrevuParPrixAchat)`, {
+    voit: [...ADMIN, 'CT', 'CLE chantiers:read+finances:read'], masque: ['COM', 'TECH', 'CLE chantiers:read'], reglages: ['rentabiliteConducteur=non', 'rentabiliteDirecteurs=non'],
   }),
   M('chantier', 'metrics.materielReel', MONTANTS_CHANTIER, 'chantiers/droits.ts:67', { voit: [...ADMIN, 'CT', 'COM'], masque: ['TECH'] }),
   M('chantier', 'metrics.pctMateriel', MONTANTS_CHANTIER, 'chantiers/droits.ts:67', { voit: [...ADMIN, 'CT', 'COM'], masque: ['TECH'] }),
@@ -94,19 +100,19 @@ export const MONTANTS_MASQUES = [
   M('chantier', 'metrics.coutsInterventionDevis.coutMainOeuvre', COUT_MO, 'chantiers/droits.ts:50 et :69', { voit: [...ADMIN, 'CLE chantiers:read'], masque: ['CT', 'COM', 'TECH'] }),
   M('chantier', 'metrics.coutsInterventionDevis.materiel', MONTANTS_CHANTIER, 'chantiers/droits.ts:69', { voit: [...ADMIN, 'CT', 'COM'], masque: ['TECH'] }),
   ...['margeBrute', 'margeCommerciale', 'margePct', 'margeEstimee', 'margeEstimeePct', 'estimation'].map((champ) => M('chantier', `metrics.${champ}`, MARGE, 'chantiers/suivi.ts:139-141 (computeChantierMetrics)', {
-    voit: [...ADMIN, 'DIR', 'CT', 'RESP', 'CLE chantiers:read+finances:read'], masque: ['COM', 'DC', 'AC', 'CPT', 'TECH', 'CLE chantiers:read'],
+    voit: [...ADMIN, 'CT', 'RESP', 'CLE chantiers:read+finances:read'], masque: ['COM', 'DC', 'AC', 'CPT', 'TECH', 'CLE chantiers:read'],
     reglages: ['margeCommercialeActive=non', 'rentabiliteConducteur=non', 'rentabiliteDirecteurs=non', 'rentabiliteHierarchie=non'],
   })),
   // Estimation présente (rentabilité) : ses coûts de main-d'œuvre restent masqués hors administration. Ses autres
   // champs (coût matériel attendu, ratio, sources) ne sont masqués qu'avec l'estimation entière.
   ...['coutEstime', 'coutMainOeuvreAttendu', 'coutHoraireReference'].map((champ) => M('chantier', `metrics.estimation.${champ}`, COUT_MO, 'chantiers/droits.ts:51 (chantierSansCoutMainOeuvre)', {
-    voit: [...ADMIN, 'CLE chantiers:read+finances:read'], masque: ['CT', 'RESP', 'DIR'],
+    voit: [...ADMIN, 'CLE chantiers:read+finances:read'], masque: ['CT', 'RESP'],
   })),
   M('chantier', 'achats[].montantHT', MONTANTS_CHANTIER, 'chantiers/droits.ts:63 ; droits/visibilite.ts:18-26 (sansMontantsSaisie)', { voit: [...ADMIN, 'CT', 'CLE chantiers:read'], masque: ['TECH'] }),
   M('chantier', 'pointages[].tauxHoraireApplique', COUT_MO, 'chantiers/droits.ts:45 et :64 ; droits/visibilite.ts:41-50 (sansTauxHoraire)', { voit: [...ADMIN, 'CLE chantiers:read'], masque: ['CT', 'TECH'] }),
   M('chantier', 'pointages[].intervenant.tauxHoraireCharge', COUT_MO, 'chantiers/routes.ts:141 (intervenant joint à la fiche) ; droits/visibilite.ts:47 et :24', { voit: ADMIN, masque: ['CT', 'TECH'], routes: ['GET /api/chantiers/:id'] }),
   M('chantier', 'facturation', RENTABILITE, 'chantiers/routes.ts:168-177 (fiche seulement)', {
-    voit: [...ADMIN, 'DIR', 'CT', 'RESP'], masque: ['COM', 'DC', 'AC', 'CPT', 'TECH'], reglages: ['rentabiliteConducteur=non', 'rentabiliteDirecteurs=non', 'rentabiliteHierarchie=non'], routes: ['GET /api/chantiers/:id'],
+    voit: [...ADMIN, 'CT', 'RESP'], masque: ['COM', 'DC', 'AC', 'CPT', 'TECH'], reglages: ['rentabiliteConducteur=non', 'rentabiliteDirecteurs=non', 'rentabiliteHierarchie=non'], routes: ['GET /api/chantiers/:id'],
   }),
 
   // --- Journaux des achats et des heures (et leurs jumelles /api/v1) ---
@@ -154,17 +160,21 @@ export const MONTANTS_MASQUES = [
   }),
 
   // --- Tableau de bord et statistiques ---
-  M('stats-global', 'achatsTotal', `non commercial, et ${MONTANTS_CHANTIER}`, 'statistiques/routes.ts:83-88', { voit: [...ADMIN, 'CT', 'DIR'], masque: ['COM', 'TECH'] }),
-  M('stats-global', 'caTotal', 'administration, et margeCommercialeActive', 'statistiques/routes.ts:94-108', { voit: ADMIN, masque: ['CT', 'COM', 'DIR'], reglages: ['margeCommercialeActive=non'] }),
-  M('stats-global', 'margeTotal', 'administration ou commercial, et margeCommercialeActive', 'statistiques/routes.ts:109 et :117', { voit: [...ADMIN, 'COM'], masque: ['CT', 'DIR', 'TECH'], reglages: ['margeCommercialeActive=non'] }),
-  M('stats-global', 'margePct', 'administration, et margeCommercialeActive', 'statistiques/routes.ts:110', { voit: ADMIN, masque: ['CT', 'COM', 'DIR'], reglages: ['margeCommercialeActive=non'] }),
-  M('stats-global', 'commissionCommercialeTotal', 'administration, et margeCommercialeActive', 'statistiques/routes.ts:111', { voit: ADMIN, masque: ['CT', 'COM', 'DIR'], reglages: ['margeCommercialeActive=non'] }),
-  M('stats-global', 'commissionTotal', 'commercial, et margeCommercialeActive', 'statistiques/routes.ts:118', { voit: ['COM'], masque: [...ADMIN, 'CT', 'DIR'], reglages: ['margeCommercialeActive=non'] }),
+  // Tableau de bord : le directeur lit les chiffres de l'administration, quel que soit le réglage de la rentabilité (réponse
+  // de Nelson du 06-11-2026, « Chantiers seulement »), et non plus ceux d'un compte hors administration.
+  M('stats-global', 'achatsTotal', `non commercial, et ${MONTANTS_CHANTIER}`, 'statistiques/routes.ts:83-88', { voit: [...ADMIN, 'CT'], masque: ['COM', 'TECH'] }),
+  M('stats-global', 'caTotal', 'administration, et margeCommercialeActive', 'statistiques/routes.ts:94-108', { voit: ADMIN, masque: ['CT', 'COM'], reglages: ['margeCommercialeActive=non'] }),
+  M('stats-global', 'margeTotal', 'administration ou commercial, et margeCommercialeActive', 'statistiques/routes.ts:109 et :117', { voit: [...ADMIN, 'COM'], masque: ['CT', 'TECH'], reglages: ['margeCommercialeActive=non'] }),
+  M('stats-global', 'margePct', 'administration, et margeCommercialeActive', 'statistiques/routes.ts:110', { voit: ADMIN, masque: ['CT', 'COM'], reglages: ['margeCommercialeActive=non'] }),
+  M('stats-global', 'commissionCommercialeTotal', 'administration, et margeCommercialeActive', 'statistiques/routes.ts:111', { voit: ADMIN, masque: ['CT', 'COM'], reglages: ['margeCommercialeActive=non'] }),
+  M('stats-global', 'commissionTotal', 'commercial, et margeCommercialeActive', 'statistiques/routes.ts:118', { voit: ['COM'], masque: [...ADMIN, 'CT'], reglages: ['margeCommercialeActive=non'] }),
   M('stats-conducteur', 'depensesTotal', 'administration', 'statistiques/routes.ts:226', { voit: ADMIN, masque: ['RESP'] }),
   M('stats-conducteur', 'manqueAGagnerMainOeuvre', 'administration', 'statistiques/routes.ts:227', { voit: ADMIN, masque: ['RESP'] }),
-  M('stats-conducteur', 'caTotal', `administration ou ${RENTABILITE}`, 'statistiques/routes.ts:184-186 et :228', { voit: [...ADMIN, 'RESP'], reglages: ['rentabiliteHierarchie=non'] }),
-  M('stats-conducteur', 'margeTotal', `administration, ou ${MARGE}`, 'statistiques/routes.ts:187-190 et :229', { voit: [...ADMIN, 'RESP'], reglages: ['margeCommercialeActive=non', 'rentabiliteHierarchie=non'] }),
-  M('stats-conducteur', 'margePct', `administration, ou ${MARGE}`, 'statistiques/routes.ts:230', { voit: [...ADMIN, 'RESP'], reglages: ['margeCommercialeActive=non', 'rentabiliteHierarchie=non'] }),
+  // Performances : le CA et la marge suivent voitRentabilite seule (statistiques/routes.ts, réponse du 06-11-2026) ; le
+  // directeur les perd avec rentabiliteDirecteurs=non.
+  M('stats-conducteur', 'caTotal', RENTABILITE, 'statistiques/routes.ts:184-186 et :228', { voit: [...ADMIN, 'RESP'], reglages: ['rentabiliteDirecteurs=non', 'rentabiliteHierarchie=non'] }),
+  M('stats-conducteur', 'margeTotal', `administration, ou ${MARGE}`, 'statistiques/routes.ts:187-190 et :229', { voit: [...ADMIN, 'RESP'], reglages: ['margeCommercialeActive=non', 'rentabiliteDirecteurs=non', 'rentabiliteHierarchie=non'] }),
+  M('stats-conducteur', 'margePct', `administration, ou ${MARGE}`, 'statistiques/routes.ts:230', { voit: [...ADMIN, 'RESP'], reglages: ['margeCommercialeActive=non', 'rentabiliteDirecteurs=non', 'rentabiliteHierarchie=non'] }),
   M('stats-intervenant', 'cout', COUT_MO, 'statistiques/routes.ts:394-398', { voit: ADMIN, masque: ['CT', 'RESP'] }),
   // Masquée par le seul réglage : un commercial ne lit que sa ligne, l'administration toutes (liste, et non champ).
   M('stats-commercial', 'chantiers[].margeCommerciale', 'margeCommercialeActive', 'commissions/routes.ts:66 et :95 ; chantiers/suivi.ts:139-141', { voit: [...ADMIN, 'COM'], reglages: ['margeCommercialeActive=non'] }),
@@ -191,7 +201,7 @@ export const MONTANTS_MIS_A_ZERO = [
   {
     route: 'GET /api/stats/commerciaux', element: 'ligne du commercial COM (commerciaux[])', champs: ['margeTotal', 'margeStandard', 'margeReduite'],
     regle: 'margeCommercialeActive : la marge de chaque chantier est nulle et comptée zéro dans les totaux du commercial',
-    source: 'commissions/metier.ts:78-79 et :93-96 ; commissions/routes.ts:47-54', voit: ['SA', 'AD', 'AD-COM', 'COM'], reglage: 'margeCommercialeActive=non',
+    source: 'commissions/metier.ts:78-79 et :93-96 ; commissions/routes.ts:47-54', voit: ['SA', 'AD', 'AD-COM', 'DIR', 'COM'], reglage: 'margeCommercialeActive=non',
   },
 ];
 

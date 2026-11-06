@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 // lib/droits.ts, et non roles.ts : roles.ts charge api.ts, qui lit import.meta.env, introuvable sous tsx --test (N5 du
 // cadrage du lot « anomalies d'écran »). Le journal d'administration, lui, n'importe que lib/droits.ts (V-N6).
-import { TYPES_COMPTE, roleLabel, typesCompteProposes } from '../src/lib/droits.ts';
+import { TYPES_COMPTE, isAdminRole, isSuperAdminRole, roleLabel, typesCompteProposes } from '../src/lib/droits.ts';
 import { lisible } from '../src/lib/journalAdministration.ts';
 
 // PR A3 du lot « anomalies d'écran », #203 (cadrage, version 2, contrôlé) ; point 1 de #475 ; N4 du contrôle (casse de
@@ -79,4 +79,44 @@ test('un rôle absent ou inconnu n’a aucun libellé : rien n’est affiché, n
     assert.notEqual(roleLabel(role), roleLabel('CONDUCTEUR_TRAVAUX'));
     assert.equal(TYPES_COMPTE.some((type) => type.libelle === roleLabel(role)), false, `aucun libellé de type pour ${String(role)}`);
   }
+});
+
+// Lot « Directeur aligné sur l'administration » (cadrage version 3, « Libellé : Directeur, inchangé ») : le directeur a les
+// droits de l'administration (décision de Nelson du 24-10-2026, point 14), pas ceux du super administrateur. Il
+// n'attribue pas non plus le type Administrateur, qui lèverait sa restriction de rentabilité (réponse de Nelson du
+// 06-11-2026, « Chantiers seulement ») : choix par défaut, à confirmer (règle 5, option la plus restrictive), miroir de
+// refuseTypeAdminParDirecteur côté serveur. Dans Administration > Utilisateurs (AdminUtilisateurs.tsx :
+// typesCompteProposes(isSuper, estDirecteur)), il se voit donc proposer huit types, sans « Super administrateur » ni
+// « Administrateur », et son type garde son libellé.
+test('le directeur garde son libellé « Directeur » et se voit proposer les types d’un administrateur, sans « Super administrateur » ni « Administrateur »', () => {
+  assert.equal(roleLabel('DIRECTEUR'), 'Directeur');
+  assert.equal(lisible('DIRECTEUR', 'role'), 'Directeur');
+  assert.equal(isAdminRole('DIRECTEUR'), true);
+  assert.equal(isSuperAdminRole('DIRECTEUR'), false);
+  const directeur = typesCompteProposes(isSuperAdminRole('DIRECTEUR'), true);
+  // Huit types, dans l'ordre des listes, « Directeur » compris : il ouvre un autre directeur.
+  assert.deepEqual(directeur, enObjets(ATTENDUS.filter(([valeur]) => valeur !== 'SUPERADMIN' && valeur !== 'ADMIN')));
+  assert.equal(directeur.length, 8);
+  assert.equal(directeur.some((type) => type.valeur === 'ADMIN' || type.libelle === 'Administrateur'), false);
+  assert.equal(directeur.at(-1)?.valeur, 'DIRECTEUR');
+  // Lecture écartée : la liste de l'administrateur, « Administrateur » compris.
+  assert.notDeepEqual(directeur, typesCompteProposes(isSuperAdminRole('ADMIN')));
+});
+
+// Même choix par défaut : le second paramètre retire « Administrateur » et lui seul ; il ne touche pas au filtre du super
+// administrateur, et la valeur par défaut garde les listes d'avant (administrateur et super administrateur inchangés).
+test('typesCompteProposes : « sans administrateur » retire « Administrateur » et lui seul, avec ou sans « Super administrateur » ; par défaut, les listes d’avant', () => {
+  const neuf = enObjets(ATTENDUS.filter(([valeur]) => valeur !== 'SUPERADMIN'));
+  assert.deepEqual(typesCompteProposes(false, true), enObjets(ATTENDUS.filter(([valeur]) => valeur !== 'SUPERADMIN' && valeur !== 'ADMIN')));
+  assert.deepEqual(typesCompteProposes(true, true), enObjets(ATTENDUS.filter(([valeur]) => valeur !== 'ADMIN')));
+  assert.equal(typesCompteProposes(true, true).some((type) => type.valeur === 'SUPERADMIN'), true, 'le super administrateur reste proposé');
+  assert.equal(typesCompteProposes(true, true).length, 9);
+  // Valeur par défaut, et false explicite : inchangées.
+  assert.deepEqual(typesCompteProposes(false), neuf);
+  assert.deepEqual(typesCompteProposes(false, false), neuf);
+  assert.deepEqual(typesCompteProposes(true), enObjets(ATTENDUS));
+  assert.deepEqual(typesCompteProposes(true, false), enObjets(ATTENDUS));
+  // Proposer ne modifie pas la table : « Administrateur » garde son libellé (une ligne déjà administrateur l'affiche).
+  assert.equal(TYPES_COMPTE.length, 10);
+  assert.equal(roleLabel('ADMIN'), 'Administrateur');
 });

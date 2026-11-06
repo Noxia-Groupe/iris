@@ -66,7 +66,8 @@ const REFERENCE_SANS_GAIN = join(DOSSIER_MATRICES, 'individuels-sans-gain.txt');
 const SA = 'SA';
 // Comptes sans périmètre : le minimum « dans et hors du périmètre » ne les vise pas ; leurs refus ne sont jamais
 // joués par spéculation (un refus d'administration dépend souvent de l'état, qu'un corps valide peut changer).
-const ADMINISTRATION = ['SA', 'AD', 'AD-COM'];
+// Le directeur en fait partie depuis le lot « Directeur aligné sur l'administration » (décision de Nelson du 24-10-2026, point 14).
+const ADMINISTRATION = ['SA', 'AD', 'AD-COM', 'DIR'];
 const REFUS_AVANT_LA_CIBLE = /^(401|403|410) /;
 const REFUS_PREDIT = /^(403|404|409|410) /;
 const DESTINATAIRE = 'contact-matrice@iris.test';
@@ -863,7 +864,7 @@ if (!TEST_DATABASE_URL) {
       }
       assert.match(reponse('CT', 'PATCH /api/achats/:id', 'achat-chantier-ct', 'chantierId=chantier-autre et motif'), /^200 écrit \(.*\) ; chantier de l’achat inchangé$/);
       assert.match(reponse('SA', 'POST /api/users', '—', 'compte commercial, accesFinance=oui'), /^201 écrit \(.*\) ; accesFinance=oui$/);
-      for (const compte of ['AD', 'AD-COM']) assert.match(reponse(compte, 'POST /api/users', '—', 'compte commercial, accesFinance=oui'), /^201 écrit \(.*\) ; accesFinance=non$/);
+      for (const compte of ['AD', 'AD-COM', 'DIR']) assert.match(reponse(compte, 'POST /api/users', '—', 'compte commercial, accesFinance=oui'), /^201 écrit \(.*\) ; accesFinance=non$/);
     });
 
     // Avenant, section 3 : « pour chaque couple (compte, route) admis à l'entrée, au moins un cas dans et un cas hors du

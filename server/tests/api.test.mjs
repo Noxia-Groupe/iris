@@ -323,9 +323,9 @@ if (!TEST_DATABASE_URL) {
     const emailsUtilisateursTest = [
       'cycle.conducteur@iris.test', 'regles95@iris.test', 'conducteur.test@iris.test', 'correcteur.test@iris.test', 'auteur.journal@iris.test', 'permissions@iris.test', 'commercial.permissions@iris.test', 'finances.archive.achat@iris.test', 'finances.archive.pointage@iris.test', 'finances.archive.conducteur.pointage@iris.test',
       'sav.non-affecte@iris.test', 'sav.cout.curative@iris.test', 'sav.cout.curative.collegue@iris.test', 'sav.cout.curative.conducteur@iris.test', 'sav.cout.curative.course@iris.test', 'sav.cout.curative.relecture@iris.test', 'sav.cout.curative.fuseau@iris.test', 'sav.cout.contrat.termine@iris.test', 'sav.premier@iris.test', 'sav.second@iris.test', 'sav.journal@iris.test', 'sav.rapport@iris.test', 'sav.intrus@iris.test', 'sav.fige@iris.test', 'sav.cle.envoi@iris.test', 'sav.horodatage@iris.test', 'sav.trace@iris.test', 'sav.trace.annule@iris.test', 'sav.cloture@iris.test', 'sav.cloture.client_absent@iris.test', 'sav.cloture.refus_signature@iris.test', 'sav.cloture.signature_impossible@iris.test', 'sav.cloture.signe@iris.test', 'sav.verrou.cloture@iris.test', 'sav.verrou.signature@iris.test', 'sav.course.cle@iris.test', 'sav.verrou.annulation@iris.test', 'sav.verrou.affectation@iris.test', 'sav.journee@iris.test', 'sav.journee.collegue@iris.test', 'sav.journee.fuseau@iris.test', 'sav.journee.conducteur@iris.test', 'sav.journee.responsable@iris.test', 'sav.journee.tiers@iris.test', 'sav.journee.directeur@iris.test', 'sav.journee.equipe@iris.test', 'sav.fiche@iris.test', 'sav.fiche.collegue@iris.test', 'sav.fiche.commercial@iris.test', 'sav.conducteur@iris.test', 'sav.responsable@iris.test', 'sav.tiers@iris.test', 'sav.cout.heures@iris.test', 'sav.cout.second@iris.test', 'sav.cout.confidentiel@iris.test', 'sav.cout.garde.technicien@iris.test', 'sav.cout.garde.collegue@iris.test', 'sav.cout.garde.conducteur@iris.test', 'sav.cout.garde.commercial@iris.test', 'sav.cout.garde.taux@iris.test', 'sav.cout.garde.responsable@iris.test', 'contrat.conducteur@iris.test', 'contrat.couverture.technicien@iris.test', 'contrat.couverture.lecteur@iris.test', 'facture.conducteur@iris.test', 'comptabilite.conducteur@iris.test', 'comptabilite.modification.conducteur@iris.test', 'comptabilite.modification.admin@iris.test', 'comptabilite.import.autre.admin@iris.test', 'comptabilite.admin@iris.test', 'journal.comptable.sql@iris.test', 'journal.comptable.auteur@iris.test', 'journal.regle.auteur@iris.test', 'phase8bis.conducteur@iris.test', 'phase8bis.commercial@iris.test', 'rentabilite.conducteur@iris.test', 'suivi.conducteur@iris.test',
-      'chaine.conducteur@iris.test', 'chaine.secteur@iris.test', 'chaine.regional@iris.test', 'chaine.autre.responsable@iris.test', 'chaine.autre.conducteur@iris.test', 'chaine.directeur@iris.test', 'chaine.admin@iris.test', 'chaine.inactif@iris.test', 'chaine.commercial@iris.test', 'chaine.technicien@iris.test',
+      'chaine.conducteur@iris.test', 'chaine.secteur@iris.test', 'chaine.regional@iris.test', 'chaine.autre.responsable@iris.test', 'chaine.autre.conducteur@iris.test', 'chaine.directeur@iris.test', 'chaine.commercial.affecte@iris.test', 'chaine.admin@iris.test', 'chaine.inactif@iris.test', 'chaine.commercial@iris.test', 'chaine.technicien@iris.test',
       'budgets.technicien@iris.test', 'budgets.comptable@iris.test', 'budgets.conducteur@iris.test', 'budgets.responsable@iris.test', 'budgets.autre.responsable@iris.test', 'budgets.directeur@iris.test', 'budgets.commercial@iris.test', 'budgets.finance.technicien@iris.test', 'budgets.reconversion@iris.test',
-      'annuaire.technicien@iris.test', 'annuaire.autre.technicien@iris.test', 'annuaire.conducteur@iris.test', 'annuaire.directeur@iris.test', 'annuaire.commercial@iris.test', 'annuaire.responsable@iris.test',
+      'annuaire.technicien@iris.test', 'annuaire.autre.technicien@iris.test', 'annuaire.conducteur@iris.test', 'annuaire.directeur@iris.test', 'annuaire.responsable.sans.annuaire@iris.test', 'annuaire.commercial@iris.test', 'annuaire.responsable@iris.test',
       'ouverture.conducteur@iris.test', 'ouverture.autre.conducteur@iris.test', 'ouverture.commercial@iris.test', 'ouverture.commercial.inactif@iris.test', 'ouverture.ancien.conducteur@iris.test',
       'taux.responsable@iris.test', 'taux.conducteur@iris.test', 'taux.directeur@iris.test', 'taux.commercial@iris.test',
       'fiche111.titulaire@iris.test', 'permissions.autre@iris.test', 'sans.plan.commercial@iris.test',
@@ -2002,7 +2002,16 @@ if (!TEST_DATABASE_URL) {
       // Réservé à l'administration, et un simple administrateur ne rattache personne à un
       // super administrateur, qu'il ne voit pas.
       assert.equal((await rattacher('autre.conducteur', comptes.regional.id, entete('regional'))).status, 403);
-      assert.equal((await rattacher('autre.conducteur', comptes.regional.id, entete('directeur'))).status, 403);
+      // Lot « Directeur aligné sur l'administration » (décision de Nelson du 24-10-2026, point 14, « Tout, réglages
+      // compris ») : le directeur rattache comme l'administration, et comme elle ne touche à aucun super
+      // administrateur. Le rattachement fait est aussitôt retiré : il ouvrirait au régional la branche d'autre.conducteur.
+      const parDirecteur = await rattacher('autre.conducteur', comptes.regional.id, entete('directeur'));
+      assert.equal(parDirecteur.status, 200, JSON.stringify(parDirecteur.body));
+      assert.equal((await prisma.user.findUnique({ where: { id: comptes['autre.conducteur'].id } })).responsableHierarchiqueId, comptes.regional.id);
+      assert.equal((await rattacher('autre.conducteur', null, entete('directeur'))).status, 200);
+      assert.equal((await prisma.user.findUnique({ where: { id: comptes['autre.conducteur'].id } })).responsableHierarchiqueId, null);
+      assert.equal((await rattacher('autre.conducteur', superId, entete('directeur'))).status, 400);
+      assert.equal((await request(app).patch(`/api/users/${superId}/responsable-hierarchique`).set(entete('directeur')).send({ responsableHierarchiqueId: comptes.admin.id })).status, 403);
       assert.equal((await rattacher('autre.conducteur', superId, entete('admin'))).status, 400);
       assert.equal((await request(app).patch(`/api/users/${superId}/responsable-hierarchique`).set(entete('admin')).send({ responsableHierarchiqueId: comptes.admin.id })).status, 403);
       // La liste des comptes montre le rattachement ; la base refuse l'auto-rattachement écrit hors API.
@@ -2054,30 +2063,52 @@ if (!TEST_DATABASE_URL) {
       await voitLaPerte('regional', true);
     });
 
-    test('le directeur voit tous les chantiers et leur rentabilité, sans rien administrer ni saisir (hors clôture)', async () => {
+    // Lot « Directeur aligné sur l'administration » : la décision de Nelson du 24-10-2026 (point 14, « Oui la diectiin
+    // pourra tout faire », option « Tout, réglages compris ») remplace la lecture seule du 14-10-2026. Le directeur a les
+    // droits de l'administration et garde ses particularités (point 17) : toute la société, rentabilité selon le réglage.
+    // Les neuf gestes que ce test refusait jusqu'ici lui sont ouverts, avec la même réponse que pour l'administration.
+    test('le directeur voit tous les chantiers et leur rentabilité, et a les droits de l’administration : saisie, fiche, réglages, comptes, référentiels, planning, SAV, statistiques', async () => {
       await voitLaPerte('directeur', true);
       const autreBranche = await vue('directeur', chantierAutreBranche);
       assert.ok(autreBranche.liste, 'tous les chantiers, hors de toute hiérarchie');
       assert.equal(autreBranche.fiche.status, 200);
+      // Mêmes droits par défaut que l'administrateur (et non plus le seul chantiers:read d'avant).
       const moi = await request(app).get('/api/me').set(entete('directeur'));
-      assert.deepEqual(moi.body.permissions, ['chantiers:read']);
-      const refus = [
-        ['saisie d’un achat', () => request(app).post('/api/achats').set(entete('directeur')).send({ chantierId: chantier.id, montantHT: 1 })],
-        ['modification du chantier', () => request(app).patch(`/api/chantiers/${chantier.id}`).set(entete('directeur')).send({ nom: 'TEST piraté' })],
-        ['réglages', () => request(app).put('/api/parametres').set(entete('directeur')).send({ rentabiliteDirecteurs: true })],
-        ['comptes', () => request(app).get('/api/users').set(entete('directeur'))],
-        ['référentiel', () => request(app).post('/api/categories').set(entete('directeur')).send({ nom: 'TEST directeur' })],
-        ['planning', () => request(app).get('/api/planning/events').set(entete('directeur'))],
-        ['SAV', () => request(app).get('/api/interventions').set(entete('directeur'))],
-        ['statistiques Travaux', () => request(app).get('/api/stats/conducteurs').set(entete('directeur'))],
-        ['commercial d’un chantier resté à son nom', () => request(app).patch(`/api/chantiers/${chantierDuDirecteur.id}/commercial`).set(entete('directeur')).send({ commercialId: null })],
+      const moiAdmin = await request(app).get('/api/me').set(entete('admin'));
+      assert.deepEqual(moi.body.permissions, moiAdmin.body.permissions);
+      assert.deepEqual([...moi.body.permissions].sort(), ['chantiers:archive', 'chantiers:read', 'chantiers:write', 'clients:read', 'devis:read', 'devis:write']);
+      // Commercial à rattacher au chantier resté au nom du directeur (un chantier garde toujours un commercial).
+      const commercial = await prisma.user.upsert({ where: { email: 'chaine.commercial.affecte@iris.test' }, update: { role: 'COMMERCIAL', actif: true }, create: { email: 'chaine.commercial.affecte@iris.test', name: 'TEST Chaîne commercial affecté', role: 'COMMERCIAL' } });
+      const admis = [
+        ['saisie d’un achat', 200, () => request(app).post('/api/achats').set(entete('directeur')).send({ ...saisie, chantierId: chantierDuDirecteur.id, montantHT: 1 })],
+        ['modification du chantier', 200, () => request(app).patch(`/api/chantiers/${chantierDuDirecteur.id}`).set(entete('directeur')).send({ nom: 'TEST Chaîne ancien chantier du directeur, renommé par lui' })],
+        ['réglages', 200, () => request(app).put('/api/parametres').set(entete('directeur')).send({ rentabiliteDirecteurs: true })],
+        ['comptes', 200, () => request(app).get('/api/users').set(entete('directeur'))],
+        ['référentiel', 200, () => request(app).post('/api/categories').set(entete('directeur')).send({ nom: 'TEST Chaîne catégorie du directeur' })],
+        ['planning', 200, () => request(app).get('/api/planning/events?start=2099-03-02&end=2099-03-08').set(entete('directeur'))],
+        ['SAV', 200, () => request(app).get('/api/interventions').set(entete('directeur'))],
+        ['statistiques Travaux', 200, () => request(app).get('/api/stats/conducteurs').set(entete('directeur'))],
+        ['commercial d’un chantier resté à son nom', 200, () => request(app).patch(`/api/chantiers/${chantierDuDirecteur.id}/commercial`).set(entete('directeur')).send({ commercialId: commercial.id })],
       ];
       // Appels différés : supertest ouvre un serveur dès la création de la requête, et un
       // appel jamais attendu après un premier échec empêcherait la suite de se terminer.
-      for (const [cas, appel] of refus) {
+      const reponses = {};
+      for (const [cas, attendu, appel] of admis) {
         const reponse = await appel();
-        assert.equal(reponse.status, 403, `${cas} → ${reponse.status} ${JSON.stringify(reponse.body)}`);
+        assert.equal(reponse.status, attendu, `${cas} → ${reponse.status} ${JSON.stringify(reponse.body)}`);
+        reponses[cas] = reponse.body;
       }
+      // Chaque écriture est relue en base, au nom du directeur.
+      const achat = await prisma.achatReel.findUnique({ where: { id: reponses['saisie d’un achat'].id } });
+      assert.deepEqual([achat.chantierId, Number(achat.montantHT), achat.createdById], [chantierDuDirecteur.id, 1, comptes.directeur.id]);
+      assert.deepEqual(await prisma.chantier.findUnique({ where: { id: chantierDuDirecteur.id }, select: { nom: true, commercialId: true } }), { nom: 'TEST Chaîne ancien chantier du directeur, renommé par lui', commercialId: commercial.id });
+      assert.ok(await prisma.categorie.findUnique({ where: { nom: 'TEST Chaîne catégorie du directeur' } }));
+      // Comme pour l'administrateur, la liste des comptes ne montre aucun super administrateur.
+      assert.equal(reponses.comptes.some((u) => u.role === 'SUPERADMIN' || u.id === superId), false);
+      // Statistiques Travaux de toute la société, comme l'administration : les deux branches.
+      const lignes = reponses['statistiques Travaux'].map((l) => l.id);
+      assert.ok(lignes.includes(comptes.conducteur.id) && lignes.includes(comptes['autre.conducteur'].id));
+      // Le chantier d'origine n'a pas été touché.
       assert.equal((await prisma.chantier.findUnique({ where: { id: chantier.id } })).nom, 'TEST Chaîne chantier');
     });
 
@@ -2383,7 +2414,10 @@ if (!TEST_DATABASE_URL) {
       assert.equal(reouverture.status, 403, 'seul un administrateur rouvre');
     });
 
-    test('un directeur clôture n’importe quel chantier, sans le rouvrir ni le modifier', async () => {
+    // Lot « Directeur aligné sur l'administration » : le point 14 des décisions du 24-10-2026 remplace « sans
+    // réouverture (seule l'administration rouvre) » du 14-10-2026, et la réponse de Nelson du 06-11-2026 (« Oui, comme
+    // l'admin ») lui ouvre la fiche d'un chantier terminé. Il clôture toujours tout chantier (point 17).
+    test('un directeur clôture n’importe quel chantier, puis le modifie terminé et le rouvre, comme l’administration', async () => {
       const chantier = await prisma.chantier.create({ data: { client: 'TEST Client budgets', dateDebut: new Date(), budgetGlobalVendu: 1000, nom: 'TEST Budgets chantier clôturé par la direction', responsableId: chantierConducteur.responsableId } });
       const ligne = (await request(app).get('/api/chantiers').set(authDe.directeur)).body.find((c) => c.id === chantier.id);
       assert.equal(ligne.peutCloturer, true);
@@ -2391,10 +2425,19 @@ if (!TEST_DATABASE_URL) {
       assert.equal(cloture.status, 200, JSON.stringify(cloture.body));
       assert.equal(cloture.body.statut, 'TERMINE');
       assert.notEqual(cloture.body.dateFin, null, 'date de fin posée à la clôture');
+      // Chantier terminé : sa fiche s'écrit par le directeur, relue en base.
+      const fiche = await request(app).patch(`/api/chantiers/${chantier.id}`).set(authDe.directeur).send({ nom: 'TEST Budgets chantier clôturé, renommé par la direction' });
+      assert.equal(fiche.status, 200, JSON.stringify(fiche.body));
+      assert.deepEqual(await prisma.chantier.findUnique({ where: { id: chantier.id }, select: { nom: true, statut: true } }), { nom: 'TEST Budgets chantier clôturé, renommé par la direction', statut: 'TERMINE' });
+      // Réouverture, comme l'administration : le chantier repasse en cours (la date de fin saisie reste, comme pour elle).
       const reouverture = await request(app).patch(`/api/chantiers/${chantier.id}/statut`).set(authDe.directeur).send({ statut: 'EN_COURS' });
-      assert.equal(reouverture.status, 403, 'seul un administrateur rouvre');
-      // La clôture reste son seul geste d'écriture sur l'affaire.
-      assert.equal((await request(app).patch(`/api/chantiers/${chantier.id}`).set(authDe.directeur).send({ nom: 'TEST piraté' })).status, 403);
+      assert.equal(reouverture.status, 200, JSON.stringify(reouverture.body));
+      assert.equal(reouverture.body.statut, 'EN_COURS');
+      assert.equal((await prisma.chantier.findUnique({ where: { id: chantier.id } })).statut, 'EN_COURS');
+      // Témoin : le conducteur titulaire, hors administration, ne rouvre toujours pas (message inchangé).
+      assert.equal((await request(app).patch(`/api/chantiers/${chantier.id}/statut`).set(authDe.directeur).send({ statut: 'TERMINE' })).status, 200);
+      const refusConducteur = await request(app).patch(`/api/chantiers/${chantier.id}/statut`).set(authDe.conducteur).send({ statut: 'EN_COURS' });
+      assert.deepEqual([refusConducteur.status, refusConducteur.body.error], [403, 'Seul un administrateur peut réouvrir un chantier clôturé.']);
       assert.equal((await prisma.chantier.findUnique({ where: { id: chantier.id } })).statut, 'TERMINE');
       // Un conducteur ne clôture que l'affaire dont il est chargé.
       assert.equal((await request(app).patch(`/api/chantiers/${chantierTechnicien.id}/statut`).set(authDe.conducteur).send({ statut: 'TERMINE' })).status, 404);
@@ -2608,10 +2651,11 @@ if (!TEST_DATABASE_URL) {
     });
 
     test('chantiers : heures, marges et alertes gardées, sans taux ni coût de main-d’œuvre hors administration', async () => {
+      // Le directeur n'est plus « hors administration » : il lit taux et coût de main-d'œuvre comme elle (témoins, plus
+      // bas ; lot « Directeur aligné sur l'administration », réponse de Nelson du 06-11-2026, « Chantiers seulement »).
       const vues = [
         ['conducteur du chantier', authDe.conducteur, true],
         ['responsable de sa branche', authDe.responsable, true],
-        ['directeur', authDe.directeur, true],
         ['commercial vendeur', authDe.commercial, false],
       ];
       for (const [qui, entetes, rentabilite] of vues) {
@@ -2653,17 +2697,40 @@ if (!TEST_DATABASE_URL) {
       const parCle = (await request(app).get('/api/v1/chantiers').set({ Authorization: `Bearer ${cle}` })).body.find((c) => c.id === chantier.id);
       assert.equal(parCle.metrics.moReel, 504);
       assert.equal(parCle.pointages[0].tauxHoraireApplique, 42);
+      // Le directeur lit taux et coût de main-d'œuvre comme l'administration, quel que soit le réglage de la rentabilité
+      // (réponse de Nelson du 06-11-2026, « Chantiers seulement » : le réglage ne lui masque que la rentabilité des
+      // chantiers). 504 € = 12 h × 42 €/h : la lecture « coût de main-d'œuvre masqué » rendrait null.
+      try {
+        for (const rentabiliteDirecteurs of [true, false]) {
+          assert.equal((await request(app).put('/api/parametres').set(auth).send({ rentabiliteDirecteurs })).status, 200);
+          const fiche = (await request(app).get(`/api/chantiers/${chantier.id}`).set(authDe.directeur)).body;
+          const ligne = (await request(app).get('/api/chantiers').set(authDe.directeur)).body.find((c) => c.id === chantier.id);
+          const contexte = `directeur, rentabiliteDirecteurs=${rentabiliteDirecteurs}`;
+          for (const [ou, vue] of [['fiche', fiche], ['liste', ligne]]) {
+            assert.deepEqual([vue.metrics.moReel, vue.metrics.totalDepenses], [504, 604], `${ou}, ${contexte}`);
+            // La rentabilité, elle, suit le réglage : 396 € = 1 000 € − 604 €.
+            assert.deepEqual([vue.budgetGlobalVendu, vue.metrics.margeCommerciale], rentabiliteDirecteurs ? [1000, 396] : [null, null], `${ou}, ${contexte}`);
+          }
+          assert.deepEqual([fiche.pointages[0].tauxHoraireApplique, fiche.pointages[0].intervenant.tauxHoraireCharge], [42, 42], contexte);
+          // L'estimation est une donnée de rentabilité : son coût horaire de référence suit le réglage.
+          assert.equal(fiche.metrics.estimation?.coutHoraireReference ?? null, rentabiliteDirecteurs ? 42 : null, contexte);
+        }
+      } finally {
+        assert.equal((await request(app).put('/api/parametres').set(auth).send({ rentabiliteDirecteurs: true })).status, 200);
+      }
     });
 
     test('heures, intervenants et journal des saisies : ni taux appliqué ni taux de l’intervenant hors administration', async () => {
-      for (const [qui, entetes] of [['conducteur', authDe.conducteur], ['responsable', authDe.responsable], ['directeur', authDe.directeur]]) {
+      // Le directeur, qui a les droits de l'administration, en est le témoin plus bas (lot « Directeur aligné sur
+      // l'administration ») : il n'est plus « hors administration ».
+      for (const [qui, entetes] of [['conducteur', authDe.conducteur], ['responsable', authDe.responsable]]) {
         const heures = await request(app).get('/api/heures').set(entetes);
         assert.equal(heures.status, 200, `${qui} : ${JSON.stringify(heures.body)}`);
         const ligne = heures.body.find((h) => h.id === pointage.id);
         assert.equal(ligne.nbrHeures, 12, qui);
         sansTaux(heures.body, `heures, ${qui}`);
       }
-      for (const [qui, entetes] of [['conducteur', authDe.conducteur], ['responsable', authDe.responsable], ['directeur', authDe.directeur], ['commercial', authDe.commercial]]) {
+      for (const [qui, entetes] of [['conducteur', authDe.conducteur], ['responsable', authDe.responsable], ['commercial', authDe.commercial]]) {
         const intervenants = await request(app).get('/api/intervenants').set(entetes);
         assert.equal(intervenants.status, 200, `${qui} : ${JSON.stringify(intervenants.body)}`);
         assert.ok(intervenants.body.some((i) => i.id === intervenant.id), qui);
@@ -2676,11 +2743,18 @@ if (!TEST_DATABASE_URL) {
       sansTaux(journal.body, 'journal des saisies, conducteur');
       // Le montant d'un achat reste visible : il n'est pas un coût de main-d'œuvre.
       assert.equal(journal.body.find((e) => e.cible === 'ACHAT').apres.montantHT, 100);
-      // Témoins.
-      assert.equal((await request(app).get('/api/heures').set(auth)).body.find((h) => h.id === pointage.id).tauxHoraireApplique, 42);
-      assert.equal((await request(app).get('/api/intervenants').set(auth)).body.find((i) => i.id === intervenant.id).tauxHoraireCharge, 42);
-      const journalAdmin = (await request(app).get(`/api/chantiers/${chantier.id}/journal-saisies`).set(auth)).body;
-      assert.equal(journalAdmin.find((e) => e.cible === 'HEURE' && e.action === 'CREATION').apres.tauxHoraireApplique, 42);
+      // Témoins : l'administration, et le directeur qui en a les droits, quel que soit le réglage de la rentabilité.
+      try {
+        for (const [qui, entetes, rentabiliteDirecteurs] of [['administration', auth, true], ['directeur', authDe.directeur, true], ['directeur sans la rentabilité', authDe.directeur, false]]) {
+          assert.equal((await request(app).put('/api/parametres').set(auth).send({ rentabiliteDirecteurs })).status, 200);
+          assert.equal((await request(app).get('/api/heures').set(entetes)).body.find((h) => h.id === pointage.id).tauxHoraireApplique, 42, qui);
+          assert.equal((await request(app).get('/api/intervenants').set(entetes)).body.find((i) => i.id === intervenant.id).tauxHoraireCharge, 42, qui);
+          const journalAdmin = (await request(app).get(`/api/chantiers/${chantier.id}/journal-saisies`).set(entetes)).body;
+          assert.equal(journalAdmin.find((e) => e.cible === 'HEURE' && e.action === 'CREATION').apres.tauxHoraireApplique, 42, qui);
+        }
+      } finally {
+        assert.equal((await request(app).put('/api/parametres').set(auth).send({ rentabiliteDirecteurs: true })).status, 200);
+      }
     });
 
     test('saisie, correction, archivage et restauration d’heures par le conducteur : réponses sans taux, taux figé en base', async () => {
@@ -2798,6 +2872,9 @@ if (!TEST_DATABASE_URL) {
       const autreTechnicien = await compte('autreTechnicien', 'annuaire.autre.technicien@iris.test', 'TECHNICIEN', { responsableHierarchiqueId: responsable.id });
       const conducteur = await compte('conducteur', 'annuaire.conducteur@iris.test', 'CONDUCTEUR_TRAVAUX');
       await compte('directeur', 'annuaire.directeur@iris.test', 'DIRECTEUR');
+      // Témoin sans l'annuaire : un responsable sans clients:read (le directeur, qui le portait jusqu'ici, a désormais les
+      // droits de l'administration, décision de Nelson du 24-10-2026, point 14).
+      await compte('sansAnnuaire', 'annuaire.responsable.sans.annuaire@iris.test', 'RESPONSABLE');
       const commercial = await compte('commercial', 'annuaire.commercial@iris.test', 'COMMERCIAL');
       client = await prisma.client.create({ data: { raisonSociale: 'TEST Annuaire Résidence des Tilleuls', telephone: '01 23 45 67 89' } });
       contact = await prisma.clientContact.create({ data: { clientId: client.id, nom: 'Gardien', prenom: 'Paul', telephone: '06 11 22 33 44', principal: true } });
@@ -2897,8 +2974,15 @@ if (!TEST_DATABASE_URL) {
       assert.equal(conducteur.status, 200, JSON.stringify(conducteur.body));
       assert.deepEqual(conducteur.body.map((c) => c.id), [chantiers.vendu.id]);
       sansMontant(conducteur.body, 'conducteur');
+      // Le directeur a les droits de l'administration (lot « Directeur aligné sur l'administration ») : le même
+      // historique qu'elle, tous les chantiers reliés à la fiche sauf l'annulé, sans montant.
+      const directeur = await historique(jetons.directeur);
+      assert.equal(directeur.status, 200, JSON.stringify(directeur.body));
+      assert.deepEqual(directeur.body, admin.body);
+      sansMontant(directeur.body, 'directeur');
       // Sans l'annuaire (clients:read), pas d'historique ; un client inconnu répond 404.
-      assert.equal((await historique(jetons.directeur)).status, 403);
+      const sansAnnuaire = await historique(jetons.sansAnnuaire);
+      assert.deepEqual([sansAnnuaire.status, sansAnnuaire.body.error], [403, 'Permission requise : clients:read']);
       assert.equal((await request(app).get('/api/clients/00000000-0000-0000-0000-000000000000/chantiers').set(auth)).status, 404);
     });
 
@@ -3314,6 +3398,9 @@ if (!TEST_DATABASE_URL) {
       cleLecture = await cle(['catalogue:read']);
     });
     const enTete = (qui) => ({ Authorization: comptes[qui].Authorization });
+    // Comptes hors administration : tous sauf le directeur, qui a les droits de l'administration depuis le lot « Directeur
+    // aligné sur l'administration » (décision de Nelson du 24-10-2026, point 14) et en est le témoin admis.
+    const horsAdministration = () => Object.keys(comptes).filter((qui) => qui !== 'directeur');
 
     test('l’administration crée une main d’œuvre : quatre prix de vente, heures par jour, unité l’heure, création journalisée', async () => {
       const categorie = await envoyer('post', '/api/catalogue/categories', admin, { nom: `TEST Corps de métier ${suffixe}` });
@@ -3491,7 +3578,7 @@ if (!TEST_DATABASE_URL) {
       const avant = await etatPrestation(fiche.id);
       const avantPrestations = await prisma.cataloguePrestation.count();
       const avantJournal = await nbEntreesJournal();
-      for (const qui of Object.keys(comptes)) {
+      for (const qui of horsAdministration()) {
         const entetes = enTete(qui);
         assert.equal((await envoyer('post', '/api/catalogue/prestations', entetes, corpsMainOeuvre(`TEST-MO-INTRUS-${suffixe}`))).status, 403, `${qui} : création`);
         assert.equal((await envoyer('put', `/api/catalogue/prestations/${fiche.id}`, entetes, { ...corpsMainOeuvre(fiche.reference), prixVenteHt: '99' })).status, 403, `${qui} : modification`);
@@ -3501,6 +3588,26 @@ if (!TEST_DATABASE_URL) {
       assert.equal(await etatPrestation(fiche.id), avant);
       assert.equal(await prisma.cataloguePrestation.count(), avantPrestations);
       assert.equal(await nbEntreesJournal(), avantJournal);
+    });
+
+    // Lot « Directeur aligné sur l'administration » : le directeur écrit le catalogue comme l'administration
+    // (requireAdmin), et chaque écriture est journalisée à son nom.
+    test('le directeur crée, modifie, désactive et lit une main d’œuvre comme l’administration, journalisé à son nom', async () => {
+      const directeur = enTete('directeur');
+      const reference = `TEST-MO-DIRECTEUR-${suffixe}`;
+      const creation = await envoyer('post', '/api/catalogue/prestations', directeur, corpsMainOeuvre(reference));
+      assert.equal(creation.status, 201, JSON.stringify(creation.body));
+      const id = creation.body.id;
+      const modification = await envoyer('put', `/api/catalogue/prestations/${id}`, directeur, { ...corpsMainOeuvre(reference), prixVenteHt: '99' });
+      assert.equal(modification.status, 200, JSON.stringify(modification.body));
+      assert.equal(Number((await prisma.cataloguePrestation.findUnique({ where: { id } })).prixVenteHt), 99);
+      assert.equal((await request(app).delete(`/api/catalogue/prestations/${id}`).set(directeur)).status, 200);
+      assert.equal((await prisma.cataloguePrestation.findUnique({ where: { id } })).actif, false);
+      const lecture = await request(app).get('/api/catalogue/prestations').set(directeur);
+      assert.equal(lecture.status, 200, JSON.stringify(lecture.body));
+      const journal = await journalMainOeuvre(id);
+      assert.ok(journal.length >= 3, JSON.stringify(journal.map((e) => e.action)));
+      assert.ok(journal.every((e) => e.auteurId === comptes.directeur.id && e.auteurSuperAdmin === false), 'journalisé au nom du directeur');
     });
 
     test('clé d’intégration catalogue:write : aucune main d’œuvre créée, modifiée, désactivée ni réactivée, aucun passage dans un sens ou l’autre (403) ; les prestations ordinaires restent permises', async () => {
@@ -3703,11 +3810,23 @@ if (!TEST_DATABASE_URL) {
       // Fiche inconnue : 404.
       assert.equal((await envoyer('put', `/api/intervenants/${randomUUID()}/main-oeuvre`, admin, { mainOeuvreId: plombier.id })).status, 404);
       // Comptes non administrateurs : 403 ; aucune clé d'intégration (route de session).
-      for (const qui of Object.keys(comptes)) assert.equal((await rattacher(enTete(qui), electricien.id)).status, 403, qui);
+      for (const qui of horsAdministration()) assert.equal((await rattacher(enTete(qui), electricien.id)).status, 403, qui);
       assert.equal((await envoyer('put', `/api/v1/intervenants/${id}/main-oeuvre`, parCle(cleEcriture), { mainOeuvreId: electricien.id })).status, 404);
       assert.equal((await rattacher(parCle(cleEcriture), electricien.id)).status, 401);
       assert.equal(await rattachementEnBase(), plombier.id);
       assert.equal(await nbEntreesJournal(), avantJournal);
+      // Le directeur rattache comme l'administration (lot « Directeur aligné sur l'administration »), journalisé à son
+      // nom ; il remet ensuite le rattachement d'avant.
+      const parDirecteur = await rattacher(enTete('directeur'), electricien.id);
+      assert.equal(parDirecteur.status, 200, JSON.stringify(parDirecteur.body));
+      assert.equal(await rattachementEnBase(), electricien.id);
+      assert.equal((await rattacher(enTete('directeur'), plombier.id)).status, 200);
+      assert.equal(await rattachementEnBase(), plombier.id);
+      journal = await journalIntervenant(id);
+      assert.deepEqual(journal.slice(-2).map((e) => [e.auteurId, e.avant.mainOeuvre, e.apres.mainOeuvre]), [
+        [comptes.directeur.id, `${plombier.reference} — ${plombier.nom}`, `${electricien.reference} — ${electricien.nom}`],
+        [comptes.directeur.id, `${electricien.reference} — ${electricien.nom}`, `${plombier.reference} — ${plombier.nom}`],
+      ]);
 
       // Désactiver la main d'œuvre garde le rattachement, affiché comme tel à l'administration.
       assert.equal((await request(app).delete(`/api/catalogue/prestations/${plombier.id}`).set(admin)).status, 200);
@@ -3721,7 +3840,7 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await rattacher(admin, electricien.id)).status, 200);
       assert.equal((await request(app).delete(`/api/intervenants/${id}`).set(admin)).status, 200);
       journal = await journalIntervenant(id);
-      assert.deepEqual(journal.slice(2).map((e) => [e.avant.mainOeuvre, e.apres.mainOeuvre]), [
+      assert.deepEqual(journal.slice(4).map((e) => [e.avant.mainOeuvre, e.apres.mainOeuvre]), [
         [`${plombier.reference} — ${plombier.nom}`, null],
         [null, `${electricien.reference} — ${electricien.nom}`],
         [`${electricien.reference} — ${electricien.nom}`, null],
@@ -3744,7 +3863,7 @@ if (!TEST_DATABASE_URL) {
           assert.equal(texte.includes(indice), false, `${qui} : « ${indice} » exposé`);
         }
       };
-      for (const qui of Object.keys(comptes)) {
+      for (const qui of horsAdministration()) {
         const liste = await request(app).get('/api/intervenants').set(enTete(qui));
         assert.equal(liste.status, 200, qui);
         assert.ok(liste.body.some((i) => i.id === intervenant.id), `${qui} : la fiche est listée`);
@@ -3758,9 +3877,11 @@ if (!TEST_DATABASE_URL) {
       assert.equal(fiche.body.pointages[0].intervenant.nom, intervenant.nom);
       absents(fiche.body, 'conducteur, fiche chantier');
       absents((await request(app).get('/api/heures').set(enTete('conducteur'))).body, 'conducteur, journal des heures');
-      // Témoin : l'administration voit le rattachement.
+      // Témoins : l'administration voit le rattachement, et le directeur, qui en a les droits, le voit comme elle.
       const vueAdmin = (await request(app).get('/api/intervenants').set(admin)).body.find((i) => i.id === intervenant.id);
       assert.deepEqual([vueAdmin.mainOeuvreId, vueAdmin.mainOeuvre.reference], [mainOeuvre.id, mainOeuvre.reference]);
+      const vueDirecteur = (await request(app).get('/api/intervenants').set(enTete('directeur'))).body.find((i) => i.id === intervenant.id);
+      assert.deepEqual(vueDirecteur, vueAdmin);
     });
 
     test('une ligne de devis reprise d’une main d’œuvre fige son prix à l’heure hors contrat et l’unité heure', async () => {
@@ -5448,15 +5569,13 @@ if (!TEST_DATABASE_URL) {
         // Le conducteur crée des interventions, mais n'a pas le droit devis.
         assert.equal((await convertirEn(devis.id, 'INTERVENTION', {}, entete('conducteur'))).status, 403);
         // Porteurs du droit devis hors de l'encadrement SAV et de l'administration : l'assistante
-        // commerciale, le comptable et le directeur commercial l'ont par défaut ; le directeur et le
-        // responsable, s'il leur est accordé. Ils ne créent ni intervention ni contrat. Par la création
-        // directe, même code ; seul le directeur y reçoit le message de blockCommercial (D1a).
-        for (const compte of ['directeur', 'responsable']) {
-          await prisma.user.update({ where: { id: comptes[compte].id }, data: { permissions: ['devis:read', 'devis:write'] } });
-        }
+        // commerciale, le comptable et le directeur commercial l'ont par défaut ; le responsable, s'il lui
+        // est accordé. Ils ne créent ni intervention ni contrat. Par la création directe, même code et même
+        // message. Le directeur, qui a désormais les droits de l'administration, n'en est plus (plus bas).
+        await prisma.user.update({ where: { id: comptes.responsable.id }, data: { permissions: ['devis:read', 'devis:write'] } });
         for (const [compte, messageDirect] of [
           ['assistante', 'Création réservée à l’encadrement SAV.'], ['comptable', 'Création réservée à l’encadrement SAV.'],
-          ['directeurCommercial', 'Création réservée à l’encadrement SAV.'], ['directeur', 'Accès non autorisé pour un compte directeur.'],
+          ['directeurCommercial', 'Création réservée à l’encadrement SAV.'],
           ['responsable', 'Création réservée à l’encadrement SAV.'],
         ]) {
           const intervention = await convertirEn(devis.id, 'INTERVENTION', {}, entete(compte));
@@ -5485,6 +5604,20 @@ if (!TEST_DATABASE_URL) {
         }
         assert.equal(await prisma.devisConversion.count({ where: { devisId: devis.id } }), 0);
         assert.deepEqual(await dossiersCrees('TEST Conversion réservée'), { interventions: 0, contrats: 0, chantiers: 0 });
+        // Lot « Directeur aligné sur l'administration » (décision de Nelson du 24-10-2026, point 14) : le directeur, sans
+        // droit individuel, convertit comme l'administration, en intervention comme en contrat, et crée une intervention
+        // directe ; sur un devis à part.
+        assert.deepEqual((await prisma.user.findUnique({ where: { id: comptes.directeur.id } })).permissions, [], 'sans droit individuel');
+        const devisDirecteur = await devisAccepte('TEST Conversion par le directeur');
+        const interventionDirecteur = await convertirEn(devisDirecteur.id, 'INTERVENTION', {}, entete('directeur'));
+        assert.equal(interventionDirecteur.status, 201, JSON.stringify(interventionDirecteur.body));
+        const contratDirecteur = await convertirEn(devisDirecteur.id, 'CONTRAT', CONTRAT, entete('directeur'));
+        assert.equal(contratDirecteur.status, 201, JSON.stringify(contratDirecteur.body));
+        assert.deepEqual((await prisma.devisConversion.findMany({ where: { devisId: devisDirecteur.id }, orderBy: { cibleType: 'asc' } })).map((c) => [c.cibleType, c.cibleId]),
+          [['CONTRAT', contratDirecteur.body.id], ['INTERVENTION', interventionDirecteur.body.id]]);
+        assert.deepEqual(await dossiersCrees('TEST Conversion par le directeur'), { interventions: 1, contrats: 1, chantiers: 0 });
+        const directeDirecteur = await request(app).post('/api/interventions').set(entete('directeur')).send({ clientId, titre: 'TEST Intervention directe du directeur' });
+        assert.equal(directeDirecteur.status, 201, JSON.stringify(directeDirecteur.body));
       });
 
       test('une saisie invalide, un acompte attendu ou un client désactivé ne crée rien', async () => {
@@ -8301,7 +8434,9 @@ if (!TEST_DATABASE_URL) {
       });
 
       // Règle 2 : la journée et la fiche reprennent, pour chaque rôle, le périmètre de la liste.
-      test('journée et fiche suivent le périmètre hiérarchique de la liste ; le directeur est refusé', async () => {
+      // Lot « Directeur aligné sur l'administration » : le directeur voit tout le SAV, comme l'administration
+      // (voitToutLeSav ; décision de Nelson du 24-10-2026, points 14 et 17), et non plus refusé comme le commercial.
+      test('journée et fiche suivent le périmètre hiérarchique de la liste ; le directeur voit tout, comme l’administration', async () => {
         const jetonDe = (compte) => jwt.sign({ id: compte.id }, process.env.JWT_SECRET);
         const conducteur = await prisma.user.create({ data: { email: 'sav.journee.conducteur@iris.test', name: 'TEST Conducteur journée', role: 'CONDUCTEUR_TRAVAUX' } });
         const responsable = await prisma.user.create({ data: { email: 'sav.journee.responsable@iris.test', name: 'TEST Responsable journée', role: 'RESPONSABLE' } });
@@ -8345,11 +8480,15 @@ if (!TEST_DATABASE_URL) {
             assert.equal(ids.includes(item.id), false, `${role} : journée ${item.titre}`);
           }
         }
-        // L'administration voit tout ; le directeur, comme le commercial, n'a ni journée ni fiche.
+        // L'administration voit tout, et le directeur, qui en a les droits, de même : chaque fiche et la journée entière.
         assert.equal((await lire(session, horsEquipe.id)).status, 200);
         assert.equal((await idsDuJour(session)).includes(horsEquipe.id), true);
-        assert.equal((await lire(jetonDe(directeur), rattachee.id)).status, 403);
-        assert.equal((await journee(jetonDe(directeur))).status, 403);
+        const idsDirecteur = await idsDuJour(jetonDe(directeur));
+        for (const item of [rattachee, ouverteParLui, horsEquipe]) {
+          assert.equal((await lire(jetonDe(directeur), item.id)).status, 200, `directeur : fiche ${item.titre}`);
+          assert.equal(idsDirecteur.includes(item.id), true, `directeur : journée ${item.titre}`);
+        }
+        assert.deepEqual([...idsDirecteur].sort(), [...await idsDuJour(session)].sort(), 'la journée du directeur est celle de l’administration');
       });
     });
 
@@ -16049,15 +16188,20 @@ if (!TEST_DATABASE_URL) {
       const [commercial, technicien, lecteur, directeur] = await Promise.all([
         prisma.user.create({ data: { email: EMAILS[0], name: 'TEST Commercial PDF devis', role: 'COMMERCIAL' } }),
         prisma.user.create({ data: { email: EMAILS[1], name: 'TEST Technicien PDF devis', role: 'TECHNICIEN', permissions: ['devis:read'] } }),
-        // Le droit de lecture seul, accordé à un directeur, suffit.
-        prisma.user.create({ data: { email: EMAILS[2], name: 'TEST Lecteur PDF devis', role: 'DIRECTEUR', permissions: ['devis:read'] } }),
+        // Le droit de lecture seul, accordé à un responsable (qui ne l'a pas par son type), suffit. Le directeur, qui
+        // servait ici de lecteur, a désormais les droits de l'administration (lot « Directeur aligné sur
+        // l'administration », décision de Nelson du 24-10-2026, point 14) : il imprime sans droit individuel.
+        prisma.user.create({ data: { email: EMAILS[2], name: 'TEST Lecteur PDF devis', role: 'RESPONSABLE', permissions: ['devis:read'] } }),
         prisma.user.create({ data: { email: EMAILS[3], name: 'TEST Directeur PDF devis', role: 'DIRECTEUR' } }),
       ]);
       try {
         assert.ok((await texteDevis(devis.id, entete(commercial))).texte.includes(`DEVIS ${devis.numero}`));
         assert.ok((await texteDevis(devis.id, entete(lecteur))).texte.includes(`DEVIS ${devis.numero}`));
+        assert.ok((await texteDevis(devis.id, entete(directeur))).texte.includes(`DEVIS ${devis.numero}`));
         assert.equal((await pdfDevis(devis.id, entete(technicien))).status, 403);
-        assert.equal((await pdfDevis(devis.id, entete(directeur))).status, 403);
+        // Témoin du lecteur : le même responsable, sans le droit individuel, est refusé.
+        await prisma.user.update({ where: { id: lecteur.id }, data: { permissions: [] } });
+        assert.equal((await pdfDevis(devis.id, entete(lecteur))).status, 403);
         assert.equal((await request(app).get(`/api/devis/${devis.id}/document.pdf`)).status, 401);
         assert.equal((await pdfDevis(randomUUID())).status, 404);
         const cle = await request(app).post('/api/admin/api-keys').set(admin()).send({ nom: 'TEST clé PDF devis', scopes: ['devis:read'] });
@@ -17940,7 +18084,10 @@ if (!TEST_DATABASE_URL) {
         prisma.user.create({ data: { email: EMAILS[0], name: 'TEST Commercial envoi', role: 'COMMERCIAL' } }),
         // Les droits devis, accordés individuellement, restent sans effet pour un technicien.
         prisma.user.create({ data: { email: EMAILS[1], name: 'TEST Technicien envoi', role: 'TECHNICIEN', permissions: ['devis:read', 'devis:write'] } }),
-        prisma.user.create({ data: { email: EMAILS[2], name: 'TEST Lecteur envoi', role: 'DIRECTEUR', permissions: ['devis:read'] } }),
+        // Lecteur : un responsable, qui n'a pas le droit devis par son type, avec la seule lecture. Le directeur, qui
+        // tenait ce rôle, a désormais les droits de l'administration (lot « Directeur aligné sur l'administration »,
+        // décision de Nelson du 24-10-2026, point 14) : il lit et envoie devis et factures comme elle.
+        prisma.user.create({ data: { email: EMAILS[2], name: 'TEST Lecteur envoi', role: 'RESPONSABLE', permissions: ['devis:read'] } }),
         prisma.user.create({ data: { email: EMAILS[3], name: 'TEST Directeur envoi', role: 'DIRECTEUR' } }),
       ]);
       const cle = await request(app).post('/api/admin/api-keys').set(admin()).send({ nom: 'TEST clé envoi', scopes: ['devis:read', 'devis:write', 'finances:read'] });
@@ -17955,12 +18102,19 @@ if (!TEST_DATABASE_URL) {
         // Le droit de lecture seul lit le journal, sans préparer d'envoi.
         assert.equal((await lire(`devis/${devis.id}`, entete(lecteur))).status, 200);
         assert.equal((await envoyer(`devis/${devis.id}`, 'client@envoi.test', entete(lecteur))).status, 403);
-        for (const compte of [technicien, directeur]) {
-          assert.equal((await lire(`devis/${devis.id}`, entete(compte))).status, 403, compte.email);
-          assert.equal((await envoyer(`devis/${devis.id}`, 'client@envoi.test', entete(compte))).status, 403, compte.email);
-        }
+        assert.equal((await lire(`devis/${devis.id}`, entete(technicien))).status, 403, technicien.email);
+        assert.equal((await envoyer(`devis/${devis.id}`, 'client@envoi.test', entete(technicien))).status, 403, technicien.email);
+        // Le directeur, comme l'administration : devis et facture, lus et envoyés, à son nom.
+        assert.equal((await lire(`devis/${devis.id}`, entete(directeur))).status, 200);
+        const envoiDirecteur = await envoyer(`devis/${devis.id}`, 'client@envoi.test', entete(directeur));
+        assert.equal(envoiDirecteur.status, 201, JSON.stringify(envoiDirecteur.body));
+        assert.equal(envoiDirecteur.body.envoi.auteurNom, 'TEST Directeur envoi');
+        assert.equal((await lire(`factures/${facture.id}`, entete(directeur))).status, 200);
+        const factureDirecteur = await envoyer(`factures/${facture.id}`, 'client@envoi.test', entete(directeur));
+        assert.equal(factureDirecteur.status, 201, JSON.stringify(factureDirecteur.body));
+        assert.equal(factureDirecteur.body.envoi.auteurNom, 'TEST Directeur envoi');
         // Facture : l'administration seule, comme son PDF.
-        for (const compte of [commercial, technicien, lecteur, directeur]) {
+        for (const compte of [commercial, technicien, lecteur]) {
           const refus = await lire(`factures/${facture.id}`, entete(compte));
           assert.equal(refus.status, 403, compte.email);
           assert.equal(refus.body.error, 'Accès réservé aux administrateurs');
@@ -17976,11 +18130,12 @@ if (!TEST_DATABASE_URL) {
           assert.equal((await request(app).post(`/api/v1/${chemin}/envois`).set(parCle).send({ destinataire: 'client@envoi.test' })).status, 404);
         }
         assert.equal((await request(app).get('/api/v1/devis').set(parCle)).status, 200, 'la clé lit bien les devis');
-        assert.equal(await prisma.envoiDocument.count({ where: { devisId: devis.id } }), 1);
-        assert.equal(await prisma.envoiDocument.count({ where: { factureId: facture.id } }), 0);
+        // Celui du commercial et celui du directeur ; pour la facture, celui du directeur seul.
+        assert.equal(await prisma.envoiDocument.count({ where: { devisId: devis.id } }), 2);
+        assert.equal(await prisma.envoiDocument.count({ where: { factureId: facture.id } }), 1);
         // Un refus de droits n'écrit rien, statut compris (lot 6a-3 bis) : un brouillon reste brouillon.
         const intact = await creerDevis(client.id, 'TEST Droits : brouillon jamais envoyé');
-        for (const [auth, code] of [[entete(lecteur), 403], [entete(technicien), 403], [entete(directeur), 403], [parCle, 401]]) {
+        for (const [auth, code] of [[entete(lecteur), 403], [entete(technicien), 403], [parCle, 401]]) {
           assert.equal((await envoyer(`devis/${intact.id}`, 'client@envoi.test', auth)).status, code);
         }
         assert.equal((await request(app).post(`/api/devis/${intact.id}/envois`).send({ destinataire: 'client@envoi.test' })).status, 401);
@@ -18550,13 +18705,21 @@ if (!TEST_DATABASE_URL) {
       await refusSansEcriture(visite.id, () => remettre(visite.id, jeton('conducteur')), 404, 'Intervention introuvable.', 'conducteur hors périmètre');
       await refusSansEcriture(visite.id, () => remettre(visite.id, jeton('responsable')), 404, 'Intervention introuvable.', 'responsable hors périmètre');
       await refusSansEcriture(visite.id, () => remettre(visite.id, jeton('technicien')), 403, 'Un technicien ne modifie ni le planning ni les référentiels.', 'technicien affecté');
+      // Le directeur n'en est plus : il a les droits de l'administration (lot « Directeur aligné sur l'administration »,
+      // décision de Nelson du 24-10-2026, point 14), et remet à planifier comme elle, plus bas.
       for (const [cle, message] of [
-        ['commercial', 'Accès non autorisé pour un compte commercial.'], ['directeur', 'Accès non autorisé pour un compte directeur.'],
+        ['commercial', 'Accès non autorisé pour un compte commercial.'],
         ['directeurCommercial', 'Accès non autorisé pour un compte directeur commercial.'], ['assistante', 'Accès non autorisé pour un compte assistante commerciale.'],
         ['comptable', 'Accès non autorisé pour un compte comptable.'],
       ]) {
         await refusSansEcriture(visite.id, () => remettre(visite.id, jeton(cle)), 403, message, cle);
       }
+      // Le directeur, hors de toute affectation et de tout rattachement, remet une autre visite « à planifier » : il voit
+      // tout le SAV (voitToutLeSav) et passe les gardes de l'administration ; le créneau est libéré.
+      const { visite: visiteDirecteur } = await visitePlanifiee('TEST Remise par le directeur');
+      const parDirecteur = await remettre(visiteDirecteur.id, jeton('directeur'));
+      assert.equal(parDirecteur.status, 200, JSON.stringify(parDirecteur.body));
+      assert.deepEqual([parDirecteur.body.statut, (await etat(visiteDirecteur.id)).projection], ['A_PLANIFIER', null]);
       await refusSansEcriture(visite.id, () => request(app).post(`/api/interventions/${visite.id}/remise-a-planifier`).send({ motif: MOTIF }), 401, 'Authentification requise', 'sans session');
       // Clé d'intégration : refusée par la route de session, et aucune porte /api/v1.
       const cle = await request(app).post('/api/admin/api-keys').set(admin()).send({ nom: 'TEST agent remise à planifier', scopes: ['clients:read', 'chantiers:write'] });
@@ -18578,6 +18741,9 @@ if (!TEST_DATABASE_URL) {
         const refus = await refusSansEcriture(visite.id, () => remettre(visite.id), 403, 'Le module Planning est désactivé par l\'administration.', 'module désactivé');
         assert.equal(refus.body.code, 'PLANNING_DESACTIVE');
         assert.equal((await placer(visite.id, {}, jeton('admin'))).status, 403, 'le placement aussi');
+        // Le directeur, comme l'administrateur, et non comme le super administrateur : refusé.
+        const refusDirecteur = await refusSansEcriture(visite.id, () => remettre(visite.id, jeton('directeur')), 403, 'Le module Planning est désactivé par l\'administration.', 'directeur, module désactivé');
+        assert.equal(refusDirecteur.body.code, 'PLANNING_DESACTIVE');
         const superAdmin = await remettre(visite.id, admin());
         assert.equal(superAdmin.status, 200, JSON.stringify(superAdmin.body));
       } finally {
@@ -19270,12 +19436,22 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await envoyer('put', '/api/parametres', admin, { tauxAcompteDefaut: tauxAcompteDefaut.toString() })).status, 200);
       assert.equal(await pasEnBase(), 15);
       // Droits : l'administration seule, en session ; ni les autres comptes, ni une clé d'intégration.
-      for (const qui of ['commercial', 'conducteur', 'technicien', 'directeur', 'assistante']) {
+      for (const qui of ['commercial', 'conducteur', 'technicien', 'assistante']) {
         assert.equal((await regler(45, enTete(qui))).status, 403, qui);
         assert.equal((await request(app).get('/api/parametres').set(enTete(qui))).status, 403, qui);
       }
       assert.equal((await request(app).put('/api/parametres').send({ pasTempsPasseMinutes: 45 })).status, 401);
       assert.equal((await regler(45, parCle(cleDevis))).status, 401);
+      assert.equal(await pasEnBase(), 15);
+      // Le directeur a les droits de l'administration, réglages compris (lot « Directeur aligné sur l'administration »,
+      // décision de Nelson du 24-10-2026, point 14) : il lit et règle le pas, journalisé à son nom ; l'administration
+      // le remet ensuite à 15 minutes.
+      assert.equal((await request(app).get('/api/parametres').set(enTete('directeur'))).status, 200);
+      const parDirecteur = await regler(45, enTete('directeur'));
+      assert.deepEqual([parDirecteur.status, parDirecteur.body.pasTempsPasseMinutes, await pasEnBase()], [200, 45, 45]);
+      const entreeDirecteur = await dernierJournal();
+      assert.deepEqual([entreeDirecteur.auteurId, entreeDirecteur.avant, entreeDirecteur.apres], [comptes.directeur.id, { pasTempsPasseMinutes: 15 }, { pasTempsPasseMinutes: 45 }]);
+      assert.equal((await regler(15)).status, 200);
       assert.equal(await pasEnBase(), 15);
       // La base borne aussi le réglage, bornes comprises, de 1 à 60 minutes : un pas réglé avant le lot
       // « facture au temps passé » y reste admis (aucune reprise), l'API n'acceptant plus que 15, 30, 45 ou
@@ -20044,12 +20220,20 @@ if (!TEST_DATABASE_URL) {
         const melange = await envoyer('put', '/api/parametres', admin, { pasTempsPasseMinutes: 45, tempsMinimumMinutes: 20 });
         assert.equal(melange.status, 400, JSON.stringify(melange.body));
         assert.deepEqual([await pasEnBase(), await minimumEnBase()], [15, 90]);
-        // Droits : l'administration seule, en session.
-        for (const qui of ['commercial', 'conducteur', 'technicien', 'directeur', 'assistante']) {
+        // Droits : l'administration seule, en session (le directeur en a les droits, plus bas).
+        for (const qui of ['commercial', 'conducteur', 'technicien', 'assistante']) {
           assert.equal((await reglerMinimum(120, enTete(qui))).status, 403, qui);
         }
         assert.equal((await reglerMinimum(120, parCle(cleDevis))).status, 401);
         assert.equal((await request(app).put('/api/parametres').send({ tempsMinimumMinutes: 120 })).status, 401);
+        assert.equal(await minimumEnBase(), 90);
+        // Le directeur règle le minimum comme l'administration (lot « Directeur aligné sur l'administration »),
+        // journalisé à son nom ; l'administration remet ensuite 90 minutes.
+        const parDirecteur = await reglerMinimum(120, enTete('directeur'));
+        assert.deepEqual([parDirecteur.status, parDirecteur.body.tempsMinimumMinutes, await minimumEnBase()], [200, 120, 120]);
+        entree = await dernierJournal();
+        assert.deepEqual([entree.auteurId, entree.avant, entree.apres], [comptes.directeur.id, { tempsMinimumMinutes: 90 }, { tempsMinimumMinutes: 120 }]);
+        assert.equal((await reglerMinimum(90)).status, 200);
         assert.equal(await minimumEnBase(), 90);
       } finally {
         assert.equal((await reglerMinimum('')).status, 200);
@@ -20365,11 +20549,21 @@ if (!TEST_DATABASE_URL) {
       }
       // Types sans SAV ni planning : refusés avant toute lecture.
       for (const [cle, message] of [
-        ['commercial', 'Accès non autorisé pour un compte commercial.'], ['directeur', 'Accès non autorisé pour un compte directeur.'],
+        ['commercial', 'Accès non autorisé pour un compte commercial.'],
         ['directeurCommercial', 'Accès non autorisé pour un compte directeur commercial.'], ['assistante', 'Accès non autorisé pour un compte assistante commerciale.'],
         ['comptable', 'Accès non autorisé pour un compte comptable.'],
       ]) {
         await refusSansEcriture(terminee.id, () => marquer(terminee.id, true, jeton(cle)), 403, message, cle);
+      }
+      // Le directeur, qui a les droits de l'administration et voit tout le SAV (lot « Directeur aligné sur
+      // l'administration », décision de Nelson du 24-10-2026, points 14 et 16), pose et retire la marque comme elle,
+      // journalisé à son nom, sans être affecté ni rattaché.
+      for (const aSuivre of [true, false]) {
+        const parDirecteur = await marquer(terminee.id, aSuivre, jeton('directeur'));
+        assert.equal(parDirecteur.status, 200, JSON.stringify(parDirecteur.body));
+        assert.equal(parDirecteur.body.aSuivre, aSuivre);
+        derniere = (await journal(terminee.id)).at(-1);
+        assert.deepEqual([derniere.action, derniere.auteurId, derniere.apres.aSuivre], ['MARQUE_A_SUIVRE', comptes.directeur.id, aSuivre]);
       }
       // Le conducteur qui a créé l'intervention la marque dans son périmètre.
       const duConducteur = await curativePlanifiee('TEST Suivi intervention du conducteur', { enTete: jeton('conducteur') });
@@ -20506,12 +20700,20 @@ if (!TEST_DATABASE_URL) {
       const initiale = await curativeTerminee('TEST Suivi droits', { aSuivre: true });
       await refusSansEcriture(initiale.id, () => creerSuite(initiale.id, {}, jeton('technicien')), 403, 'Création d’une suite réservée à l’encadrement du SAV.', 'technicien');
       for (const [cle, message] of [
-        ['commercial', 'Accès non autorisé pour un compte commercial.'], ['directeur', 'Accès non autorisé pour un compte directeur.'],
+        ['commercial', 'Accès non autorisé pour un compte commercial.'],
         ['directeurCommercial', 'Accès non autorisé pour un compte directeur commercial.'], ['assistante', 'Accès non autorisé pour un compte assistante commerciale.'],
         ['comptable', 'Accès non autorisé pour un compte comptable.'],
       ]) {
         await refusSansEcriture(initiale.id, () => creerSuite(initiale.id, {}, jeton(cle)), 403, message, cle);
       }
+      // Décision de Nelson du 24-10-2026, point 16 : le directeur fait partie des comptes qui créent la suite liée. Sans
+      // affectation ni rattachement, il la crée sur une intervention à part et la lit ensuite.
+      const pourDirecteur = await curativeTerminee('TEST Suivi droits du directeur', { aSuivre: true });
+      const suiteDirecteur = await creerSuite(pourDirecteur.id, {}, jeton('directeur'));
+      assert.equal(suiteDirecteur.status, 201, JSON.stringify(suiteDirecteur.body));
+      const suiteEnBase = await prisma.intervention.findUniqueOrThrow({ where: { id: suiteDirecteur.body.id } });
+      assert.deepEqual([suiteEnBase.interventionInitialeId, suiteEnBase.createdById], [pourDirecteur.id, comptes.directeur.id]);
+      assert.equal((await fiche_(suiteDirecteur.body.id, jeton('directeur'))).status, 200);
       for (const cle of ['conducteur', 'responsable']) {
         await refusSansEcriture(initiale.id, () => creerSuite(initiale.id, {}, jeton(cle)), 404, 'Intervention introuvable.', `${cle} hors périmètre`);
       }
@@ -22906,7 +23108,10 @@ if (!TEST_DATABASE_URL) {
         ['a2assistante', 'ASSISTANTE_COMMERCIALE', [], false],
         ['a2comptable', 'COMPTABLE', [], false],
         ['a2directeurCommercial', 'DIRECTEUR_COMMERCIAL', [], false],
-        ['a2directeurDevis', 'DIRECTEUR', ['devis:write'], false],
+        // Le directeur a les droits de l'administration, sans droit individuel (lot « Directeur aligné sur
+        // l'administration », décision de Nelson du 24-10-2026, point 14 ; il crée la suite liée, point 16) : il crée
+        // l'intervention et ouvre le chantier d'un devis qui a déjà la sienne, comme elle.
+        ['a2directeurDevis', 'DIRECTEUR', [], true],
         ['a2responsableDevis', 'RESPONSABLE', ['devis:write'], false],
       ];
       const constats = [];
@@ -23291,12 +23496,53 @@ if (!TEST_DATABASE_URL) {
     test('droits : l’administration seule lit l’aperçu et crée la facture', async () => {
       const { intervention } = await interventionTempsPasse('droits');
       await heure(intervention.id, 1);
-      for (const cle of ['conducteur', 'technicien', 'directeur']) {
+      // Le directeur n'en est plus : il a les droits de l'administration (test suivant).
+      for (const cle of ['conducteur', 'technicien']) {
         assert.equal((await apercu(intervention.id, jeton(cle))).status, 403, cle);
         assert.equal((await creerFacture(intervention.id, { totalHtAttendu: 55.5 }, jeton(cle))).status, 403, cle);
       }
       assert.equal((await request(app).get(`/api/interventions/${intervention.id}/facture-temps-passe`)).status, 401);
       assert.equal(await prisma.facture.count({ where: { interventionId: intervention.id } }), 0);
+    });
+
+    // Lot « Directeur aligné sur l'administration » (montant) : décision de Nelson du 24-10-2026, point 14, et réponse du
+    // 06-11-2026, « Chantiers seulement » (« Le reste (tableau de bord, commissions, factures, coûts, prix d'achat) comme
+    // l'administration »). Le directeur lit l'aperçu et crée la facture au temps passé, avec les montants de
+    // l'administration, que la société lui laisse la rentabilité des chantiers ou non.
+    // Montants : 1,42 h saisies (85,2 min) → minimum d'une heure puis deux tranches de 15 min → 1,5 h × 45,50 € = 68,25 €,
+    // plus 10 € de fourniture : 78,25 € HT, 15,65 € de TVA, 93,90 € TTC. Lectures écartées : 403 (avant le lot) ; un aperçu
+    // ou une facture aux montants masqués (null) pour le directeur sans la rentabilité ; 1,42 h facturées telles quelles
+    // (64,61 € de main d'œuvre, 74,61 € HT) si le minimum et le pas ne s'appliquaient pas à sa facture.
+    test('le directeur lit l’aperçu et crée la facture au temps passé avec les montants de l’administration, réglage de la rentabilité coché ou non', async () => {
+      const avant = (await prisma.parametres.findUniqueOrThrow({ where: { id: 'singleton' } })).rentabiliteDirecteurs;
+      try {
+        for (const rentabiliteDirecteurs of [true, false]) {
+          assert.equal((await envoyer('put', '/api/parametres', admin, { rentabiliteDirecteurs })).status, 200);
+          const { devis, intervention } = await interventionTempsPasse(`directeur ${rentabiliteDirecteurs}`);
+          await heure(intervention.id, 1.42);
+          const parAdmin = await apercu(intervention.id);
+          assert.equal(parAdmin.status, 200, JSON.stringify(parAdmin.body));
+          const parDirecteur = await apercu(intervention.id, jeton('directeur'));
+          assert.equal(parDirecteur.status, 200, JSON.stringify(parDirecteur.body));
+          assert.deepEqual(parDirecteur.body, parAdmin.body, `aperçu, rentabiliteDirecteurs=${rentabiliteDirecteurs}`);
+          assert.deepEqual([parDirecteur.body.heures.facturees, parDirecteur.body.totalHt, parDirecteur.body.totalTva, parDirecteur.body.totalTtc], [1.5, 78.25, 15.65, 93.9]);
+          const creee = await creerFacture(intervention.id, { totalHtAttendu: 78.25 }, jeton('directeur'));
+          assert.equal(creee.status, 201, JSON.stringify(creee.body));
+          assert.deepEqual([creee.body.statut, creee.body.tempsPasse, creee.body.totalHt, creee.body.totalTva, creee.body.totalTtc], ['BROUILLON', true, 78.25, 15.65, 93.9]);
+          const factures = await facturesDe(intervention.id);
+          assert.equal(factures.length, 1);
+          const [enBase] = factures;
+          assert.deepEqual([enBase.totalHt.toString(), enBase.totalTva.toString(), enBase.totalTtc.toString()], ['78.25', '15.65', '93.9']);
+          assert.deepEqual(enBase.lignes.map((l) => [l.designation, l.quantite.toString(), l.prixUnitaireHt.toString(), l.totalHt.toString(), l.totalTtc.toString()]), [
+            ['TEST Main d’œuvre au temps passé', '1.5', '45.5', '68.25', '81.9'],
+            ['TEST Fourniture', '1', '10', '10', '12'],
+          ]);
+          assert.deepEqual(enBase.journal.map((j) => [j.action, j.acteurId]), [['CREATION_BROUILLON', comptes.directeur.id]]);
+          assert.match(enBase.journal[0].detail, new RegExp(`devis ${devis.numero} v${devis.version}$`));
+        }
+      } finally {
+        assert.equal((await envoyer('put', '/api/parametres', admin, { rentabiliteDirecteurs: avant })).status, 200);
+      }
     });
 
     test('concurrence : une heure saisie pendant la création est attendue, puis refuse la facture dont l’aperçu a changé', async () => {
@@ -26272,6 +26518,723 @@ if (!TEST_DATABASE_URL) {
         assert.deepEqual([res.status, res.body.error], [400, 'Montant de ligne hors des limites acceptées.'], quantite);
       }
       assert.equal(await nbDevis(), nombre, 'aucun devis créé');
+    });
+  });
+
+  // Lot « Directeur aligné sur l'administration » (cadrage version 3, verdict « go » du controleur-coherence).
+  // Décisions de Nelson du 24-10-2026 (historique, « Décisions du 24-10-2026 sur la remise à planifier ») : point 14,
+  // « Oui la diectiin pourra tout faire », option « Tout, réglages compris » (« Le Directeur a les mêmes droits que
+  // l'administration (ADMIN), paramètres et gestion des comptes compris »), les réglages réservés au super administrateur
+  // restant au SUPERADMIN ; point 16, le directeur crée la suite liée ; point 17, « Il garde ses particularite actuel »
+  // (toute la société, rentabilité selon le réglage de la société, clôture). Réponses de Nelson du 06-11-2026 :
+  // rentabilité, « Chantiers seulement » (le réglage ne lui masque que la marge, le vendu et le coût prévu des chantiers,
+  // « Le reste (tableau de bord, commissions, factures, coûts, prix d'achat) comme l'administration ») ; chantier terminé,
+  // « Oui, comme l'admin ». Décision 7 de #182 : « aussi commercial » réservé aux types ADMIN et SUPERADMIN.
+  // Chaque montant est lu par le directeur sous rentabiliteDirecteurs vrai puis faux, et comparé à un ADMIN.
+  describe('Directeur aligné sur l’administration : droits de l’administration hors réglages du super administrateur, rentabilité des chantiers selon le réglage', () => {
+    let sa = {};
+    let saId = '';
+    const comptes = {};
+    const suffixe = `${Date.now()}`;
+    let client = null;
+    let fournisseur = null;
+    let categorie = null;
+    let fiche = null;
+    let reglagesInitiaux = null;
+    const jeton = (cle) => ({ Authorization: `Bearer ${jwt.sign({ id: comptes[cle].id }, process.env.JWT_SECRET)}` });
+    // Le corps est calculé avant la requête (cf. les autres blocs) : request(app) ouvre un serveur éphémère.
+    const envoyer = (methode, chemin, auth, corps) => request(app)[methode](chemin).set(auth).send(corps);
+    const lire = (chemin, auth) => request(app).get(chemin).set(auth);
+    const regler = async (reglages) => {
+      const res = await envoyer('put', '/api/parametres', sa, reglages);
+      assert.equal(res.status, 200, JSON.stringify(res.body));
+    };
+    const aujourdhui = async () => {
+      const fuseau = (await prisma.companySettings.findUnique({ where: { id: 'singleton' } }))?.fuseauHoraire || 'Europe/Paris';
+      return jourCivilEntreprise(new Date(), fuseau).split('-').reverse().join('-');
+    };
+    const nbJournalAdministration = () => prisma.journalAdministration.count();
+    const REFUS_SUPERADMIN = 'Accès réservé au super administrateur';
+    const REFUS_CIBLE_SUPERADMIN = 'Seul un super administrateur peut gérer un compte super administrateur.';
+    // Devis signé : 4 détecteurs à 35 € HT (prix d'achat prévu 12,35 €, soit 49,40 € de coût prévu) et 2 h de pose à 50 €
+    // HT : 240 € HT vendus.
+    const devisSigne = async (objet, auth = sa) => {
+      const devis = await envoyer('post', '/api/devis', auth, { clientId: client.id, objet: `TEST Directeur ${objet} ${suffixe}`, lignes: [
+        { designation: 'TEST Détecteur directeur', nature: 'FOURNITURE', quantite: '4', prixUnitaireHt: '35', tauxTva: 20, prixAchatUnitaireHt: '12.35' },
+        { designation: 'TEST Pose directeur', nature: 'MAIN_OEUVRE', quantite: '2', prixUnitaireHt: '50', tauxTva: 20 },
+      ] });
+      assert.equal(devis.status, 201, JSON.stringify(devis.body));
+      const signature = await envoyer('post', `/api/devis/${devis.body.id}/signature`, sa, { signataire: 'TEST Signataire directeur', confirme: true });
+      assert.equal(signature.status, 201, JSON.stringify(signature.body));
+      return devis.body;
+    };
+    const convertir = async (devisId, auth = sa, responsableId = comptes.conducteur.id) => {
+      const res = await envoyer('post', `/api/devis/${devisId}/convertir`, auth, { cible: 'CHANTIER', responsableId, commercialId: comptes.commercial.id });
+      assert.equal(res.status, 201, JSON.stringify(res.body));
+      return res.body;
+    };
+    // Prérequis comptables de l'émission, posés s'ils manquent (même procédé que le bloc « TVA française »).
+    const assurerFacturation = async () => {
+      const compte = async (code, nature) => (await prisma.compteComptable.upsert({ where: { code }, create: { code, nature, libelle: `TEST ${code}` }, update: { actif: true } })).id;
+      const regles = await prisma.regleComptable.findMany({ include: { compte: true } });
+      for (const [cle, code, nature] of [['CLIENT', '411371', 'ACTIF'], ['VENTE_PRESTATION', '706371', 'PRODUIT'], ['VENTE_ARTICLE', '707371', 'PRODUIT']]) {
+        const actuelle = regles.find((r) => r.cle === cle);
+        if (!actuelle?.compte?.actif || actuelle.compte.nature !== nature) await regleFixture(cle, await compte(code, nature));
+      }
+      if (!regles.find((r) => r.cle === 'JOURNAL_VENTES')?.journal) await regleFixture('JOURNAL_VENTES', 'VTE');
+      const tva = await prisma.regleTvaComptable.findUnique({ where: { taux: 20 }, include: { compte: true } });
+      if (!tva?.compte?.actif) await tvaFixture(20, await compte('445371', 'TVA'));
+    };
+
+    before(async () => {
+      const secours = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
+      assert.equal(secours.status, 200);
+      sa = { Authorization: `Bearer ${secours.body.token}` };
+      saId = secours.body.user.id;
+      for (const [cle, role, extra] of [
+        ['directeur', 'DIRECTEUR', {}], ['admin', 'ADMIN', {}], ['conducteur', 'CONDUCTEUR_TRAVAUX', {}], ['conducteurPerformances', 'CONDUCTEUR_TRAVAUX', {}], ['commercial', 'COMMERCIAL', {}],
+        ['autreCommercial', 'COMMERCIAL', {}], ['directeurCommercial', 'DIRECTEUR_COMMERCIAL', {}],
+      ]) {
+        const email = `directeur-admin.${cle}@iris.test`;
+        comptes[cle] = await prisma.user.upsert({ where: { email }, update: { role, actif: true, permissions: [], estCommercial: false, accesFinance: false, ...extra }, create: { email, name: `TEST Directeur administration ${cle}`, role, ...extra } });
+      }
+      reglagesInitiaux = await prisma.parametres.findUniqueOrThrow({ where: { id: 'singleton' } });
+      await regler({ margeCommercialeActive: true, rentabiliteConducteur: true, rentabiliteHierarchie: true, rentabiliteDirecteurs: true });
+      const cree = await envoyer('post', '/api/clients', sa, { raisonSociale: `TEST Client directeur administration ${suffixe}`, siren: await sirenLibre() });
+      assert.equal(cree.status, 201, JSON.stringify(cree.body));
+      client = cree.body;
+      const site = await envoyer('post', `/api/clients/${client.id}/sites`, sa, { nom: 'TEST Facturation directeur', adresse: '4 rue de la Direction', codePostal: '14000', ville: 'Caen', estSiteFacturation: true });
+      assert.equal(site.status, 201, JSON.stringify(site.body));
+      client.siteId = site.body.id;
+      fournisseur = await prisma.fournisseur.create({ data: { nom: `TEST Fournisseur directeur ${suffixe}` } });
+      categorie = await prisma.categorie.create({ data: { nom: `TEST Catégorie directeur ${suffixe}` } });
+      fiche = await prisma.intervenant.create({ data: { nom: `TEST Intervenant directeur ${suffixe}`, role: 'Technicien', tauxHoraireCharge: 38 } });
+    });
+
+    after(async () => {
+      if (reglagesInitiaux) await prisma.parametres.update({ where: { id: 'singleton' }, data: {
+        margeCommercialeActive: reglagesInitiaux.margeCommercialeActive,
+        rentabiliteConducteur: reglagesInitiaux.rentabiliteConducteur,
+        rentabiliteHierarchie: reglagesInitiaux.rentabiliteHierarchie,
+        rentabiliteDirecteurs: reglagesInitiaux.rentabiliteDirecteurs,
+        seuilMargeFaible: reglagesInitiaux.seuilMargeFaible,
+      } });
+    });
+
+    test('comptes : le directeur crée un compte, en change le type, le désactive et le révoque, journalisé à son nom ; comme un administrateur, il ne touche à aucun super administrateur, ni à l’accès financier, ni aux droits individuels', async () => {
+      const directeur = jeton('directeur');
+      const email = `directeur-admin.cree.${suffixe}@iris.test`;
+      // L'accès financier demandé à la création est ignoré, comme pour un administrateur (seul un super administrateur l'accorde).
+      const creation = await envoyer('post', '/api/users', directeur, { email, name: 'TEST Compte créé par le directeur', role: 'CONDUCTEUR_TRAVAUX', accesFinance: true });
+      assert.equal(creation.status, 201, JSON.stringify(creation.body));
+      const id = creation.body.id;
+      assert.deepEqual(await prisma.user.findUnique({ where: { id }, select: { role: true, accesFinance: true, actif: true } }), { role: 'CONDUCTEUR_TRAVAUX', accesFinance: false, actif: true });
+      const type = await envoyer('patch', `/api/users/${id}/role`, directeur, { role: 'RESPONSABLE' });
+      assert.equal(type.status, 200, JSON.stringify(type.body));
+      const desactivation = await envoyer('patch', `/api/users/${id}/actif`, directeur, { actif: false });
+      assert.equal(desactivation.status, 200, JSON.stringify(desactivation.body));
+      assert.deepEqual(await prisma.user.findUnique({ where: { id }, select: { role: true, actif: true } }), { role: 'RESPONSABLE', actif: false });
+      const journal = await prisma.journalAdministration.findMany({ where: { cibleId: id }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
+      assert.deepEqual(journal.map((e) => [e.domaine, e.action, e.auteurId, e.auteurSuperAdmin]), [
+        ['DROITS', 'CREATION', comptes.directeur.id, false], ['DROITS', 'TYPE_COMPTE', comptes.directeur.id, false], ['DROITS', 'DESACTIVATION', comptes.directeur.id, false],
+      ]);
+      assert.deepEqual([journal[1].avant.role, journal[1].apres.role], ['CONDUCTEUR_TRAVAUX', 'RESPONSABLE']);
+      const revocation = await request(app).delete(`/api/users/${id}`).set(directeur);
+      assert.equal(revocation.status, 200, JSON.stringify(revocation.body));
+      assert.equal(await prisma.user.count({ where: { id } }), 0);
+      // La liste des comptes : sans aucun super administrateur, comme pour l'administrateur.
+      const liste = await lire('/api/users', directeur);
+      assert.equal(liste.status, 200, JSON.stringify(liste.body));
+      assert.equal(liste.body.some((u) => u.role === 'SUPERADMIN'), false);
+      assert.deepEqual(liste.body.map((u) => u.id).sort(), (await lire('/api/users', jeton('admin'))).body.map((u) => u.id).sort());
+
+      // Refus du super administrateur : chaque geste, joué par le directeur puis par l'administrateur, même code et même
+      // message, sans rien écrire (comptes et journal).
+      const cible = comptes.conducteur;
+      const gestes = [
+        ['création d’un super administrateur', (auth) => envoyer('post', '/api/users', auth, { email: `directeur-admin.super.${suffixe}@iris.test`, name: 'TEST Super refusé', role: 'SUPERADMIN' }), 403, REFUS_CIBLE_SUPERADMIN],
+        ['promotion en super administrateur', (auth) => envoyer('patch', `/api/users/${cible.id}/role`, auth, { role: 'SUPERADMIN' }), 403, REFUS_CIBLE_SUPERADMIN],
+        ['type d’un super administrateur', (auth) => envoyer('patch', `/api/users/${saId}/role`, auth, { role: 'ADMIN' }), 403, REFUS_CIBLE_SUPERADMIN],
+        ['désactivation d’un super administrateur', (auth) => envoyer('patch', `/api/users/${saId}/actif`, auth, { actif: false }), 403, REFUS_CIBLE_SUPERADMIN],
+        ['révocation d’un super administrateur', (auth) => request(app).delete(`/api/users/${saId}`).set(auth), 403, REFUS_CIBLE_SUPERADMIN],
+        ['accès financier', (auth) => envoyer('patch', `/api/users/${cible.id}/acces-finance`, auth, { accesFinance: true }), 403, REFUS_SUPERADMIN],
+        ['droits individuels', (auth) => envoyer('put', `/api/users/${cible.id}/permissions`, auth, { permissions: ['devis:read'] }), 403, REFUS_SUPERADMIN],
+      ];
+      const etat = async () => JSON.stringify([await prisma.user.findMany({ where: { OR: [{ id: { in: [cible.id, saId] } }, { email: `directeur-admin.super.${suffixe}@iris.test` }] }, orderBy: { id: 'asc' } }), await nbJournalAdministration()]);
+      const avant = await etat();
+      for (const [cas, appel, code, message] of gestes) {
+        for (const qui of ['directeur', 'admin']) {
+          const res = await appel(jeton(qui));
+          assert.deepEqual([res.status, res.body.error], [code, message], `${qui}, ${cas}`);
+        }
+      }
+      assert.equal(await etat(), avant, 'aucun refus n’écrit');
+    });
+
+    test('« aussi commercial » : réservé à l’administrateur et au super administrateur, jamais porté par un directeur (décision 7 de #182)', async () => {
+      const directeur = jeton('directeur');
+      const MESSAGE = 'Seul un compte Administrateur peut être marqué "aussi commercial".';
+      // Bascule refusée sur un directeur (400), par le super administrateur comme par le directeur lui-même, sans écrire.
+      const avantJournal = await nbJournalAdministration();
+      for (const [qui, auth] of [['super administrateur', sa], ['directeur', directeur]]) {
+        const refus = await envoyer('patch', `/api/users/${comptes.directeur.id}/est-commercial`, auth, { estCommercial: true });
+        assert.deepEqual([refus.status, refus.body.error], [400, MESSAGE], qui);
+      }
+      assert.equal((await prisma.user.findUnique({ where: { id: comptes.directeur.id } })).estCommercial, false);
+      assert.equal(await nbJournalAdministration(), avantJournal);
+      // Création d'un directeur avec la case cochée : enregistré sans elle. Témoin : un administrateur la garde.
+      for (const [role, attendu] of [['DIRECTEUR', false], ['ADMIN', true]]) {
+        const email = `directeur-admin.aussi.${role.toLowerCase()}.${suffixe}@iris.test`;
+        const res = await envoyer('post', '/api/users', sa, { email, name: `TEST Aussi commercial ${role}`, role, estCommercial: true });
+        assert.equal(res.status, 201, JSON.stringify(res.body));
+        assert.equal(res.body.estCommercial, attendu, role);
+        assert.equal((await prisma.user.findUniqueOrThrow({ where: { email } })).estCommercial, attendu, role);
+      }
+      // Un administrateur « aussi commercial » passé directeur perd la marque, journalisée ; le directeur pose la marque sur
+      // un administrateur, comme l'administration.
+      const ancien = await prisma.user.findUniqueOrThrow({ where: { email: `directeur-admin.aussi.admin.${suffixe}@iris.test` } });
+      const passage = await envoyer('patch', `/api/users/${ancien.id}/role`, directeur, { role: 'DIRECTEUR' });
+      assert.equal(passage.status, 200, JSON.stringify(passage.body));
+      assert.deepEqual([passage.body.role, passage.body.estCommercial], ['DIRECTEUR', false]);
+      assert.deepEqual(await prisma.user.findUnique({ where: { id: ancien.id }, select: { role: true, estCommercial: true } }), { role: 'DIRECTEUR', estCommercial: false });
+      const [entree] = await prisma.journalAdministration.findMany({ where: { cibleId: ancien.id, action: 'TYPE_COMPTE' } });
+      assert.deepEqual([entree.avant, entree.apres, entree.auteurId], [{ role: 'ADMIN', estCommercial: true }, { role: 'DIRECTEUR', estCommercial: false }, comptes.directeur.id]);
+      const marque = await envoyer('patch', `/api/users/${comptes.admin.id}/est-commercial`, directeur, { estCommercial: true });
+      assert.equal(marque.status, 200, JSON.stringify(marque.body));
+      assert.equal((await prisma.user.findUnique({ where: { id: comptes.admin.id } })).estCommercial, true);
+      assert.equal((await envoyer('patch', `/api/users/${comptes.admin.id}/est-commercial`, directeur, { estCommercial: false })).status, 200);
+      // Un directeur marqué en base (état que l'API ne produit pas) n'est ni proposé ni accepté comme commercial d'un chantier.
+      const marqueEnBase = await prisma.user.upsert({ where: { email: 'directeur-admin.marque-en-base@iris.test' }, update: { role: 'DIRECTEUR', estCommercial: true, actif: true }, create: { email: 'directeur-admin.marque-en-base@iris.test', name: 'TEST Directeur marqué en base', role: 'DIRECTEUR', estCommercial: true } });
+      assert.equal((await lire('/api/commerciaux', sa)).body.some((c) => c.id === marqueEnBase.id), false);
+      const chantier = await prisma.chantier.create({ data: { nom: `TEST Directeur chantier commercial ${suffixe}`, client: client.raisonSociale, clientId: client.id, dateDebut: new Date(), budgetGlobalVendu: 100, responsableId: comptes.conducteur.id, commercialId: comptes.commercial.id } });
+      const refus = await envoyer('patch', `/api/chantiers/${chantier.id}/commercial`, sa, { commercialId: marqueEnBase.id });
+      assert.deepEqual([refus.status, refus.body.error], [400, 'Commercial introuvable.']);
+      assert.equal((await prisma.chantier.findUnique({ where: { id: chantier.id } })).commercialId, comptes.commercial.id);
+      const commerciaux = await lire('/api/stats/commerciaux', sa);
+      assert.equal(commerciaux.body.commerciaux.some((c) => c.id === marqueEnBase.id), false);
+      // État retiré en fin de test : aucun autre test ne doit hériter d'un directeur marqué.
+      await prisma.user.update({ where: { id: marqueEnBase.id }, data: { estCommercial: false, actif: false } });
+    });
+
+    test('paramètres : le directeur lit et règle les paramètres, journalisés à son nom ; modules, société, rémunération, clés d’intégration et conservation du journal restent au super administrateur', async () => {
+      const directeur = jeton('directeur');
+      assert.equal((await lire('/api/parametres', directeur)).status, 200);
+      const avant = (await prisma.parametres.findUniqueOrThrow({ where: { id: 'singleton' } })).seuilMargeFaible;
+      const reglage = await envoyer('put', '/api/parametres', directeur, { seuilMargeFaible: 17 });
+      assert.equal(reglage.status, 200, JSON.stringify(reglage.body));
+      assert.equal(Number((await prisma.parametres.findUniqueOrThrow({ where: { id: 'singleton' } })).seuilMargeFaible), 17);
+      const entree = await prisma.journalAdministration.findFirstOrThrow({ where: { domaine: 'REGLAGES', type: 'PARAMETRES' }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] });
+      assert.deepEqual([entree.auteurId, entree.auteurSuperAdmin, entree.apres], [comptes.directeur.id, false, { seuilMargeFaible: 17 }]);
+      await regler({ seuilMargeFaible: avant === null ? null : Number(avant) });
+      // Réglages du super administrateur : refusés au directeur comme à l'administrateur, même message, sans rien écrire.
+      const etat = async () => JSON.stringify([await prisma.parametres.findUniqueOrThrow({ where: { id: 'singleton' } }), await prisma.companySettings.findUnique({ where: { id: 'singleton' } }), await prisma.apiAccessKey.count(), await nbJournalAdministration()]);
+      const avantRefus = await etat();
+      for (const [cas, appel] of [
+        ['modules', (auth) => envoyer('put', '/api/modules', auth, { planningActif: false })],
+        ['société', (auth) => envoyer('put', '/api/company', auth, { raisonSociale: 'TEST Société renommée par le directeur' })],
+        ['logo', (auth) => request(app).delete('/api/company/logo').set(auth)],
+        ['rémunération', (auth) => envoyer('put', '/api/parametres/remuneration', auth, {})],
+        ['clés d’intégration (liste)', (auth) => lire('/api/admin/api-keys', auth)],
+        ['clés d’intégration (création)', (auth) => envoyer('post', '/api/admin/api-keys', auth, { nom: 'TEST clé du directeur', scopes: ['chantiers:read'] })],
+        ['conservation du journal', (auth) => envoyer('put', '/api/journal-administration/conservation', auth, { jours: 400 })],
+      ]) {
+        for (const qui of ['directeur', 'admin']) {
+          const res = await appel(jeton(qui));
+          assert.deepEqual([res.status, res.body.error], [403, REFUS_SUPERADMIN], `${qui}, ${cas}`);
+        }
+      }
+      assert.equal(await etat(), avantRefus, 'aucun refus n’écrit');
+      // Le journal d'administration : lu comme l'administrateur, sans les entrées réservées au super administrateur.
+      const journalDirecteur = await lire('/api/journal-administration', directeur);
+      assert.equal(journalDirecteur.status, 200, JSON.stringify(journalDirecteur.body));
+      const journalAdmin = await lire('/api/journal-administration', jeton('admin'));
+      assert.equal(journalDirecteur.body.total, journalAdmin.body.total);
+      const reservees = await prisma.journalAdministration.count({ where: { OR: [{ concerneSuperAdmin: true }, { reserveSuperAdmin: true }] } });
+      assert.ok(reservees > 0, 'des entrées réservées existent');
+      assert.equal(journalDirecteur.body.total, (await lire('/api/journal-administration', sa)).body.total - reservees);
+    });
+
+    // Rentabilité des directeurs. Choix par défaut, à confirmer (règle 5 de la méthode, option la plus restrictive), retenu
+    // par Claude Code le 06-11-2026 sur le point 1 du rapport du rédacteur des tests : le directeur règle les paramètres
+    // comme l'administration (décision de Nelson du 24-10-2026, point 14), sauf la case qui lui masque la rentabilité des
+    // chantiers (réponse de Nelson du 06-11-2026, « Chantiers seulement ») ; sinon il lèverait lui-même la restriction que
+    // la société lui pose. Renvoyer la valeur en place reste admis : l'écran des réglages envoie toutes ses cases.
+    // Lectures écartées : refus dès que la case est présente (la valeur en place renvoyée passe ici) ; refus d'un seul sens
+    // (les deux sens sont joués) ; refus partiel qui écrirait les autres champs du même corps ; refus étendu à
+    // l'administrateur.
+    test('rentabilité des directeurs : le directeur ne change pas cette case, dans aucun sens (403, rien d’écrit ni journalisé) ; il renvoie la valeur en place et règle le reste ; l’administrateur la change', async () => {
+      const directeur = jeton('directeur');
+      const admin = jeton('admin');
+      const MESSAGE = 'Un directeur ne règle pas la rentabilité des directeurs.';
+      const lireReglages = () => prisma.parametres.findUniqueOrThrow({ where: { id: 'singleton' } });
+      const derniereEntree = () => prisma.journalAdministration.findFirstOrThrow({ where: { domaine: 'REGLAGES', type: 'PARAMETRES' }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] });
+      const initial = await lireReglages();
+      try {
+        for (const enPlace of [true, false]) {
+          await regler({ rentabiliteDirecteurs: enPlace, rentabiliteConducteur: true, rentabiliteHierarchie: true, seuilMargeFaible: 15 });
+          // Refus : la valeur contraire seule, puis accompagnée d'autres réglages, qui ne sont pas écrits non plus.
+          for (const corps of [{ rentabiliteDirecteurs: !enPlace }, { rentabiliteDirecteurs: !enPlace, rentabiliteHierarchie: false, seuilMargeFaible: 23 }]) {
+            const avant = JSON.stringify(await lireReglages());
+            const journal = await nbJournalAdministration();
+            const refus = await envoyer('put', '/api/parametres', directeur, corps);
+            assert.deepEqual([refus.status, refus.body.error], [403, MESSAGE], `en place ${enPlace}, corps ${JSON.stringify(corps)}`);
+            assert.equal(JSON.stringify(await lireReglages()), avant, `rien n’est écrit (${JSON.stringify(corps)})`);
+            assert.equal(await nbJournalAdministration(), journal, `rien n’est journalisé (${JSON.stringify(corps)})`);
+          }
+          // La valeur en place renvoyée seule : admise, sans changement donc sans entrée de journal.
+          const journal = await nbJournalAdministration();
+          const meme = await envoyer('put', '/api/parametres', directeur, { rentabiliteDirecteurs: enPlace });
+          assert.equal(meme.status, 200, JSON.stringify(meme.body));
+          assert.equal(meme.body.rentabiliteDirecteurs, enPlace);
+          assert.equal((await lireReglages()).rentabiliteDirecteurs, enPlace);
+          assert.equal(await nbJournalAdministration(), journal, 'aucun changement, aucune entrée');
+          // La valeur en place renvoyée avec d'autres réglages, comme le fait l'écran : ils sont écrits et journalisés au nom
+          // du directeur, la case inchangée.
+          const autres = await envoyer('put', '/api/parametres', directeur, { rentabiliteDirecteurs: enPlace, rentabiliteHierarchie: false, seuilMargeFaible: 23 });
+          assert.equal(autres.status, 200, JSON.stringify(autres.body));
+          const apres = await lireReglages();
+          assert.deepEqual([apres.rentabiliteDirecteurs, apres.rentabiliteHierarchie, Number(apres.seuilMargeFaible)], [enPlace, false, 23]);
+          const entree = await derniereEntree();
+          assert.deepEqual([entree.auteurId, entree.avant, entree.apres], [comptes.directeur.id, { rentabiliteHierarchie: true, seuilMargeFaible: 15 }, { rentabiliteHierarchie: false, seuilMargeFaible: 23 }]);
+        }
+        // Un autre réglage seul, sans la case : admis, journalisé au nom du directeur.
+        const seul = await envoyer('put', '/api/parametres', directeur, { rentabiliteConducteur: false });
+        assert.equal(seul.status, 200, JSON.stringify(seul.body));
+        assert.deepEqual([(await lireReglages()).rentabiliteConducteur, (await lireReglages()).rentabiliteDirecteurs], [false, false]);
+        const entreeSeul = await derniereEntree();
+        assert.deepEqual([entreeSeul.auteurId, entreeSeul.avant, entreeSeul.apres], [comptes.directeur.id, { rentabiliteConducteur: true }, { rentabiliteConducteur: false }]);
+        // L'administrateur change la case, dans les deux sens, journalisé à son nom.
+        for (const valeur of [true, false]) {
+          const res = await envoyer('put', '/api/parametres', admin, { rentabiliteDirecteurs: valeur });
+          assert.equal(res.status, 200, JSON.stringify(res.body));
+          assert.equal((await lireReglages()).rentabiliteDirecteurs, valeur);
+          const entreeAdmin = await derniereEntree();
+          assert.deepEqual([entreeAdmin.auteurId, entreeAdmin.avant, entreeAdmin.apres], [comptes.admin.id, { rentabiliteDirecteurs: !valeur }, { rentabiliteDirecteurs: valeur }]);
+        }
+      } finally {
+        await prisma.parametres.update({ where: { id: 'singleton' }, data: {
+          rentabiliteDirecteurs: initial.rentabiliteDirecteurs, rentabiliteConducteur: initial.rentabiliteConducteur,
+          rentabiliteHierarchie: initial.rentabiliteHierarchie, seuilMargeFaible: initial.seuilMargeFaible,
+        } });
+      }
+    });
+
+    // Type Administrateur. Même choix par défaut, à confirmer (règle 5, option la plus restrictive) : en attribuant le type
+    // ADMIN, à un compte qu'il ouvre ou à lui-même, le directeur lèverait sa restriction de rentabilité. Seuls l'ADMIN et le
+    // SUPERADMIN l'attribuent ; le directeur ouvre tous les autres types, directeur compris, et peut retirer le type ADMIN.
+    // Lectures écartées : refus sur la seule création (le changement de type est joué) ; refus de tout changement touchant un
+    // administrateur (le passage ADMIN → conducteur est admis) ; refus étendu à l'administrateur.
+    test('type Administrateur : le directeur ne l’attribue ni à la création ni par changement de type, pas même à lui-même (403, rien d’écrit) ; il ouvre un directeur et fait passer un administrateur conducteur ; l’administrateur attribue le type', async () => {
+      const directeur = jeton('directeur');
+      const admin = jeton('admin');
+      const MESSAGE = 'Un directeur n’attribue pas le type Administrateur.';
+      const crees = [];
+      const dernierType = (id) => prisma.journalAdministration.findFirstOrThrow({ where: { cibleId: id, action: 'TYPE_COMPTE' }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] });
+      try {
+        // Création refusée, avec ou sans « aussi commercial » : aucun compte, aucune entrée de journal.
+        const email = `directeur-admin.type-admin.${suffixe}@iris.test`;
+        const comptesAvant = await prisma.user.count();
+        const journalAvant = await nbJournalAdministration();
+        for (const corps of [{ email, name: 'TEST Administrateur ouvert par le directeur', role: 'ADMIN' }, { email, name: 'TEST Administrateur ouvert par le directeur', role: 'ADMIN', estCommercial: true }]) {
+          const refus = await envoyer('post', '/api/users', directeur, corps);
+          assert.deepEqual([refus.status, refus.body.error], [403, MESSAGE], JSON.stringify(corps));
+        }
+        assert.equal(await prisma.user.count({ where: { email } }), 0, 'aucun compte créé');
+        assert.equal(await prisma.user.count(), comptesAvant);
+        assert.equal(await nbJournalAdministration(), journalAvant, 'aucune entrée de journal');
+        // Il ouvre un autre directeur : admis, journalisé à son nom.
+        const emailDirecteur = `directeur-admin.type-admin.directeur.${suffixe}@iris.test`;
+        const ouverture = await envoyer('post', '/api/users', directeur, { email: emailDirecteur, name: 'TEST Directeur ouvert par le directeur', role: 'DIRECTEUR' });
+        assert.equal(ouverture.status, 201, JSON.stringify(ouverture.body));
+        crees.push(ouverture.body.id);
+        assert.equal((await prisma.user.findUniqueOrThrow({ where: { email: emailDirecteur } })).role, 'DIRECTEUR');
+        const creation = await prisma.journalAdministration.findFirstOrThrow({ where: { cibleId: ouverture.body.id, action: 'CREATION' } });
+        assert.deepEqual([creation.auteurId, creation.apres.role], [comptes.directeur.id, 'DIRECTEUR']);
+        // Changement de type vers ADMIN refusé : sur un conducteur, sur le directeur qu'il vient d'ouvrir, sur son propre compte.
+        const journalRefus = await nbJournalAdministration();
+        for (const [qui, id] of [['conducteur', comptes.conducteur.id], ['autre directeur', ouverture.body.id], ['lui-même', comptes.directeur.id]]) {
+          const avant = await prisma.user.findUniqueOrThrow({ where: { id }, select: { role: true, estCommercial: true, actif: true } });
+          const refus = await envoyer('patch', `/api/users/${id}/role`, directeur, { role: 'ADMIN' });
+          assert.deepEqual([refus.status, refus.body.error], [403, MESSAGE], qui);
+          assert.deepEqual(await prisma.user.findUniqueOrThrow({ where: { id }, select: { role: true, estCommercial: true, actif: true } }), avant, `${qui} : type inchangé`);
+        }
+        assert.equal(await nbJournalAdministration(), journalRefus, 'aucun refus journalisé');
+        // Un administrateur passé conducteur par le directeur : admis (retirer le type n'en attribue aucun), journalisé à son nom.
+        const ancien = await envoyer('post', '/api/users', sa, { email: `directeur-admin.type-admin.ancien.${suffixe}@iris.test`, name: 'TEST Ancien administrateur', role: 'ADMIN' });
+        assert.equal(ancien.status, 201, JSON.stringify(ancien.body));
+        crees.push(ancien.body.id);
+        const passage = await envoyer('patch', `/api/users/${ancien.body.id}/role`, directeur, { role: 'CONDUCTEUR_TRAVAUX' });
+        assert.equal(passage.status, 200, JSON.stringify(passage.body));
+        assert.equal(passage.body.role, 'CONDUCTEUR_TRAVAUX');
+        assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: ancien.body.id } })).role, 'CONDUCTEUR_TRAVAUX');
+        const passageJournal = await dernierType(ancien.body.id);
+        assert.deepEqual([passageJournal.auteurId, passageJournal.avant.role, passageJournal.apres.role], [comptes.directeur.id, 'ADMIN', 'CONDUCTEUR_TRAVAUX']);
+        // Le directeur ne lui rend pas le type ; l'administrateur, si, journalisé à son nom.
+        const rendu = await envoyer('patch', `/api/users/${ancien.body.id}/role`, directeur, { role: 'ADMIN' });
+        assert.deepEqual([rendu.status, rendu.body.error], [403, MESSAGE]);
+        assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: ancien.body.id } })).role, 'CONDUCTEUR_TRAVAUX');
+        const retour = await envoyer('patch', `/api/users/${ancien.body.id}/role`, admin, { role: 'ADMIN' });
+        assert.equal(retour.status, 200, JSON.stringify(retour.body));
+        assert.equal((await prisma.user.findUniqueOrThrow({ where: { id: ancien.body.id } })).role, 'ADMIN');
+        const retourJournal = await dernierType(ancien.body.id);
+        assert.deepEqual([retourJournal.auteurId, retourJournal.avant.role, retourJournal.apres.role], [comptes.admin.id, 'CONDUCTEUR_TRAVAUX', 'ADMIN']);
+        // L'administrateur ouvre un administrateur, journalisé à son nom.
+        const emailParAdmin = `directeur-admin.type-admin.par-admin.${suffixe}@iris.test`;
+        const parAdmin = await envoyer('post', '/api/users', admin, { email: emailParAdmin, name: 'TEST Administrateur ouvert par l’administrateur', role: 'ADMIN' });
+        assert.equal(parAdmin.status, 201, JSON.stringify(parAdmin.body));
+        crees.push(parAdmin.body.id);
+        assert.equal((await prisma.user.findUniqueOrThrow({ where: { email: emailParAdmin } })).role, 'ADMIN');
+        const creationAdmin = await prisma.journalAdministration.findFirstOrThrow({ where: { cibleId: parAdmin.body.id, action: 'CREATION' } });
+        assert.deepEqual([creationAdmin.auteurId, creationAdmin.apres.role], [comptes.admin.id, 'ADMIN']);
+      } finally {
+        // Comptes du test révoqués : aucun autre test n'hérite d'un administrateur ou d'un directeur de plus.
+        for (const id of crees) await request(app).delete(`/api/users/${id}`).set(sa);
+      }
+    });
+
+    test('SAV : sans affectation ni rattachement, le directeur liste et lit une intervention, la place au planning et y voit son créneau, saisit son matériel, crée sa suite et l’annule avec un motif', async () => {
+      const directeur = jeton('directeur');
+      const curative = async (titre) => {
+        const res = await envoyer('post', '/api/interventions', sa, { clientId: client.id, titre: `TEST Directeur SAV ${titre} ${suffixe}` });
+        assert.equal(res.status, 201, JSON.stringify(res.body));
+        return res.body;
+      };
+      const intervention = await curative('placée');
+      const liste = await lire('/api/interventions', directeur);
+      assert.equal(liste.status, 200, JSON.stringify(liste.body));
+      assert.ok(liste.body.some((i) => i.id === intervention.id), 'listée');
+      assert.equal((await lire(`/api/interventions/${intervention.id}`, directeur)).status, 200);
+      // Témoin : un conducteur sans rattachement ne la voit pas.
+      assert.equal((await lire(`/api/interventions/${intervention.id}`, jeton('conducteur'))).status, 404);
+      // Placement au planning, puis le créneau lu dans le planning.
+      const placement = await envoyer('put', `/api/interventions/${intervention.id}/planning`, directeur, { dateDebut: '2099-05-06', creneau: 'HEURES', heureDebut: '09:00', heureFin: '11:00', intervenantIds: [fiche.id] });
+      assert.equal(placement.status, 200, JSON.stringify(placement.body));
+      assert.equal((await prisma.intervention.findUniqueOrThrow({ where: { id: intervention.id } })).statut, 'PLANIFIEE');
+      const planning = await lire('/api/planning/events?start=2099-05-04&end=2099-05-10', directeur);
+      assert.equal(planning.status, 200, JSON.stringify(planning.body));
+      assert.ok(planning.body.some((ev) => ev.interventionId === intervention.id), 'créneau visible au planning');
+      // Matériel d'une curative, saisi par le directeur, journalisé à son nom ; ses coûts lus comme l'administration.
+      const achat = await envoyer('post', `/api/interventions/${intervention.id}/couts/achats`, directeur, { date: await aujourdhui(), fournisseurId: fournisseur.id, description: 'TEST Pièce posée par le directeur', montantHT: 23.45 });
+      assert.equal(achat.status, 201, JSON.stringify(achat.body));
+      const enBase = await prisma.coutInterventionAchat.findUniqueOrThrow({ where: { id: achat.body.id } });
+      assert.deepEqual([enBase.montantHT.toString(), enBase.createdById], ['23.45', comptes.directeur.id]);
+      for (const rentabiliteDirecteurs of [true, false]) {
+        await regler({ rentabiliteDirecteurs });
+        const parDirecteur = await lire(`/api/interventions/${intervention.id}/couts`, directeur);
+        assert.equal(parDirecteur.status, 200, JSON.stringify(parDirecteur.body));
+        assert.deepEqual(parDirecteur.body, (await lire(`/api/interventions/${intervention.id}/couts`, jeton('admin'))).body, `coûts SAV, rentabiliteDirecteurs=${rentabiliteDirecteurs}`);
+        assert.equal(parDirecteur.body.totalMaterielHT, 23.45);
+      }
+      await regler({ rentabiliteDirecteurs: true });
+      // Suite d'une intervention terminée (point 16), puis annulation avec un motif.
+      const terminee = await curative('terminée');
+      await prisma.intervention.update({ where: { id: terminee.id }, data: { statut: 'TERMINEE' } });
+      const suite = await envoyer('post', `/api/interventions/${terminee.id}/suites`, directeur, {});
+      assert.equal(suite.status, 201, JSON.stringify(suite.body));
+      assert.deepEqual(await prisma.intervention.findUnique({ where: { id: suite.body.id }, select: { interventionInitialeId: true, createdById: true } }), { interventionInitialeId: terminee.id, createdById: comptes.directeur.id });
+      const annulation = await envoyer('patch', `/api/interventions/${suite.body.id}/statut`, directeur, { statut: 'ANNULEE', motif: 'TEST annulée par le directeur' });
+      assert.equal(annulation.status, 200, JSON.stringify(annulation.body));
+      assert.equal((await prisma.intervention.findUniqueOrThrow({ where: { id: suite.body.id } })).statut, 'ANNULEE');
+      const derniere = await prisma.journalSaisieChantier.findFirstOrThrow({ where: { interventionId: suite.body.id }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] });
+      assert.deepEqual([derniere.action, derniere.auteurId, derniere.apres.statut], ['CHANGEMENT_STATUT', comptes.directeur.id, 'ANNULEE']);
+    });
+
+    test('chantiers : le directeur modifie la fiche et le commercial d’un chantier terminé et réaffecte son client, comme l’administration ; le titulaire terminé reste refusé, message inchangé', async () => {
+      const directeur = jeton('directeur');
+      const chantier = await prisma.chantier.create({ data: {
+        nom: `TEST Directeur chantier terminé ${suffixe}`, client: client.raisonSociale, clientId: client.id, dateDebut: new Date(), dateFin: new Date(), statut: 'TERMINE',
+        budgetGlobalVendu: 500, budgetMaterielVendu: 200, budgetMainOeuvreVendu: 300, heuresVendues: 6, responsableId: comptes.conducteur.id, commercialId: comptes.commercial.id,
+      } });
+      // Témoin : le titulaire, hors administration, ne modifie plus un chantier clôturé (messages figés dans la matrice).
+      const refusTitulaire = await envoyer('patch', `/api/chantiers/${chantier.id}`, jeton('conducteur'), { nom: 'TEST refusé' });
+      assert.deepEqual([refusTitulaire.status, refusTitulaire.body.error], [403, 'Ce chantier est clôturé : seul un administrateur peut encore le modifier.']);
+      const fiche_ = await envoyer('patch', `/api/chantiers/${chantier.id}`, directeur, { nom: `TEST Directeur chantier terminé corrigé ${suffixe}`, budgetMaterielVendu: 250.5 });
+      assert.equal(fiche_.status, 200, JSON.stringify(fiche_.body));
+      const commercial = await envoyer('patch', `/api/chantiers/${chantier.id}/commercial`, directeur, { commercialId: comptes.autreCommercial.id });
+      assert.equal(commercial.status, 200, JSON.stringify(commercial.body));
+      const autreClient = await envoyer('post', '/api/clients', sa, { raisonSociale: `TEST Client réaffecté par le directeur ${suffixe}` });
+      assert.equal(autreClient.status, 201, JSON.stringify(autreClient.body));
+      const reaffectation = await envoyer('patch', `/api/chantiers/${chantier.id}`, directeur, { clientId: autreClient.body.id });
+      assert.equal(reaffectation.status, 200, JSON.stringify(reaffectation.body));
+      const enBase = await prisma.chantier.findUniqueOrThrow({ where: { id: chantier.id } });
+      assert.deepEqual([enBase.statut, enBase.nom, enBase.budgetMaterielVendu.toString(), enBase.commercialId, enBase.clientId, enBase.client],
+        ['TERMINE', `TEST Directeur chantier terminé corrigé ${suffixe}`, '250.5', comptes.autreCommercial.id, autreClient.body.id, `TEST Client réaffecté par le directeur ${suffixe}`]);
+      const journal = await prisma.journalSaisieChantier.findMany({ where: { chantierId: chantier.id }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
+      assert.ok(journal.length >= 2, JSON.stringify(journal.map((e) => e.action)));
+      assert.ok(journal.every((e) => e.auteurId === comptes.directeur.id), 'journalisé au nom du directeur');
+      assert.ok(journal.some((e) => e.action === 'CHANGEMENT_COMMERCIAL'));
+    });
+
+    // Montants : facture de 2 × 50 € HT à 20 % (100 € HT, 20 € de TVA, 120 € TTC), créée, émise et réglée par le directeur,
+    // comparée ligne à ligne à la même facture créée par l'administrateur. Lectures écartées : 403 (avant le lot) ; montants
+    // masqués (null) pour le directeur à qui la société ne laisse pas la rentabilité des chantiers ; une facture ou un export
+    // différents de ceux de l'administration.
+    test('factures et règlements : le directeur crée, émet et règle une facture et lit l’export comptable comme l’administration, réglage de la rentabilité coché ou non', async () => {
+      await assurerFacturation();
+      const jour = await aujourdhui();
+      const corps = (rentabiliteDirecteurs, qui) => ({ clientId: client.id, origine: 'HORS_AFFAIRE', motifHorsAffaire: `TEST Directeur facture ${qui} ${rentabiliteDirecteurs}`, dateEmission: jour, dateEcheance: jour, lignes: [{ designation: `TEST Prestation directeur ${qui}`, quantite: 2, prixUnitaireHt: 50, tauxTva: 20 }] });
+      const lignes = async (id) => (await prisma.factureLigne.findMany({ where: { factureId: id }, orderBy: { ordre: 'asc' } })).map((l) => [l.quantite.toString(), l.prixUnitaireHt.toString(), l.tauxTva.toString(), l.totalHt.toString(), l.totalTtc.toString()]);
+      try {
+        for (const rentabiliteDirecteurs of [true, false]) {
+          await regler({ rentabiliteDirecteurs });
+          const parAdmin = await envoyer('post', '/api/factures', jeton('admin'), corps(rentabiliteDirecteurs, 'administrateur'));
+          assert.equal(parAdmin.status, 201, JSON.stringify(parAdmin.body));
+          const creee = await envoyer('post', '/api/factures', jeton('directeur'), corps(rentabiliteDirecteurs, 'directeur'));
+          assert.equal(creee.status, 201, JSON.stringify(creee.body));
+          assert.deepEqual([creee.body.totalHt, creee.body.totalTva, creee.body.totalTtc], [100, 20, 120]);
+          assert.deepEqual([creee.body.totalHt, creee.body.totalTva, creee.body.totalTtc], [parAdmin.body.totalHt, parAdmin.body.totalTva, parAdmin.body.totalTtc]);
+          assert.deepEqual(await lignes(creee.body.id), await lignes(parAdmin.body.id));
+          assert.deepEqual(await lignes(creee.body.id), [['2', '50', '20', '100', '120']]);
+          const emise = await envoyer('post', `/api/factures/${creee.body.id}/emettre`, jeton('directeur'), {});
+          assert.equal(emise.status, 200, JSON.stringify(emise.body));
+          assert.equal(emise.body.statut, 'EMISE');
+          assert.ok(emise.body.numero, 'numérotée à l’émission');
+          const reglement = await envoyer('post', '/api/reglements', jeton('directeur'), { clientId: client.id, dateReglement: jour, montant: 120, moyen: 'VIREMENT', affectations: [{ factureId: creee.body.id, montant: 120 }] });
+          assert.equal(reglement.status, 201, JSON.stringify(reglement.body));
+          const facture = await prisma.facture.findUniqueOrThrow({ where: { id: creee.body.id }, include: { journal: { orderBy: { createdAt: 'asc' } } } });
+          assert.deepEqual([facture.statut, facture.totalHt.toString(), facture.totalTva.toString(), facture.totalTtc.toString()], ['REGLEE', '100', '20', '120']);
+          assert.ok(facture.journal.length >= 2 && facture.journal.every((j) => j.acteurId === comptes.directeur.id), JSON.stringify(facture.journal));
+          assert.equal((await prisma.reglement.findFirstOrThrow({ where: { affectations: { some: { factureId: creee.body.id } } } })).createdById, comptes.directeur.id);
+          // Export comptable : celui de l'administrateur, qui porte la facture émise par le directeur.
+          const exportDirecteur = await lire('/api/factures/export-comptable.csv', jeton('directeur'));
+          assert.equal(exportDirecteur.status, 200, exportDirecteur.text);
+          assert.equal(exportDirecteur.text, (await lire('/api/factures/export-comptable.csv', jeton('admin'))).text);
+          assert.ok(exportDirecteur.text.includes(emise.body.numero), 'la facture émise figure à l’export');
+        }
+      } finally {
+        await regler({ rentabiliteDirecteurs: true });
+      }
+    });
+
+    // Montants des chantiers (réponse de Nelson du 06-11-2026, « Chantiers seulement »). Affaire de 240 € HT vendus (4 × 35 € de
+    // fourniture, 2 × 50 € de pose), coût prévu 49,40 € (4 × 12,35 €), 300 € d'achats : marge du jour −60 €, en perte ; une
+    // facture émise de 100 € HT (reste à facturer 140 €). Réglage coché : le directeur lit exactement ce que lit l'administrateur
+    // (lecture écartée : un masquage permanent, option « Supprimer le réglage pour lui » écartée par Nelson). Réglage décoché :
+    // ni vendu, ni marge, ni estimation, ni facturation, ni coût prévu, ni alerte de perte (lecture écartée : la vue de
+    // l'administration, que lui donnerait isAdminRole testé avant le réglage) ; ses budgets par poste, ses achats et ses coûts
+    // de main-d'œuvre restent ceux de l'administrateur (lecture écartée : « Toute la vue financière », option écartée).
+    test('rentabilité des chantiers : liste, fiche, Performances et réponses d’écriture du directeur, comme l’administrateur avec le réglage, sans vendu, marge, facturation, estimation ni coût prévu sans lui ; le vendu ne s’écrit pas sans lui', async () => {
+      await assurerFacturation();
+      const directeur = jeton('directeur');
+      const admin = jeton('admin');
+      const devis = await devisSigne('rentabilité');
+      // Titulaire propre à ce test : sa ligne des Performances ne compte que cette affaire.
+      const chantier = await convertir(devis.id, sa, comptes.conducteurPerformances.id);
+      assert.deepEqual([Number(chantier.budgetGlobalVendu), Number(chantier.coutMaterielPrevu)], [240, 49.4]);
+      const achat = await envoyer('post', '/api/achats', sa, { chantierId: chantier.id, categorieId: categorie.id, fournisseurId: fournisseur.id, date: await aujourdhui(), description: 'TEST achat directeur', montantHT: 300 });
+      assert.equal(achat.status, 200, JSON.stringify(achat.body));
+      const jour = await aujourdhui();
+      const facture = await envoyer('post', '/api/factures', sa, { clientId: client.id, origine: 'CHANTIER', chantierId: chantier.id, dateEmission: jour, dateEcheance: jour, lignes: [{ designation: 'TEST Acompte directeur', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }] });
+      assert.equal(facture.status, 201, JSON.stringify(facture.body));
+      assert.equal((await envoyer('post', `/api/factures/${facture.body.id}/emettre`, sa, {})).status, 200);
+      const vue = async (auth) => {
+        const fiche = await lire(`/api/chantiers/${chantier.id}`, auth);
+        assert.equal(fiche.status, 200, JSON.stringify(fiche.body));
+        const liste = await lire('/api/chantiers', auth);
+        assert.equal(liste.status, 200, JSON.stringify(liste.body));
+        return { fiche: fiche.body, ligne: liste.body.find((c) => c.id === chantier.id) };
+      };
+      const performances = async (auth) => {
+        const res = await lire('/api/stats/conducteurs', auth);
+        assert.equal(res.status, 200, JSON.stringify(res.body));
+        return res.body.find((l) => l.id === comptes.conducteurPerformances.id);
+      };
+      try {
+        // Réglage coché : la fiche et la ligne du directeur sont celles de l'administrateur, au champ près.
+        await regler({ rentabiliteDirecteurs: true });
+        const deAdmin = await vue(admin);
+        const deDirecteur = await vue(directeur);
+        assert.deepEqual(deDirecteur.fiche, deAdmin.fiche);
+        assert.deepEqual(deDirecteur.ligne, deAdmin.ligne);
+        assert.deepEqual([deDirecteur.fiche.budgetGlobalVendu, deDirecteur.fiche.coutMaterielPrevu, deDirecteur.fiche.metrics.margeCommerciale, deDirecteur.ligne.metrics.margeCommerciale], [240, 49.4, -60, -60]);
+        assert.deepEqual([deDirecteur.fiche.facturation.totalFactureHt, deDirecteur.fiche.facturation.resteAFacturerHt], [100, 140]);
+        assert.ok(deDirecteur.ligne.metrics.alertes.includes('EN_PERTE'));
+        assert.equal(typeof deDirecteur.fiche.metrics.margeEstimee, 'number');
+        assert.ok(deDirecteur.fiche.metrics.estimation);
+        const perfAdmin = await performances(admin);
+        assert.deepEqual(await performances(directeur), perfAdmin);
+        assert.deepEqual([perfAdmin.caTotal, perfAdmin.margeTotal, perfAdmin.margePct], [240, -60, -25]);
+
+        // Réglage décoché : masquage des seules données de rentabilité ; le reste, comme l'administrateur.
+        await regler({ rentabiliteDirecteurs: false });
+        const adminSans = await vue(admin);
+        const directeurSans = await vue(directeur);
+        for (const [ou, v, a] of [['fiche', directeurSans.fiche, adminSans.fiche], ['liste', directeurSans.ligne, adminSans.ligne]]) {
+          assert.deepEqual([v.budgetGlobalVendu, v.coutMaterielPrevu, v.metrics.margeCommerciale, v.metrics.margeEstimee, v.metrics.estimation], [null, null, null, null, null], ou);
+          assert.equal(v.metrics.alertes.includes('EN_PERTE'), false, ou);
+          // Témoin : l'administrateur, lui, garde tout sous ce réglage.
+          assert.deepEqual([a.budgetGlobalVendu, a.coutMaterielPrevu, a.metrics.margeCommerciale], [240, 49.4, -60], ou);
+          // Budgets par poste, achats, coûts de main-d'œuvre et dépassements : ceux de l'administrateur.
+          assert.deepEqual([v.budgetMaterielVendu, v.budgetMainOeuvreVendu, v.metrics.materielReel, v.metrics.moReel, v.metrics.totalDepenses, v.metrics.alertes.includes('MATERIEL_DEPASSE')],
+            [a.budgetMaterielVendu, a.budgetMainOeuvreVendu, a.metrics.materielReel, a.metrics.moReel, a.metrics.totalDepenses, a.metrics.alertes.includes('MATERIEL_DEPASSE')], ou);
+          assert.equal(v.metrics.materielReel, 300, ou);
+        }
+        assert.equal('facturation' in directeurSans.fiche, false, 'ni factures ni reste à facturer');
+        assert.deepEqual([adminSans.fiche.facturation.totalFactureHt, adminSans.fiche.facturation.resteAFacturerHt], [100, 140]);
+        // Performances : ni CA, ni marge, ni marge % (null, et non 0) ; le suivi opérationnel et les dépenses, comme l'administrateur.
+        const perfSans = await performances(directeur);
+        const perfAdminSans = await performances(admin);
+        assert.deepEqual([perfSans.caTotal, perfSans.margeTotal, perfSans.margePct], [null, null, null]);
+        assert.deepEqual([perfAdminSans.caTotal, perfAdminSans.margeTotal, perfAdminSans.margePct], [240, -60, -25]);
+        assert.deepEqual([perfSans.nbChantiers, perfSans.depensesTotal, perfSans.manqueAGagnerMainOeuvre], [perfAdminSans.nbChantiers, perfAdminSans.depensesTotal, perfAdminSans.manqueAGagnerMainOeuvre]);
+
+        // Écriture du vendu : refusée au directeur sans le réglage (403, rien d'écrit) ; l'administrateur l'écrit.
+        const refus = await envoyer('patch', `/api/chantiers/${chantier.id}`, directeur, { budgetGlobalVendu: 260 });
+        assert.deepEqual([refus.status, refus.body.error], [403, 'Le montant vendu n’est modifiable que par qui suit la rentabilité de ce chantier.']);
+        assert.equal((await prisma.chantier.findUniqueOrThrow({ where: { id: chantier.id } })).budgetGlobalVendu.toString(), '240');
+        // Réponses d'écriture : modification, clôture et encaissement, sans vendu ni coût prévu.
+        const ecritures = async (auth) => {
+          const nom = await envoyer('patch', `/api/chantiers/${chantier.id}`, auth, { nom: devis.objet });
+          assert.equal(nom.status, 200, JSON.stringify(nom.body));
+          const cloture = await envoyer('patch', `/api/chantiers/${chantier.id}/statut`, auth, { statut: 'TERMINE' });
+          assert.equal(cloture.status, 200, JSON.stringify(cloture.body));
+          const encaisse = await envoyer('patch', `/api/chantiers/${chantier.id}/encaisse`, auth, { encaisse: true });
+          assert.equal(encaisse.status, 200, JSON.stringify(encaisse.body));
+          // Remise en l'état pour le passage suivant.
+          assert.equal((await envoyer('patch', `/api/chantiers/${chantier.id}/encaisse`, sa, { encaisse: false })).status, 200);
+          assert.equal((await envoyer('patch', `/api/chantiers/${chantier.id}/statut`, sa, { statut: 'EN_COURS' })).status, 200);
+          return { nom: nom.body, cloture: cloture.body, encaisse: encaisse.body };
+        };
+        const montants = (r) => [r.budgetGlobalVendu === null ? null : Number(r.budgetGlobalVendu), r.coutMaterielPrevu === null ? null : Number(r.coutMaterielPrevu), Number(r.budgetMaterielVendu), Number(r.budgetMainOeuvreVendu)];
+        const reponsesDirecteurSans = await ecritures(directeur);
+        const reponsesAdminSans = await ecritures(admin);
+        for (const cas of ['nom', 'cloture', 'encaisse']) {
+          assert.deepEqual(montants(reponsesDirecteurSans[cas]), [null, null, ...montants(reponsesAdminSans[cas]).slice(2)], `${cas}, directeur sans la rentabilité`);
+          assert.deepEqual(montants(reponsesAdminSans[cas]).slice(0, 2), [240, 49.4], `${cas}, administrateur`);
+          // Même format que pour l'administration : aucune clé retirée ni ajoutée.
+          assert.deepEqual(Object.keys(reponsesDirecteurSans[cas]).sort(), Object.keys(reponsesAdminSans[cas]).sort(), cas);
+        }
+        const temoin = await envoyer('patch', `/api/chantiers/${chantier.id}`, admin, { budgetGlobalVendu: 240 });
+        assert.equal(temoin.status, 200, JSON.stringify(temoin.body));
+
+        // Réglage coché : le vendu s'écrit, et les réponses d'écriture sont celles de l'administrateur.
+        await regler({ rentabiliteDirecteurs: true });
+        const vendu = await envoyer('patch', `/api/chantiers/${chantier.id}`, directeur, { budgetGlobalVendu: 260 });
+        assert.equal(vendu.status, 200, JSON.stringify(vendu.body));
+        assert.equal((await prisma.chantier.findUniqueOrThrow({ where: { id: chantier.id } })).budgetGlobalVendu.toString(), '260');
+        assert.equal((await envoyer('patch', `/api/chantiers/${chantier.id}`, sa, { budgetGlobalVendu: 240 })).status, 200);
+        const reponsesDirecteur = await ecritures(directeur);
+        const reponsesAdmin = await ecritures(admin);
+        for (const cas of ['nom', 'cloture', 'encaisse']) {
+          assert.deepEqual(montants(reponsesDirecteur[cas]), montants(reponsesAdmin[cas]), `${cas}, directeur avec la rentabilité`);
+          assert.deepEqual(montants(reponsesDirecteur[cas]).slice(0, 2), [240, 49.4], cas);
+        }
+
+        // Marge commerciale coupée, réglage coché : le directeur voit la marge des Performances comme l'administrateur (écart de
+        // vue déclaré du lot) ; le responsable n'y voit que le CA.
+        await regler({ margeCommercialeActive: false });
+        assert.deepEqual(await performances(directeur), await performances(admin));
+        assert.equal((await performances(directeur)).margeTotal, -60);
+      } finally {
+        await regler({ margeCommercialeActive: true, rentabiliteDirecteurs: true });
+      }
+    });
+
+    // Conversion d'un devis en chantier par le directeur (#375 ; N-v2-2, N-v2-3) : le coût prévu suit le réglage ; le vendu,
+    // égal au total HT du devis qu'il lit déjà, reste dans la réponse (comportement antérieur déclaré).
+    test('conversion d’un devis en chantier par le directeur : coût prévu dans la réponse avec le réglage, vide sans lui ; l’administration le garde', async () => {
+      try {
+        for (const [rentabiliteDirecteurs, attenduDirecteur] of [[true, 49.4], [false, null]]) {
+          await regler({ rentabiliteDirecteurs });
+          const parDirecteur = await convertir((await devisSigne(`conversion ${rentabiliteDirecteurs}`)).id, jeton('directeur'));
+          assert.equal(parDirecteur.coutMaterielPrevu === null ? null : Number(parDirecteur.coutMaterielPrevu), attenduDirecteur, `directeur, rentabiliteDirecteurs=${rentabiliteDirecteurs}`);
+          assert.equal(Number(parDirecteur.budgetGlobalVendu), 240, 'vendu égal au total HT du devis');
+          // En base, le coût prévu est écrit, quel que soit le lecteur.
+          assert.equal((await prisma.chantier.findUniqueOrThrow({ where: { id: parDirecteur.id } })).coutMaterielPrevu.toString(), '49.4');
+          const parAdmin = await convertir((await devisSigne(`conversion administrateur ${rentabiliteDirecteurs}`)).id, jeton('admin'));
+          assert.equal(Number(parAdmin.coutMaterielPrevu), 49.4, `administrateur, rentabiliteDirecteurs=${rentabiliteDirecteurs}`);
+          assert.deepEqual(Object.keys(parDirecteur).sort(), Object.keys(parAdmin).sort());
+        }
+        // Clé d'intégration : inchangée par le lot, le coût prévu avec finances:read seulement.
+        for (const [scopes, attendu] of [[['devis:write'], null], [['devis:write', 'finances:read'], 49.4]]) {
+          const cle = await envoyer('post', '/api/admin/api-keys', sa, { nom: `TEST clé directeur ${scopes.join(' ')} ${suffixe}`, scopes });
+          assert.equal(cle.status, 201, JSON.stringify(cle.body));
+          const res = await envoyer('post', `/api/v1/devis/${(await devisSigne(`clé ${scopes.length}`)).id}/convertir`, { Authorization: `Bearer ${cle.body.apiKey}` }, { cible: 'CHANTIER' });
+          assert.equal(res.status, 201, JSON.stringify(res.body));
+          assert.equal(res.body.coutMaterielPrevu === null ? null : Number(res.body.coutMaterielPrevu), attendu, scopes.join(' '));
+        }
+      } finally {
+        await regler({ rentabiliteDirecteurs: true });
+      }
+    });
+
+    // Montants hors chantiers : tableau de bord, Mes commerciaux et prix d'achat ligne par ligne, comme l'administrateur quel
+    // que soit le réglage (réponse « Chantiers seulement » ; lecture écartée : « Toute la vue financière »). Une affaire terminée
+    // et encaissée ce mois-ci, de 1 000 € vendus et 250,30 € d'achats, porte le CA et la marge du mois.
+    test('tableau de bord, Mes commerciaux, prix d’achat du devis, du catalogue et du parc : ceux de l’administrateur, réglage de la rentabilité coché ou non', async () => {
+      const chantier = await prisma.chantier.create({ data: { nom: `TEST Directeur affaire encaissée ${suffixe}`, client: client.raisonSociale, clientId: client.id, dateDebut: new Date(), budgetGlobalVendu: 1000, budgetMaterielVendu: 400, budgetMainOeuvreVendu: 600, responsableId: comptes.conducteur.id, commercialId: comptes.commercial.id } });
+      const achat = await envoyer('post', '/api/achats', sa, { chantierId: chantier.id, categorieId: categorie.id, fournisseurId: fournisseur.id, date: await aujourdhui(), description: 'TEST achat affaire encaissée', montantHT: 250.3 });
+      assert.equal(achat.status, 200, JSON.stringify(achat.body));
+      assert.equal((await envoyer('patch', `/api/chantiers/${chantier.id}/statut`, sa, { statut: 'TERMINE' })).status, 200);
+      assert.equal((await envoyer('patch', `/api/chantiers/${chantier.id}/encaisse`, sa, { encaisse: true })).status, 200);
+      const devis = await devisSigne('prix d’achat');
+      const article = await envoyer('post', '/api/catalogue/articles', sa, { reference: `TEST-DIR-ART-${suffixe}`, nom: 'TEST Article directeur', prixVenteHt: '80', prixAchatHt: '31.7', tauxTva: '20' });
+      assert.equal(article.status, 201, JSON.stringify(article.body));
+      const modele = await envoyer('post', '/api/catalogue/equipements', sa, { reference: `TEST-DIR-EQ-${suffixe}`, nom: 'TEST Modèle directeur', fabricant: 'TEST', prixVenteHt: '150', prixAchatHt: '64.2', tauxTva: '20' });
+      assert.equal(modele.status, 201, JSON.stringify(modele.body));
+      const equipement = await envoyer('post', `/api/clients/${client.id}/equipements`, sa, { catalogueEquipementId: modele.body.id, clientSiteId: client.siteId, numeroSerie: `TEST-SN-DIR-${suffixe}` });
+      assert.equal(equipement.status, 201, JSON.stringify(equipement.body));
+      const lectures = async (auth) => {
+        const global = await lire('/api/stats/global', auth);
+        assert.equal(global.status, 200, JSON.stringify(global.body));
+        const commerciaux = await lire('/api/stats/commerciaux', auth);
+        assert.equal(commerciaux.status, 200, JSON.stringify(commerciaux.body));
+        const listeDevis = await lire('/api/devis', auth);
+        assert.equal(listeDevis.status, 200, JSON.stringify(listeDevis.body));
+        const leDevis = (Array.isArray(listeDevis.body) ? listeDevis.body : listeDevis.body.devis).find((d) => d.id === devis.id);
+        const articles = await lire('/api/catalogue/articles', auth);
+        const parc = await lire(`/api/clients/${client.id}/equipements`, auth);
+        const recherche = await lire(`/api/devis/catalogue?q=TEST-DIR-ART-${suffixe}`, auth);
+        return {
+          global: global.body,
+          commerciaux: commerciaux.body,
+          prixDevis: leDevis.lignes.map((l) => l.prixAchatUnitaireHt ?? 'absent'),
+          prixArticle: articles.body.find((f) => f.id === article.body.id)?.prixAchatHt ?? 'absent',
+          prixParc: parc.body.find((e) => e.id === equipement.body.id)?.catalogueEquipement?.prixAchatHt ?? 'absent',
+          prixRecherche: recherche.body.map((f) => f.prixAchatHt ?? 'absent'),
+        };
+      };
+      try {
+        for (const rentabiliteDirecteurs of [true, false]) {
+          await regler({ rentabiliteDirecteurs });
+          const deAdmin = await lectures(jeton('admin'));
+          const deDirecteur = await lectures(jeton('directeur'));
+          const contexte = `rentabiliteDirecteurs=${rentabiliteDirecteurs}`;
+          assert.deepEqual(deDirecteur, deAdmin, contexte);
+          // Le tableau de bord porte bien des montants (et non 0 = 0) : le CA du mois compte l'affaire encaissée.
+          assert.ok(deDirecteur.global.caTotal >= 1000, `${contexte} : CA du mois ${deDirecteur.global.caTotal}`);
+          assert.equal(typeof deDirecteur.global.margeTotal, 'number', contexte);
+          assert.equal(typeof deDirecteur.global.commissionCommercialeTotal, 'number', contexte);
+          assert.equal(typeof deDirecteur.global.nbTerminesNonEncaisses, 'number', contexte);
+          assert.equal('heuresTotal' in deDirecteur.global, false, `${contexte} : pas la carte « Heures enregistrées »`);
+          // Mes commerciaux : la ligne du commercial et le vendu de l'affaire (1 000 €), sa marge (749,70 €).
+          const ligne = deDirecteur.commerciaux.commerciaux.find((c) => c.id === comptes.commercial.id);
+          const affaire = ligne.chantiers.find((c) => c.id === chantier.id);
+          assert.deepEqual([affaire.budgetGlobalVendu, affaire.margeCommerciale, affaire.comptabiliseDansPeriode], [1000, 749.7, true], contexte);
+          // Le parc rend le prix du modèle en décimal sérialisé (chaîne) : lu en nombre.
+          assert.deepEqual([deDirecteur.prixDevis, deDirecteur.prixArticle, Number(deDirecteur.prixParc), deDirecteur.prixRecherche], [[12.35, 'absent'], 31.7, 64.2, [31.7]], contexte);
+        }
+      } finally {
+        await regler({ rentabiliteDirecteurs: true });
+      }
+    });
+
+    test('non-régression : le commercial reste refusé par blockCommercial avec son message ; le directeur ne reçoit plus nulle part le refus « compte directeur »', async () => {
+      const chantier = await prisma.chantier.create({ data: { nom: `TEST Directeur non-régression ${suffixe}`, client: client.raisonSociale, clientId: client.id, dateDebut: new Date(), budgetGlobalVendu: 100, responsableId: comptes.conducteur.id, commercialId: comptes.commercial.id } });
+      for (const [cas, appel] of [
+        ['fiche du chantier', (auth) => envoyer('patch', `/api/chantiers/${chantier.id}`, auth, { nom: `TEST Directeur non-régression renommé ${suffixe}` })],
+        ['interventions', (auth) => lire('/api/interventions', auth)],
+        ['planning', (auth) => lire('/api/planning/events?start=2099-03-02&end=2099-03-08', auth)],
+      ]) {
+        const refus = await appel(jeton('commercial'));
+        assert.deepEqual([refus.status, refus.body.error], [403, 'Accès non autorisé pour un compte commercial.'], `commercial, ${cas}`);
+        const parDirecteur = await appel(jeton('directeur'));
+        assert.equal(parDirecteur.status, 200, `directeur, ${cas} : ${JSON.stringify(parDirecteur.body)}`);
+      }
+      // Le directeur commercial garde son refus du planning, avec son message.
+      const dc = await lire('/api/planning/events?start=2099-03-02&end=2099-03-08', jeton('directeurCommercial'));
+      assert.deepEqual([dc.status, dc.body.error], [403, 'Accès non autorisé pour un compte directeur commercial.']);
+      assert.equal((await prisma.chantier.findUniqueOrThrow({ where: { id: chantier.id } })).nom, `TEST Directeur non-régression renommé ${suffixe}`);
     });
   });
 }

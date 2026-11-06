@@ -2,7 +2,7 @@ import express from 'express';
 import type { Express } from 'express';
 import crypto from 'crypto';
 import { prisma, transactionVerifiee } from '../../db';
-import { isAdminRole } from '../../droits/roles';
+import { ROLE_DIRECTEUR, isAdminRole } from '../../droits/roles';
 import { requirePermission } from '../../droits/permissions';
 import { voitPrixAchatDevis, ecritPrixAchatDevis } from '../../droits/visibilite';
 import { type AuthRequest, requireAuth } from '../../http/auth';
@@ -418,9 +418,13 @@ const convertirDevis: express.RequestHandler = async (req, res) => { try {
     await rattacherInterventionDuDevis(tx, req as AuthRequest, devis, chantier.id);
     return chantier;
   });
-  // Le coût matériel prévu d'un chantier ouvert se lit comme le prix d'achat prévu des devis dont il vient.
+  // Le coût matériel prévu d'un chantier ouvert se lit comme le prix d'achat prévu des devis dont il vient ;
+  // pour le directeur, il suit la rentabilité du chantier (réponse de Nelson du 06-11-2026, « Chantiers
+  // seulement », cf. voitCoutPrevuParPrixAchat).
   const lu = decimalToNumber(resultat) as Record<string, unknown>;
-  res.status(201).json('coutMaterielPrevu' in lu && !voitPrixAchatDevis(req) ? { ...lu, coutMaterielPrevu: null } : lu);
+  const directeur = !(req as ApiRequest).apiKey && (req as AuthRequest).user?.role === ROLE_DIRECTEUR;
+  const coutPrevuVisible = directeur ? (await getParametres()).rentabiliteDirecteurs : voitPrixAchatDevis(req);
+  res.status(201).json('coutMaterielPrevu' in lu && !coutPrevuVisible ? { ...lu, coutMaterielPrevu: null } : lu);
 } catch (error) {
   // Défense en profondeur : les contraintes uniques de DevisConversion (un type par dossier et par
   // devis, rang 1 ou 2 unique par dossier). Les verrous du devis (conversion, révision, annulation)
