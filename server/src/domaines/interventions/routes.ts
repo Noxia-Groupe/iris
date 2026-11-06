@@ -1,7 +1,7 @@
 import type { Express } from 'express';
 import { Prisma } from '@prisma/client';
 import { prisma, transactionVerifiee } from '../../db';
-import { ROLE_TECHNICIEN, isAdminRole } from '../../droits/roles';
+import { ROLE_TECHNICIEN } from '../../droits/roles';
 import { voitCoutMainOeuvre, sansTauxHoraire, saisieSelonDroits } from '../../droits/visibilite';
 import { type AuthRequest, requireAuth } from '../../http/auth';
 import { blockCommercial, blockCommercialEtAssimiles, blockTechnicien } from '../../http/gardes';
@@ -42,7 +42,8 @@ const MOTIF_ANNULATION_INVALIDE = 'Un motif de 3 à 500 caractères sans caract�
 
 export function enregistrerRoutesInterventions(app: Express): void {
   app.post('/api/interventions', requireAuth, blockCommercial, (req: AuthRequest, res, next) => {
-    if (!isAdminRole(req.user?.role) && req.user?.role !== 'CONDUCTEUR_TRAVAUX') return res.status(403).json({ error: 'Création réservée à l’encadrement SAV.' });
+    // Même encadrement que le matériel d'une intervention (cf. estEncadrementCoutIntervention).
+    if (!estEncadrementCoutIntervention(req.user?.role)) return res.status(403).json({ error: 'Création réservée à l’encadrement SAV.' });
     next();
   }, async (req: AuthRequest, res) => {
     try {

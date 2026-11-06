@@ -9,7 +9,7 @@ import {
   HandCoins, KeyRound, Landmark, LayoutDashboard, PieChart, Receipt, Repeat, ScrollText, Settings, ShoppingCart, TrendingUp, Wrench,
 } from 'lucide-react';
 import {
-  isAdminRole, isSuperAdminRole, peutAccederAuxDevis, peutConsulterAnnuaire, peutConsulterPlanning, peutOuvrirAdministration, peutVoirStatistiques,
+  isAdminRole, isSuperAdminRole, peutAccederAuxDevis, peutConsulterAnnuaire, peutConsulterPlanning, peutOuvrirAdministration, peutVoirInterventions, peutVoirStatistiques,
   roleDuCompte, ROLE_COMMERCIAL, ROLE_CONDUCTEUR, ROLE_RESPONSABLE, ROLE_TECHNICIEN, type CurrentUser,
 } from './droits';
 
@@ -32,7 +32,6 @@ export function sectionsMenu(user: CurrentUser | null | undefined, planningActif
   const role = roleDuCompte(user);
   const isCommercial = role === ROLE_COMMERCIAL;
   const isAdmin = isAdminRole(role);
-  const peutVoirInterventions = isAdmin || role === ROLE_CONDUCTEUR || role === ROLE_RESPONSABLE || role === ROLE_TECHNICIEN;
   const peutVoirTravaux = isAdmin || role === ROLE_CONDUCTEUR || role === ROLE_RESPONSABLE;
 
   const sections: { titre?: string; entrees: (EntreeMenu & { visible: boolean })[] }[] = [
@@ -52,7 +51,7 @@ export function sectionsMenu(user: CurrentUser | null | undefined, planningActif
       { to: '/heures', libelle: 'Journal des heures', icone: Clock, visible: peutVoirTravaux },
     ] },
     { titre: 'Interventions', entrees: [
-      { to: '/interventions', libelle: 'Interventions SAV', icone: Wrench, visible: peutVoirInterventions },
+      { to: '/interventions', libelle: 'Interventions SAV', icone: Wrench, visible: peutVoirInterventions(role) },
       { to: '/contrats-maintenance', libelle: 'Contrats de maintenance', icone: Repeat, visible: isAdmin },
     ] },
     { titre: 'Facturation', entrees: [
@@ -74,7 +73,8 @@ export function sectionsMenu(user: CurrentUser | null | undefined, planningActif
     ] },
     { titre: 'Réglages', entrees: [
       // Administration : complète pour les administrateurs, directeur compris, réduite aux
-      // référentiels Fournisseurs et Catégories pour les conducteurs de travaux (cf. Admin.tsx) ;
+      // référentiels Fournisseurs et Catégories pour les autres comptes qui l'ouvrent, dont le conducteur
+      // de travaux et l'assistante technique (cf. Admin.tsx et peutOuvrirAdministration) ;
       // ni commercial, qui ne paramètre rien, ni technicien (lot pilote 3), ni directeur
       // commercial, assistante commerciale ou comptable (#179).
       { to: '/admin', libelle: 'Administration', icone: Settings, visible: peutOuvrirAdministration(role) },

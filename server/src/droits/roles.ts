@@ -18,6 +18,12 @@ export const ROLE_RESPONSABLE = 'RESPONSABLE';
 // (Parametres.rentabiliteDirecteurs, cf. voitRentabilite), qui ne masque que les chantiers (réponse
 // de Nelson du 06-11-2026, « Chantiers seulement »).
 export const ROLE_DIRECTEUR = 'DIRECTEUR';
+// ASSISTANTE_TECHNIQUE : « Les droit de toute la partie technique », sur toute la société (décisions de Nelson
+// du 24-10-2026, points 15, 16, 18 et 28, et section « lots prévus », point 2), sans les droits de
+// l'administration : elle n'entre pas dans TYPES_ADMINISTRATION. Ses capacités sont ajoutées une à une aux aides
+// qui les décident (voitToutLeSav, estEncadrementCoutIntervention, estEncadrementSuivi, litToutesLesAffaires).
+// Distincte de l'assistante commerciale, qui reste sans planning (point 15).
+export const ROLE_ASSISTANTE_TECHNIQUE = 'ASSISTANTE_TECHNIQUE';
 // Compte système (décision de Nelson du 22-10-2026, lot pilote 5) : auteur des écritures
 // automatiques, comme la génération des visites. Créé par la migration, il ne se connecte jamais
 // (inactif, sans mot de passe, adresse réservée), n'a aucun droit et n'apparaît pas dans la
@@ -29,8 +35,8 @@ export const NOM_COMPTE_SYSTEME = 'Iris (automatique)';
 export const EMAIL_COMPTE_SYSTEME = 'systeme@iris.invalid';
 
 // Types de compte qui ont les droits de l'administration : une seule liste, lue par isAdminRole et
-// par les aides de capacité (périmètre SAV, écrans). Le lot de l'assistante technique ajoutera ses
-// propres capacités sans élargir cette liste.
+// par les aides de capacité (périmètre SAV, écrans). L'assistante technique a ses propres capacités, sans
+// élargir cette liste (cf. ROLE_ASSISTANTE_TECHNIQUE).
 export const TYPES_ADMINISTRATION: readonly string[] = [ROLE_SUPERADMIN, 'ADMIN', ROLE_DIRECTEUR];
 
 export function isAdminRole(role: string | undefined | null): boolean {
@@ -38,6 +44,14 @@ export function isAdminRole(role: string | undefined | null): boolean {
 }
 export function isSuperAdminRole(role: string | undefined | null): boolean {
   return role === ROLE_SUPERADMIN;
+}
+
+// Capacité « lit toutes les affaires » (liste, fiche, journal des saisies, historique client, tableau de bord) :
+// l'administration, et l'assistante technique, qui travaille sur toute la société. Ce que la fiche en montre
+// (rentabilité, coût prévu, taux et coût de main-d'œuvre) reste décidé à part (voitRentabilite,
+// voitCoutPrevuParPrixAchat, voitCoutMainOeuvre), et cette lecture n'ouvre aucune écriture.
+export function litToutesLesAffaires(role: string | undefined | null): boolean {
+  return isAdminRole(role) || role === ROLE_ASSISTANTE_TECHNIQUE;
 }
 
 // « Aussi commercial » : réservé aux types ADMIN et SUPERADMIN (décision 7 de la proposition de

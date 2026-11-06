@@ -3,7 +3,7 @@ import type { Express } from 'express';
 import { Prisma } from '@prisma/client';
 import { prisma, transactionVerifiee } from '../../db';
 import {
-  ROLE_SUPERADMIN, ROLE_ASSISTANTE_COMMERCIALE, ROLE_TECHNICIEN, ROLE_COMPTABLE, ROLE_DIRECTEUR_COMMERCIAL,
+  ROLE_SUPERADMIN, ROLE_ASSISTANTE_COMMERCIALE, ROLE_ASSISTANTE_TECHNIQUE, ROLE_TECHNICIEN, ROLE_COMPTABLE, ROLE_DIRECTEUR_COMMERCIAL,
   ROLE_RESPONSABLE, ROLE_DIRECTEUR, ROLE_SYSTEME, isSuperAdminRole, peutEtreAussiCommercial,
 } from '../../droits/roles';
 import { DROITS_INTERDITS_TECHNICIEN, permissionsEffectives } from '../../droits/permissions';
@@ -16,7 +16,7 @@ import { normalizeEmail } from '../authentification/sso';
 
 // Autorise un nouveau compte à se connecter (liste blanche SSO / création de compte).
 // Aucun mot de passe n'est défini : le compte se connecte exclusivement via Microsoft Entra ID.
-const ALLOWED_ROLES = [ROLE_SUPERADMIN, 'ADMIN', 'CONDUCTEUR_TRAVAUX', 'COMMERCIAL', ROLE_ASSISTANTE_COMMERCIALE, ROLE_TECHNICIEN, ROLE_COMPTABLE, ROLE_DIRECTEUR_COMMERCIAL, ROLE_RESPONSABLE, ROLE_DIRECTEUR];
+const ALLOWED_ROLES = [ROLE_SUPERADMIN, 'ADMIN', 'CONDUCTEUR_TRAVAUX', 'COMMERCIAL', ROLE_ASSISTANTE_COMMERCIALE, ROLE_ASSISTANTE_TECHNIQUE, ROLE_TECHNICIEN, ROLE_COMPTABLE, ROLE_DIRECTEUR_COMMERCIAL, ROLE_RESPONSABLE, ROLE_DIRECTEUR];
 
 // Un compte SUPERADMIN n'est administrable QUE par un superadmin : le créer, lui changer
 // de rôle, lui réattribuer un mot de passe ou le révoquer sont autant de moyens, pour un

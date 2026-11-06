@@ -15,7 +15,7 @@ import EnvoiDocument, { type DocumentAEnvoyer } from '../components/EnvoiDocumen
 import type { TraceSignature as Trace } from '../lib/traceSignature';
 import { resumeCoutsIntervention, libelleDevisMarge, detailMargeSav, alerteMargeSav, type MargeDevisIntervention, type MargeSavHorsContrat } from '../lib/coutsIntervention';
 import { INFORMATION_SUITE_HORS_CONTRAT } from '../lib/suiteIntervention';
-import { isAdminRole, peutConsulterPlanning, useCurrentUser } from '../roles';
+import { estEncadrementSav, estEncadrementSuivi as estEncadrementSuiviRole, isAdminRole, peutConsulterPlanning, useCurrentUser } from '../roles';
 import { useModules } from '../modules';
 import { interventionRemettable } from '../lib/remiseAPlanifier';
 import { useCompanyTimezone } from '../companyTimezoneContext';
@@ -79,10 +79,11 @@ export default function Interventions({ interventionId }: { interventionId?: str
   const [introuvable, setIntrouvable] = useState(false);
   const [formulaire, setFormulaire] = useState<FormulaireOuvert | null>(null);
   const user = useCurrentUser();
-  const estEncadrement = isAdminRole(user?.role) || user?.role === 'CONDUCTEUR_TRAVAUX';
+  // Encadrement du SAV et du suivi, comme le serveur : administration, conducteur et assistante technique,
+  // plus, pour le suivi, le responsable (son périmètre).
+  const estEncadrement = estEncadrementSav(user?.role);
   const estTechnicien = user?.role === 'TECHNICIEN';
-  // Encadrement du suivi, comme le serveur : administration, conducteur, responsable (son périmètre).
-  const estEncadrementSuivi = estEncadrement || user?.role === 'RESPONSABLE';
+  const estEncadrementSuivi = estEncadrementSuiviRole(user?.role);
   const [suite, setSuite] = useState<{ id: string; reference: string; titre: string; priorite: string; horsContrat: boolean } | null>(null);
   const [info, setInfo] = useState('');
   // Remise « à planifier » d'une intervention planifiée, visite de contrat ou curative, comme depuis le

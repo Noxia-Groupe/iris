@@ -11,6 +11,13 @@ export const ROLE_ADMIN = 'ADMIN';
 export const ROLE_CONDUCTEUR = 'CONDUCTEUR_TRAVAUX';
 export const ROLE_COMMERCIAL = 'COMMERCIAL';
 export const ROLE_ASSISTANTE_COMMERCIALE = 'ASSISTANTE_COMMERCIALE';
+/**
+ * Assistante technique : la partie technique de toute la société (SAV, planning, suivi, chantiers en
+ * lecture), sans les droits de l'administration (décisions de Nelson du 24-10-2026 et du 06-11-2026).
+ * Distincte de l'assistante commerciale, qui reste sans planning. Même type que ROLE_ASSISTANTE_TECHNIQUE
+ * côté serveur.
+ */
+export const ROLE_ASSISTANTE_TECHNIQUE = 'ASSISTANTE_TECHNIQUE';
 export const ROLE_TECHNICIEN = 'TECHNICIEN';
 export const ROLE_COMPTABLE = 'COMPTABLE';
 export const ROLE_DIRECTEUR_COMMERCIAL = 'DIRECTEUR_COMMERCIAL';
@@ -62,6 +69,7 @@ export const TYPES_COMPTE: ReadonlyArray<{ valeur: string; libelle: string }> = 
   { valeur: ROLE_CONDUCTEUR, libelle: 'Conducteur de travaux' },
   { valeur: ROLE_COMMERCIAL, libelle: 'Commercial' },
   { valeur: ROLE_ASSISTANTE_COMMERCIALE, libelle: 'Assistante commerciale' },
+  { valeur: ROLE_ASSISTANTE_TECHNIQUE, libelle: 'Assistante technique' },
   { valeur: ROLE_TECHNICIEN, libelle: 'Technicien' },
   { valeur: ROLE_COMPTABLE, libelle: 'Comptable' },
   { valeur: ROLE_DIRECTEUR_COMMERCIAL, libelle: 'Directeur commercial' },
@@ -145,7 +153,8 @@ export const ROLES_SANS_PLANNING_NI_REFERENTIELS = [ROLE_DIRECTEUR_COMMERCIAL, R
 
 /**
  * Planning : fermé aux comptes exclus des opérations, aux trois types ci-dessus et à un rôle absent
- * ('', null ou undefined : option la plus restrictive, #206, choix par défaut, à confirmer).
+ * ('', null ou undefined : option la plus restrictive, #206, choix par défaut, à confirmer). Ouvert,
+ * entre autres, à l'assistante technique, qui l'organise sur toute la société.
  */
 export function peutConsulterPlanning(role?: string | null): boolean {
   if (!role) return false;
@@ -154,7 +163,8 @@ export function peutConsulterPlanning(role?: string | null): boolean {
 
 /**
  * Administration : complète pour les administrateurs, réduite aux référentiels des achats
- * (fournisseurs, catégories) pour le conducteur. Le technicien n'y a plus rien à faire depuis le
+ * (fournisseurs, catégories) pour le conducteur, le responsable et l'assistante technique, qui saisit le
+ * matériel des interventions SAV, chacun lié à un fournisseur. Le technicien n'y a plus rien à faire depuis le
  * lot pilote 3, qui lui retire ces écritures (choix par défaut), ni le directeur commercial,
  * l'assistante commerciale et le comptable depuis #179 ; le serveur les leur refuse aussi. Un rôle
  * absent ('', null ou undefined) ne l'ouvre pas non plus (#206, choix par défaut, à confirmer).
@@ -167,13 +177,38 @@ export function peutOuvrirAdministration(role?: string | null): boolean {
 /**
  * Annuaire des clients (clients, contacts, sites) : les administrateurs (TYPES_ADMINISTRATION,
  * directeur compris), qui le tiennent à jour, puis, en consultation seule, le technicien (décision de Nelson du 13-10-2026), par exemple pour
- * retrouver une adresse, et le conducteur de travaux (décision du 16-10-2026). Le serveur applique
- * la permission clients:read.
+ * retrouver une adresse, le conducteur de travaux (décision du 16-10-2026) et l'assistante technique,
+ * qui choisit le client d'une intervention SAV. Le serveur applique la permission clients:read.
  */
-export const ROLES_ANNUAIRE = [...TYPES_ADMINISTRATION, ROLE_TECHNICIEN, ROLE_CONDUCTEUR];
+export const ROLES_ANNUAIRE = [...TYPES_ADMINISTRATION, ROLE_TECHNICIEN, ROLE_CONDUCTEUR, ROLE_ASSISTANTE_TECHNIQUE];
 // Même liste pour le menu et pour la route /clients (App.tsx) : l'un ne s'ouvre pas sans l'autre.
 export function peutConsulterAnnuaire(user?: CurrentUser | null): boolean {
   return !!user && ROLES_ANNUAIRE.includes(user.role || '');
+}
+
+/**
+ * Écran des interventions SAV : l'administration, le conducteur, le responsable, le technicien et
+ * l'assistante technique (même liste pour le menu et la route /interventions).
+ */
+export const ROLES_INTERVENTIONS = [...TYPES_ADMINISTRATION, ROLE_CONDUCTEUR, ROLE_RESPONSABLE, ROLE_TECHNICIEN, ROLE_ASSISTANTE_TECHNIQUE];
+export function peutVoirInterventions(role?: string | null): boolean {
+  return !!role && ROLES_INTERVENTIONS.includes(role);
+}
+
+/**
+ * Encadrement du SAV (nouvelle intervention, matériel, coûts sans taux) : l'administration, le conducteur
+ * et l'assistante technique ; même règle que estEncadrementCoutIntervention côté serveur.
+ */
+export function estEncadrementSav(role?: string | null): boolean {
+  return isAdminRole(role) || role === ROLE_CONDUCTEUR || role === ROLE_ASSISTANTE_TECHNIQUE;
+}
+
+/**
+ * Encadrement du suivi (marque « à suivre », création de la suite) : l'encadrement du SAV et le
+ * responsable ; même règle que estEncadrementSuivi côté serveur.
+ */
+export function estEncadrementSuivi(role?: string | null): boolean {
+  return estEncadrementSav(role) || role === ROLE_RESPONSABLE;
 }
 
 /** Accès interface aux devis ; le serveur applique toujours la permission réelle. */

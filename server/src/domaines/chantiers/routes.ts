@@ -2,7 +2,7 @@ import express from 'express';
 import type { Express } from 'express';
 import { Prisma } from '@prisma/client';
 import { prisma, transactionVerifiee } from '../../db';
-import { ROLE_TECHNICIEN, ROLE_RESPONSABLE, ROLE_DIRECTEUR, isAdminRole } from '../../droits/roles';
+import { ROLE_ASSISTANTE_TECHNIQUE, ROLE_TECHNICIEN, ROLE_RESPONSABLE, isAdminRole, litToutesLesAffaires } from '../../droits/roles';
 import { perimetreChantiers } from '../../droits/perimetres';
 import { voitMontantsChantier, voitCoutMainOeuvre, saisieSelonDroits } from '../../droits/visibilite';
 import { type AuthRequest, requireAuth } from '../../http/auth';
@@ -104,6 +104,18 @@ const blockCommercialSeulement: express.RequestHandler = (req, res, next) => {
   next();
 };
 
+// L'assistante technique lit toutes les affaires sans en modifier aucune : ni fiche, ni statut, ni
+// commercial (lot « Assistante technique », première PR ; choix par défaut, le plus restrictif, à
+// confirmer). Le refus le lui dit en clair, plutôt qu'un 404 sur une fiche qu'elle lit.
+export const REFUS_ASSISTANTE_TECHNIQUE_MODIFICATION = 'Un compte assistante technique n’est pas autorisé à modifier une affaire.';
+const refuserAssistanteTechnique: express.RequestHandler = (req, res, next) => {
+  if ((req as AuthRequest).user?.role === ROLE_ASSISTANTE_TECHNIQUE) {
+    res.status(403).json({ error: REFUS_ASSISTANTE_TECHNIQUE_MODIFICATION });
+    return;
+  }
+  next();
+};
+
 // Rapport de chantier remis au client (lot 6a-4c), sans montant ni heures (réponse de Nelson du
 // 31-10-2026). Réservé à l'administration, en session seulement, sans route /api/v1 (choix par défaut,
 // le plus restrictif, à confirmer) : il réunit le chantier et les comptes rendus de ses interventions,
@@ -131,7 +143,7 @@ export function enregistrerRoutesChantiers(app: Express): void {
   app.get('/api/chantiers/:id', requireAuth, async (req, res) => {
     try {
       const authUser = (req as AuthRequest).user!;
-      const isAdmin = isAdminRole(authUser.role);
+      const litTout = litToutesLesAffaires(authUser.role);
       const params = await getParametres();
       const chantier = await prisma.chantier.findUnique({
         where: { id: paramId(req) },
@@ -146,14 +158,13 @@ export function enregistrerRoutesChantiers(app: Express): void {
         }
       });
       // 404 (et non 403) pour un chantier auquel on n'est pas rattaché : on ne révèle pas son existence.
-      // Un directeur lit toutes les fiches : il a les droits de l'administration (décision du 24-10-2026).
+      // L'administration, directeur compris, et l'assistante technique lisent toutes les fiches (cf. litToutesLesAffaires).
       const isOwner = !!chantier && (
-        authUser.role === ROLE_DIRECTEUR ||
         chantier.commercialId === authUser.id ||
         chantier.responsableId === authUser.id ||
         (authUser.role === ROLE_RESPONSABLE && !!chantier.responsableId && authUser.equipeIds.includes(chantier.responsableId))
       );
-      if (!chantier || (!isAdmin && !isOwner)) {
+      if (!chantier || (!litTout && !isOwner)) {
         return res.status(404).json({ error: 'Chantier introuvable' });
       }
       // Mêmes destinataires que la liste : marge, budget vendu, facturation et estimation pour
@@ -221,7 +232,7 @@ export function enregistrerRoutesChantiers(app: Express): void {
     res.status(410).json({ error: 'Un chantier est créé uniquement par conversion d’un devis accepté.' });
   });
 
-  app.patch('/api/chantiers/:id', requireAuth, blockCommercial, async (req, res) => {
+  app.patch('/api/chantiers/:id', requireAuth, blockCommercial, refuserAssistanteTechnique, async (req, res) => {
     try {
       const authUser = (req as AuthRequest).user!;
       const existant = await prisma.chantier.findUnique({
@@ -410,7 +421,7 @@ export function enregistrerRoutesChantiers(app: Express): void {
     res.status(410).json({ error: 'Un chantier ne se supprime pas : annulez le devis dont il est issu (une note explicative est exigée).' });
   });
 
-  app.patch('/api/chantiers/:id/statut', requireAuth, blockCommercialSeulement, async (req, res) => {
+  app.patch('/api/chantiers/:id/statut', requireAuth, blockCommercialSeulement, refuserAssistanteTechnique, async (req, res) => {
     try {
       const authUser = (req as AuthRequest).user!;
       const isAdmin = isAdminRole(authUser.role);
@@ -475,7 +486,7 @@ export function enregistrerRoutesChantiers(app: Express): void {
   // Affectation du commercial sur un chantier déjà créé — modifiable par l'administration (directeur
   // compris) ou par le conducteur responsable du chantier (pas par le commercial lui-même, ni par un
   // tiers : le commercial rattaché alimente les commissions).
-  app.patch('/api/chantiers/:id/commercial', requireAuth, blockCommercial, async (req, res) => {
+  app.patch('/api/chantiers/:id/commercial', requireAuth, blockCommercial, refuserAssistanteTechnique, async (req, res) => {
     try {
       const authUser = (req as AuthRequest).user!;
       const isAdmin = isAdminRole(authUser.role);
