@@ -26819,6 +26819,58 @@ if (!TEST_DATABASE_URL) {
       }
     });
 
+    // Course (T1 de l'audit droits et sécurité) : le refus compare la case à la valeur relue sous le verrou du réglage, et
+    // non à celle que l'écran du directeur avait lue. L'administration décoche la case dans une transaction qui tient le
+    // verrou ; le directeur renvoie entre-temps l'ancienne valeur (cochée) : il attend le verrou, puis il est refusé, et la
+    // case reste décochée. Lecture écartée : une comparaison faite avant le verrou, qui laisserait le directeur rétablir sa
+    // rentabilité en écrasant le choix de l'administration.
+    test('rentabilité des directeurs, course : décochée par l’administration pendant que le directeur renvoie l’ancienne valeur, il attend le verrou puis est refusé (403), la case reste décochée', async () => {
+      const directeur = jeton('directeur');
+      const initial = await prisma.parametres.findUniqueOrThrow({ where: { id: 'singleton' } });
+      let liberer = () => {};
+      let tenant = Promise.resolve();
+      try {
+        await regler({ rentabiliteDirecteurs: true, seuilMargeFaible: 15 });
+        const journalAvant = await nbJournalAdministration();
+        const retenue = new Promise((resolve) => { liberer = resolve; });
+        let pidTenant = null;
+        tenant = prisma.$transaction(async (tx) => {
+          await tx.$queryRaw`SELECT 1 FROM "Parametres" WHERE "id" = 'singleton' FOR UPDATE`;
+          await tx.$executeRaw`UPDATE "Parametres" SET "rentabiliteDirecteurs" = false WHERE "id" = 'singleton'`;
+          [{ pid: pidTenant }] = await tx.$queryRaw`SELECT pg_backend_pid() AS pid`;
+          await retenue;
+        }, { timeout: 30_000 });
+        // Attente bornée : si la transaction de l'administration échoue avant de tenir le verrou, le test le dit au lieu
+        // d'attendre sans fin.
+        let echecTenant = null;
+        tenant.catch((erreur) => { echecTenant = erreur; });
+        for (let essai = 0; essai < 500 && pidTenant === null && !echecTenant; essai++) await new Promise((resolve) => setTimeout(resolve, 10));
+        assert.notEqual(pidTenant, null, `la transaction de l’administration tient le verrou (${echecTenant?.message ?? 'délai dépassé'})`);
+        let repondu = false;
+        const envoi = envoyer('put', '/api/parametres', directeur, { rentabiliteDirecteurs: true, seuilMargeFaible: 21 }).then((res) => { repondu = true; return res; });
+        let bloque = false;
+        for (let essai = 0; essai < 1000 && !repondu && !bloque; essai++) {
+          const [{ n }] = await prisma.$queryRaw`SELECT count(*)::int AS n FROM pg_stat_activity WHERE ${pidTenant}::int = ANY(pg_blocking_pids(pid))`;
+          bloque = n > 0;
+          if (!bloque) await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        liberer();
+        await tenant;
+        const res = await envoi;
+        assert.equal(bloque, true, 'la requête du directeur attend le verrou du réglage');
+        assert.deepEqual([res.status, res.body.error], [403, 'Un directeur ne règle pas la rentabilité des directeurs.']);
+        const apres = await prisma.parametres.findUniqueOrThrow({ where: { id: 'singleton' } });
+        assert.deepEqual([apres.rentabiliteDirecteurs, Number(apres.seuilMargeFaible)], [false, 15], 'ni la case ni l’autre réglage ne sont écrits');
+        assert.equal(await nbJournalAdministration(), journalAvant, 'rien n’est journalisé');
+      } finally {
+        liberer();
+        await tenant.catch(() => undefined);
+        await prisma.parametres.update({ where: { id: 'singleton' }, data: {
+          rentabiliteDirecteurs: initial.rentabiliteDirecteurs, seuilMargeFaible: initial.seuilMargeFaible,
+        } });
+      }
+    });
+
     // Type Administrateur. Même choix par défaut, à confirmer (règle 5, option la plus restrictive) : en attribuant le type
     // ADMIN, à un compte qu'il ouvre ou à lui-même, le directeur lèverait sa restriction de rentabilité. Seuls l'ADMIN et le
     // SUPERADMIN l'attribuent ; le directeur ouvre tous les autres types, directeur compris, et peut retirer le type ADMIN.

@@ -624,7 +624,8 @@ const Admin = () => {
                 <div className="grid grid-cols-2 gap-2 mt-4 pt-4 border-t">
                   <div>
                     <div className="text-xs text-muted uppercase">Global Vendu</div>
-                    <div className="font-bold">{c.budgetGlobalVendu.toLocaleString()} €</div>
+                    {/* Vendu nul (null) : non communiqué au directeur sans la rentabilité des chantiers (réponse de Nelson du 06-11-2026). */}
+                    <div className="font-bold">{c.budgetGlobalVendu == null ? '—' : `${c.budgetGlobalVendu.toLocaleString()} €`}</div>
                   </div>
                   <div>
                     <div className="text-xs text-muted uppercase">Heures Vendues</div>
