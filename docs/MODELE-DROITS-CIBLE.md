@@ -4,6 +4,8 @@
 >
 > **Le lot « Directeur aligné sur l'administration » change les droits du directeur** (décisions de Nelson du 24-10-2026, points 14 et 17, [historique](HISTORIQUE-DECISIONS.md#décisions-du-24-10-2026-sur-la-remise-à-planifier), et réponses du 06-11-2026 sur la rentabilité et sur le chantier terminé). Il est implémenté, non validé pour mise en service. Les endroits de cette proposition qui décrivaient un directeur en lecture seule sont annotés « remplacé par le lot Directeur (décisions du 24-10-2026 et du 06-11-2026) » ou réécrits ; le reste de la proposition, ses décisions comprises, est inchangé. Le point 14 lève, pour le directeur, le critère « aucun montant rendu visible à qui ne le voit pas aujourd'hui sans un réglage explicite du super administrateur » (section 10) et la décision 5.
 >
+> **Le lot « Assistante technique » ajoute un onzième type, `ASSISTANTE_TECHNIQUE`** (décisions de Nelson du 24-10-2026, points 15, 16, 18 et 28, et section « lots prévus », points 1 et 2, [historique](HISTORIQUE-DECISIONS.md#décisions-du-24-10-2026-sur-la-remise-à-planifier) ; réponses du 06-11-2026). Sa première PR (AT-1) est implémentée, non validée pour mise en service ; les deux suivantes (devis, clients, chantiers et rentabilité ; factures) sont prévues. Ses droits sont décrits ligne `ASSISTANTE_TECHNIQUE` de [`MODELE-DROITS-COMPTES.md`](MODELE-DROITS-COMPTES.md). Dans cette proposition, « dix rôles » et « dix types » (titre de la section 4, sections 5.3, 8 et 9, décision 6) se lisent désormais « onze » : la table 4.1 ne décrit pas encore ce type, que les lots D1 à D3 devront reprendre comme rôle prédéfini, avec la matrice D1a, qui l'enregistre sous la clé `AT`. La décision 11 (assistante sans planning, sauf permission donnée par la société) reste celle de l'assistante commerciale ; pour l'assistante technique, elle est remplacée par la décision du 24-10-2026 (option « Nouveau type de compte », point 18 : planning et partie technique). Le critère « aucun montant rendu visible à qui ne le voit pas aujourd'hui sans un réglage explicite du super administrateur » (section 10) est levé pour elle par le point 18 et les réponses du 06-11-2026 (matériel SAV, budgets par poste et achats des chantiers ; ni taux, ni coût de main-d'œuvre, ni rentabilité sans le réglage de la deuxième PR).
+>
 > L'état décidé des droits est décrit par [`MODELE-DROITS-COMPTES.md`](MODELE-DROITS-COMPTES.md) et par l'[historique des décisions](HISTORIQUE-DECISIONS.md). L'inventaire détaillé du code, règle par règle, avec ses références `fichier:ligne` au commit `84e27a1`, est en annexe : [`MODELE-DROITS-INVENTAIRE.md`](MODELE-DROITS-INVENTAIRE.md).
 
 ## 1. Le besoin
@@ -184,6 +186,8 @@ C'est une décision d'accès, comme le dit déjà le code : le rattachement rest
 | Fiche intervenant reliée | seul un compte technicien actif se relie ; un compte qui quitte le type technicien perd sa fiche (#166) | Un rôle porte la propriété « peut porter une fiche intervenant ». Changer un compte vers un rôle qui ne l'a pas délie sa fiche, journalisé, comme aujourd'hui. |
 
 ## 4. Les dix rôles prédéfinis « Iris actuel »
+
+> Onzième type, ajouté par le lot « Assistante technique » : `ASSISTANTE_TECHNIQUE`, hors de la table 4.1 (voir l'encadré en tête de document).
 
 ### 4.1 Table de correspondance
 
