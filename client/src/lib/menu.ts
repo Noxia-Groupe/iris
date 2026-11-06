@@ -44,8 +44,9 @@ export function sectionsMenu(user: CurrentUser | null | undefined, planningActif
       { to: '/chantiers', libelle: 'Liste des chantiers', icone: FolderOpen, exact: true, visible: true },
       { to: '/devis', libelle: 'Devis', icone: FileText, visible: peutAccederAuxDevis(user) },
       // Planning : masqué pour tous (administrateurs compris) quand un superadmin a
-      // désactivé le module ; jamais proposé aux commerciaux, aux directeurs, ni, depuis #179,
-      // au directeur commercial, à l'assistante commerciale et au comptable.
+      // désactivé le module ; jamais proposé aux commerciaux, ni, depuis #179, au directeur
+      // commercial, à l'assistante commerciale et au comptable. Le directeur, qui a les droits de
+      // l'administration, le consulte comme elle.
       { to: '/planning', libelle: 'Planning', icone: CalendarDays, visible: peutConsulterPlanning(role) && planningActif },
       { to: '/achats', libelle: 'Journal des achats', icone: ShoppingCart, visible: peutVoirTravaux },
       { to: '/heures', libelle: 'Journal des heures', icone: Clock, visible: peutVoirTravaux },
@@ -72,10 +73,10 @@ export function sectionsMenu(user: CurrentUser | null | undefined, planningActif
       { to: '/catalogue', libelle: 'Catalogue', icone: BookOpen, visible: isAdmin },
     ] },
     { titre: 'Réglages', entrees: [
-      // Administration : complète pour les administrateurs, réduite aux référentiels
-      // Fournisseurs et Catégories pour les conducteurs de travaux (cf. Admin.tsx) ; ni
-      // commercial ni directeur, qui ne paramètrent rien, ni technicien (lot pilote 3), ni
-      // directeur commercial, assistante commerciale ou comptable (#179).
+      // Administration : complète pour les administrateurs, directeur compris, réduite aux
+      // référentiels Fournisseurs et Catégories pour les conducteurs de travaux (cf. Admin.tsx) ;
+      // ni commercial, qui ne paramètre rien, ni technicien (lot pilote 3), ni directeur
+      // commercial, assistante commerciale ou comptable (#179).
       { to: '/admin', libelle: 'Administration', icone: Settings, visible: peutOuvrirAdministration(role) },
       { to: '/societe', libelle: 'Société', icone: Briefcase, visible: isAdmin },
       { to: '/administration/api', libelle: 'API d’intégration', icone: KeyRound, visible: isSuperAdminRole(role) },

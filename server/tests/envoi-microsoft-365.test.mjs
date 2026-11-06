@@ -62,7 +62,6 @@ const REFUS_SUPER_ADMINISTRATION = { error: 'Accès réservé au super administr
 const REFUS_DEVIS_WRITE = { error: 'Permission requise : devis:write' };
 const REFUS_CLIENTS_READ = { error: 'Permission requise : clients:read' };
 const REFUS_COMMERCIAL = { error: 'Accès non autorisé pour un compte commercial.' };
-const REFUS_DIRECTEUR = { error: 'Accès non autorisé pour un compte directeur.' };
 const REFUS_TECHNICIEN = { error: 'L’envoi du compte rendu n’est pas ouvert au technicien.' };
 const REFUS_DESTINATAIRE = { error: 'Adresse du destinataire invalide : indiquez une seule adresse électronique, de la forme nom@domaine.fr.' };
 const DEVIS_INTROUVABLE = { error: 'Devis introuvable.' };
@@ -1099,21 +1098,23 @@ if (!TEST_DATABASE_URL) {
 
       const routes = {
         devis: {
-          gardes: [[parCompte(c.directeur), REFUS_DEVIS_WRITE, 'DIRECTEUR'], [parCompte(c.technicienAffecte), REFUS_DEVIS_WRITE, 'TECHNICIEN aux droits devis']],
+          // Le directeur, qui a désormais les droits de l'administration (lot « Directeur aligné sur l'administration »),
+          // est remplacé par le responsable, sans le droit devis.
+          gardes: [[parCompte(c.responsable), REFUS_DEVIS_WRITE, 'RESPONSABLE'], [parCompte(c.technicienAffecte), REFUS_DEVIS_WRITE, 'TECHNICIEN aux droits devis']],
           introuvables: [[randomUUID(), DEVIS_INTROUVABLE, admin()], [f.facture.id, DEVIS_INTROUVABLE, admin()]],
           annules: [[devisAnnule.id, DEVIS_ANNULE], [devisRefuse.id, DEVIS_ANNULE]],
           propres: [],
           identite: identiteIncomplete('SIRET, ville', 'un devis'),
         },
         facture: {
-          gardes: [[parCompte(c.comptable), REFUS_ADMINISTRATION, 'COMPTABLE'], [parCompte(c.directeurTousDroits), REFUS_ADMINISTRATION, 'DIRECTEUR tous droits']],
+          gardes: [[parCompte(c.comptable), REFUS_ADMINISTRATION, 'COMPTABLE'], [parCompte(c.directeurCommercial), REFUS_ADMINISTRATION, 'DIRECTEUR_COMMERCIAL']],
           introuvables: [[randomUUID(), FACTURE_INTROUVABLE, admin()], [f.devis.id, FACTURE_INTROUVABLE, admin()]],
           annules: [],
           propres: [[factureBrouillon.id, FACTURE_NON_EMISE]],
           identite: null,
         },
         compteRendu: {
-          gardes: [[parCompte(c.commercial), REFUS_COMMERCIAL, 'COMMERCIAL'], [parCompte(c.directeurTousDroits), REFUS_DIRECTEUR, 'DIRECTEUR'], [parCompte(c.technicienAffecte), REFUS_TECHNICIEN, 'TECHNICIEN affecté'], [parCompte(c.responsable), REFUS_CLIENTS_READ, 'RESPONSABLE sans clients:read']],
+          gardes: [[parCompte(c.commercial), REFUS_COMMERCIAL, 'COMMERCIAL'], [parCompte(c.technicienAffecte), REFUS_TECHNICIEN, 'TECHNICIEN affecté'], [parCompte(c.responsable), REFUS_CLIENTS_READ, 'RESPONSABLE sans clients:read']],
           introuvables: [[randomUUID(), INTERVENTION_INTROUVABLE, admin()], [f.intervention.id, INTERVENTION_INTROUVABLE, parCompte(c.conducteurTiers)]],
           annules: [[interventionAnnulee.id, INTERVENTION_ANNULEE]],
           propres: [[sansCompteRendu.id, AUCUN_COMPTE_RENDU]],
@@ -1568,15 +1569,17 @@ if (!TEST_DATABASE_URL) {
       const s = suffixe();
       const c = f.comptes;
       const comptes = [['SUPERADMIN', secours, admin()], ...Object.entries(c).map(([cle, compte]) => [cle, compte, parCompte(compte)])];
-      const ADMIS_ADMINISTRATION = ['SUPERADMIN', 'admin', 'adminCommercial'];
+      // Le directeur, avec ou sans droits individuels, a les droits de l'administration (lot « Directeur aligné sur
+      // l'administration », décision de Nelson du 24-10-2026, point 14).
+      const ADMIS_ADMINISTRATION = ['SUPERADMIN', 'admin', 'adminCommercial', 'directeur', 'directeurLecteurDevis', 'directeurTousDroits'];
       const attendus = {
-        devis: (cle) => (['SUPERADMIN', 'admin', 'adminCommercial', 'commercial', 'assistante', 'comptable', 'directeurCommercial', 'directeurTousDroits'].includes(cle) ? 201 : [403, REFUS_DEVIS_WRITE]),
+        devis: (cle) => ([...ADMIS_ADMINISTRATION, 'commercial', 'assistante', 'comptable', 'directeurCommercial'].includes(cle) ? 201 : [403, REFUS_DEVIS_WRITE]),
         facture: (cle) => (ADMIS_ADMINISTRATION.includes(cle) ? 201 : [403, REFUS_ADMINISTRATION]),
         contrat: (cle) => (ADMIS_ADMINISTRATION.includes(cle) ? 201 : [403, REFUS_ADMINISTRATION]),
         chantier: (cle) => (ADMIS_ADMINISTRATION.includes(cle) ? 201 : [403, REFUS_ADMINISTRATION]),
         compteRendu: (cle) => ({
-          SUPERADMIN: 201, admin: 201, adminCommercial: 201, conducteur: 201,
-          commercial: [403, REFUS_COMMERCIAL], directeur: [403, REFUS_DIRECTEUR], directeurLecteurDevis: [403, REFUS_DIRECTEUR], directeurTousDroits: [403, REFUS_DIRECTEUR],
+          SUPERADMIN: 201, admin: 201, adminCommercial: 201, conducteur: 201, directeur: 201, directeurLecteurDevis: 201, directeurTousDroits: 201,
+          commercial: [403, REFUS_COMMERCIAL],
           technicienAffecte: [403, REFUS_TECHNICIEN], technicienNonAffecte: [403, REFUS_TECHNICIEN],
           responsable: [403, REFUS_CLIENTS_READ], responsableTiers: [403, REFUS_CLIENTS_READ],
           conducteurTiers: [404, INTERVENTION_INTROUVABLE], directeurCommercial: [404, INTERVENTION_INTROUVABLE], assistante: [404, INTERVENTION_INTROUVABLE], comptable: [404, INTERVENTION_INTROUVABLE],

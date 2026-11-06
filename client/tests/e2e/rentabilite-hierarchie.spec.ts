@@ -121,19 +121,21 @@ test.describe('Rentabilité — chaîne hiérarchique et profil Directeur', () =
       await expect(ligneListe).toContainText(/[-−]50\s€/);
       await expect(ligneListe.locator('[data-marge-estimee]')).toContainText('Fin estimée');
 
-      // Le directeur, hors de toute hiérarchie, voit la fiche et sa perte, sans écran opérationnel.
+      // Le directeur, hors de toute hiérarchie, voit la fiche et sa perte ; il a les écrans de l'administration (lot
+      // « Directeur aligné sur l'administration », décision de Nelson du 24-10-2026, point 14) : la fiche se modifie,
+      // l'Administration et le Planning sont au menu et s'ouvrent.
       const vueDirecteur = await pageDe(browser, directeur);
       contextes.push(vueDirecteur.context());
       await vueDirecteur.goto(`/chantiers/${chantier.id}`, { waitUntil: 'networkidle' });
       await expect(vueDirecteur.locator('[data-alertes-fiche] [data-alerte="EN_PERTE"]')).toBeVisible();
-      await expect(vueDirecteur.getByRole('button', { name: 'Modifier' })).toHaveCount(0);
+      await expect(vueDirecteur.getByRole('button', { name: 'Modifier', exact: true }).first()).toBeVisible();
       const menu = vueDirecteur.locator('#menu-principal');
       await expect(menu.getByRole('link', { name: 'Liste des chantiers' })).toBeVisible();
-      await expect(menu.getByRole('link', { name: 'Administration' })).toHaveCount(0);
-      await expect(menu.getByRole('link', { name: 'Planning' })).toHaveCount(0);
+      await expect(menu.getByRole('link', { name: 'Administration', exact: true })).toBeVisible();
+      await expect(menu.getByRole('link', { name: 'Planning', exact: true })).toBeVisible();
       await expect(menu.locator('.sidebar-compte-role')).toHaveText('Directeur');
       await vueDirecteur.goto('/admin', { waitUntil: 'networkidle' });
-      await expect(vueDirecteur).toHaveURL(/\/$/);
+      await expect(vueDirecteur).toHaveURL(/\/admin$/);
 
       // La société retire la chaîne hiérarchique : le régional garde le chantier et son
       // dépassement, sans la marge ni l'alerte de perte.
@@ -206,6 +208,163 @@ test.describe('Rentabilité — chaîne hiérarchique et profil Directeur', () =
       for (const ouvert of chantiers) {
         await request.patch(`${api}/chantiers/${ouvert.id}/statut`, { headers, data: { statut: 'TERMINE' } }).catch(() => undefined);
       }
+      for (const contexte of contextes) await contexte.close().catch(() => undefined);
+    }
+  });
+
+  // Lot « Directeur aligné sur l'administration », réponse de Nelson du 06-11-2026, « Chantiers seulement » : quand la
+  // société décoche les directeurs, le directeur ne voit plus la perte ni la marge des chantiers, et Performances affiche
+  // « — » (et non 0) pour le CA, la marge et la marge % ; le tableau de bord garde les chiffres de l'administration.
+  // Montants : 200 € vendus (100 € de fourniture, 2 h de pose à 50 €), 250 € d'achats : perte de 50 €, marge −25,0 %.
+  // Lectures écartées : un « 0,00 € » ou « 0.0% » trompeur à la place de « — » ; le réglage ignoré (perte encore visible) ;
+  // le tableau de bord masqué lui aussi (« Toute la vue financière », option écartée par Nelson).
+  test('la société retire la rentabilité aux directeurs : ni perte ni « Fin estimée », « — » dans Performances, tableau de bord de l’administration', async ({ allerSurPageAdmin, creerClient, request, session, browser }) => {
+    test.slow();
+    const headers = { Authorization: `Bearer ${session.token}` };
+    const envoyer = async (methode: 'post' | 'patch' | 'put', path: string, data: object) => {
+      const response = await request[methode](`${api}${path}`, { headers, data });
+      expect(response.ok(), `${path} : ${await response.text()}`).toBeTruthy();
+      return response.json();
+    };
+    const suffixe = Date.now();
+    const creerCompte = async (cle: string, nom: string, role: string): Promise<Compte> =>
+      envoyer('post', '/users', { email: `rentab-dir.${cle}.${suffixe}@iris.test`, name: `${nom} ${suffixe}`, role });
+    const conducteur = await creerCompte('conducteur', 'Conducteur performances', 'CONDUCTEUR_TRAVAUX');
+    const directeur = await creerCompte('directeur', 'Directeur performances', 'DIRECTEUR');
+    const commercial = await creerCompte('commercial', 'Commercial performances', 'COMMERCIAL');
+    const client = await creerClient('rentabilite-directeur');
+    const devis = await envoyer('post', '/devis', { clientId: client.id, objet: `Directeur sans rentabilité E2E ${suffixe}`, lignes: [
+      { designation: 'Caméra', nature: 'FOURNITURE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 },
+      { designation: 'Pose', nature: 'MAIN_OEUVRE', quantite: 2, prixUnitaireHt: 50, tauxTva: 20 },
+    ] });
+    await envoyer('put', `/devis/${devis.id}/statut`, { statut: 'ENVOYE' });
+    await envoyer('post', `/devis/${devis.id}/signature`, { signataire: 'Client E2E', confirme: true });
+    const chantier = await envoyer('post', `/devis/${devis.id}/convertir`, { cible: 'CHANTIER' }) as { id: string; nom: string };
+    const contextes: { close: () => Promise<void> }[] = [];
+    try {
+      await envoyer('put', '/parametres', { margeCommercialeActive: true, rentabiliteConducteur: true, rentabiliteHierarchie: true, rentabiliteDirecteurs: true });
+      await envoyer('patch', `/chantiers/${chantier.id}`, { responsableId: conducteur.id });
+      await envoyer('patch', `/chantiers/${chantier.id}/commercial`, { commercialId: commercial.id });
+      const categorie = await envoyer('post', '/categories', { nom: `Directeur performances E2E ${suffixe} catégorie` });
+      const fournisseur = await envoyer('post', '/fournisseurs', { nom: `Directeur performances E2E ${suffixe} fournisseur` });
+      await envoyer('post', '/achats', { chantierId: chantier.id, categorieId: categorie.id, fournisseurId: fournisseur.id, date: dateDuJour(), description: 'Matériel complémentaire', montantHT: 250 });
+
+      const vueDirecteur = await pageDe(browser, directeur);
+      contextes.push(vueDirecteur.context());
+      const admin = await allerSurPageAdmin('/performances');
+      // Carte du conducteur dans Performances : CA vendu, marge générée, marge %.
+      const chiffres = async (page: typeof vueDirecteur) => {
+        await page.goto('/performances', { waitUntil: 'networkidle' });
+        const carte = page.locator('div.rounded-xl').filter({ hasText: conducteur.name }).filter({ hasText: 'CA vendu' }).last();
+        await expect(carte).toBeVisible();
+        return (await carte.locator('.grid-cols-3 > div').allInnerTexts()).map((texte) => texte.replace(/\s+/g, ' ').trim());
+      };
+      // Réglage coché : la carte du directeur est celle de l'administration, perte comprise.
+      const avecReglage = await chiffres(vueDirecteur);
+      expect(avecReglage).toEqual(await chiffres(admin));
+      // Performances affiche des euros arrondis (fmtEuro) : « 200 € », « -50 € ».
+      expect(avecReglage[0]).toMatch(/^CA VENDU 200\s€$/i);
+      expect(avecReglage[1]).toMatch(/^MARGE GÉNÉRÉE [-−]50\s€$/i);
+      expect(avecReglage[2]).toMatch(/^MARGE % [-−]25[.,]0\s?%$/i);
+
+      // La société décoche les directeurs.
+      await envoyer('put', '/parametres', { rentabiliteDirecteurs: false });
+      const sansReglage = await chiffres(vueDirecteur);
+      expect(sansReglage.map((texte) => texte.replace(/^(CA VENDU|MARGE GÉNÉRÉE|MARGE %) /i, ''))).toEqual(['—', '—', '—']);
+      for (const texte of sansReglage) expect(texte, 'aucun zéro trompeur').not.toMatch(/\d/);
+      // L'administration, elle, garde les chiffres.
+      expect(await chiffres(admin)).toEqual(avecReglage);
+      // Fiche et liste : ni perte ni marge estimée pour le directeur ; le chantier et ses dépassements restent.
+      await vueDirecteur.goto(`/chantiers/${chantier.id}`, { waitUntil: 'networkidle' });
+      await expect(vueDirecteur.getByRole('heading', { name: chantier.nom })).toBeVisible();
+      await expect(vueDirecteur.locator('[data-alertes-fiche] [data-alerte="EN_PERTE"]')).toHaveCount(0);
+      await vueDirecteur.goto('/chantiers', { waitUntil: 'networkidle' });
+      const ligneDirecteur = vueDirecteur.locator(`tr[data-chantier="${chantier.id}"]`);
+      await expect(ligneDirecteur).toBeVisible();
+      await expect(ligneDirecteur.locator('[data-marge-estimee]')).toHaveCount(0);
+      await expect(ligneDirecteur).not.toContainText(/[-−]50\s€/);
+      // Tableau de bord : les cartes de l'administration (« En attente d'encaissement », CA, marge, commission), sans
+      // « Heures enregistrées », identiques à celles de l'administrateur.
+      const cartes = async (page: typeof vueDirecteur) => {
+        await page.goto('/', { waitUntil: 'networkidle' });
+        const libelles = ['En attente d\'encaissement', 'CA Vendu', 'Marge totale', 'Commission commerciale', 'Heures enregistrées'];
+        const textes: Record<string, string | null> = {};
+        for (const libelle of libelles) {
+          const carte = page.locator('div.rounded-xl').filter({ has: page.getByText(libelle, { exact: true }) }).last();
+          textes[libelle] = await carte.count() ? (await carte.innerText()).replace(/\s+/g, ' ').trim() : null;
+        }
+        return textes;
+      };
+      const tableauDirecteur = await cartes(vueDirecteur);
+      expect(tableauDirecteur).toEqual(await cartes(admin));
+      expect(tableauDirecteur['Heures enregistrées']).toBeNull();
+      for (const libelle of ['En attente d\'encaissement', 'CA Vendu', 'Marge totale', 'Commission commerciale']) expect(tableauDirecteur[libelle], libelle).not.toBeNull();
+    } finally {
+      await request.patch(`${api}/chantiers/${chantier.id}/statut`, { headers, data: { statut: 'TERMINE' } }).catch(() => undefined);
+      for (const contexte of contextes) await contexte.close().catch(() => undefined);
+    }
+  });
+
+  // Choix par défaut, à confirmer (règle 5 de la méthode, option la plus restrictive), retenu par Claude Code le 06-11-2026
+  // sur le point 1 du rapport du rédacteur des tests : le directeur règle les paramètres comme l'administration (décision
+  // de Nelson du 24-10-2026, point 14), sauf la case qui lui retire la rentabilité des chantiers (réponse de Nelson du
+  // 06-11-2026, « Chantiers seulement »), refusée par le serveur. À l'écran, la case est désactivée, avec son explication,
+  // et n'est pas envoyée ; les autres réglages s'enregistrent.
+  // Lectures écartées : la case modifiable ; la case envoyée quand même (désactivée, elle manque au formulaire et partirait
+  // « false » : 403 avec le réglage coché, d'où le réglage coché ici) ; l'onglet entier refusé au directeur.
+  test('Administration > Marges : la case « Les directeurs » est désactivée pour le directeur, avec son explication, et il enregistre un autre réglage sans la changer', async ({ request, session, browser }) => {
+    const headers = { Authorization: `Bearer ${session.token}` };
+    const suffixe = Date.now();
+    const creerCompte = async (cle: string, role: string): Promise<Compte> => {
+      const reponse = await request.post(`${api}/users`, { headers, data: { email: `rentab-dir.marges.${cle}.${suffixe}@iris.test`, name: `Marges ${cle} ${suffixe}`, role } });
+      expect(reponse.status(), await reponse.text()).toBe(201);
+      return reponse.json();
+    };
+    const directeur = await creerCompte('directeur', 'DIRECTEUR');
+    const administrateur = await creerCompte('administrateur', 'ADMIN');
+    // Réglage coché pour les directeurs, hiérarchie cochée : l'enregistrement du directeur ne doit décocher que la hiérarchie.
+    const reglage = await request.put(`${api}/parametres`, { headers, data: { rentabiliteConducteur: true, rentabiliteHierarchie: true, rentabiliteDirecteurs: true } });
+    expect(reglage.ok(), await reglage.text()).toBeTruthy();
+    const contextes: { close: () => Promise<void> }[] = [];
+    const ouvrirMarges = async (compte: Compte) => {
+      const page = await pageDe(browser, compte);
+      contextes.push(page.context());
+      await page.goto('/admin', { waitUntil: 'networkidle' });
+      await page.getByRole('button', { name: 'Marges & Commissions' }).click();
+      const destinataires = page.getByRole('group', { name: 'Qui suit la rentabilité des chantiers ?' });
+      await expect(destinataires).toBeVisible();
+      return { page, destinataires, caseDirecteurs: destinataires.getByRole('checkbox', { name: 'Les directeurs (tous les chantiers)' }) };
+    };
+    const EXPLICATION = 'Cette case est réglée par l’administrateur ou le super administrateur.';
+    try {
+      const { page, destinataires, caseDirecteurs } = await ouvrirMarges(directeur);
+      await expect(caseDirecteurs).toBeDisabled();
+      await expect(caseDirecteurs).toBeChecked();
+      await expect(destinataires.getByText(EXPLICATION, { exact: true })).toBeVisible();
+      await expect(destinataires).toContainText('L’administrateur et le super administrateur les voient toujours.');
+      // Les deux autres cases restent modifiables : le directeur décoche la hiérarchie et enregistre.
+      await expect(destinataires.getByRole('checkbox', { name: 'Le conducteur (ou responsable) chargé du chantier' })).toBeEnabled();
+      const caseHierarchie = destinataires.getByRole('checkbox', { name: 'Ses responsables hiérarchiques, à tous les niveaux' });
+      await expect(caseHierarchie).toBeEnabled();
+      await caseHierarchie.uncheck();
+      const alerte = page.waitForEvent('dialog').then(async (dialog) => { const message = dialog.message(); await dialog.accept(); return message; });
+      const enregistrement = page.waitForResponse((r) => r.url().endsWith('/api/parametres') && r.request().method() === 'PUT');
+      await page.locator('form').filter({ has: destinataires }).getByRole('button', { name: 'Enregistrer' }).click();
+      const reponse = await enregistrement;
+      expect(reponse.status(), await reponse.text()).toBe(200);
+      expect(await alerte).toBe('Paramètres mis à jour');
+      // La case n'est pas envoyée ; les deux autres le sont.
+      const envoye = reponse.request().postDataJSON() as Record<string, unknown>;
+      expect(envoye).not.toHaveProperty('rentabiliteDirecteurs');
+      expect(envoye).toMatchObject({ rentabiliteConducteur: true, rentabiliteHierarchie: false });
+      const apres = await (await request.get(`${api}/parametres`, { headers })).json() as Record<string, unknown>;
+      expect([apres.rentabiliteConducteur, apres.rentabiliteHierarchie, apres.rentabiliteDirecteurs]).toEqual([true, false, true]);
+      // Témoin : chez l'administrateur, la même case est modifiable, sans l'explication.
+      const temoin = await ouvrirMarges(administrateur);
+      await expect(temoin.caseDirecteurs).toBeEnabled();
+      await expect(temoin.caseDirecteurs).toBeChecked();
+      await expect(temoin.destinataires.getByText(EXPLICATION, { exact: true })).toHaveCount(0);
+    } finally {
       for (const contexte of contextes) await contexte.close().catch(() => undefined);
     }
   });

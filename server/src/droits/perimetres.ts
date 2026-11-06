@@ -1,6 +1,6 @@
 import express from 'express';
 import { Prisma } from '@prisma/client';
-import { ROLE_RESPONSABLE, ROLE_DIRECTEUR, isAdminRole } from './roles';
+import { ROLE_RESPONSABLE, isAdminRole } from './roles';
 import type { AuthRequest } from '../http/auth';
 import type { ApiRequest } from '../http/cles-api';
 
@@ -31,7 +31,7 @@ export function perimetreChantiers(req: express.Request): Prisma.ChantierWhereIn
 function perimetreDemandeur(req: express.Request): Prisma.ChantierWhereInput {
   if ((req as ApiRequest).apiKey) return {};
   const user = (req as AuthRequest).user;
-  if (!user || isAdminRole(user.role) || user.role === ROLE_DIRECTEUR) return {};
+  if (!user || isAdminRole(user.role)) return {};
   if (user.role === 'COMMERCIAL') return { commercialId: user.id };
   if (user.role === ROLE_RESPONSABLE) return { responsableId: { in: [user.id, ...user.equipeIds] } };
   return { responsableId: user.id };

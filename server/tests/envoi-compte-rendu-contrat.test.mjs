@@ -507,7 +507,9 @@ if (!TEST_DATABASE_URL) {
         technicienAffecte: [403, 403, 403, 403],
         technicienNonAffecte: [403, 403, 403, 403],
         commercial: [403, 403, 403, 403],
-        directeur: [403, 403, 403, 403],
+        // Le directeur a les droits de l'administration et voit tout le SAV (lot « Directeur aligné sur l'administration »,
+        // décision de Nelson du 24-10-2026, points 14 et 17) : comme l'administrateur, sans affectation ni rattachement.
+        directeur: [200, 409, 200, 404],
         directeurCommercial: [404, 404, 404, 404],
         assistanteCommerciale: [404, 404, 404, 404],
         comptable: [404, 404, 404, 404],
@@ -517,6 +519,7 @@ if (!TEST_DATABASE_URL) {
         superadmin: [201, 409, 409, 404],
         admin: [201, 409, 409, 404],
         conducteur: [201, 409, 409, 404],
+        directeur: [201, 409, 409, 404],
       };
       const MESSAGES_409 = { lecture: [null, AUCUN_COMPTE_RENDU, null, null], enregistrement: [null, AUCUN_COMPTE_RENDU, INTERVENTION_ANNULEE, null] };
       const jetons = {
@@ -545,8 +548,8 @@ if (!TEST_DATABASE_URL) {
           }
         }
       }
-      // Les trois envois admis sont au journal de l'intervention, du plus récent au plus ancien.
-      assert.deepEqual((await lire(cheminCompteRendu(avecCompteRendu.id))).body.envois.map((e) => e.auteurNom), [conducteur.name, comptes.admin.name, secours.name]);
+      // Les quatre envois admis sont au journal de l'intervention, du plus récent au plus ancien.
+      assert.deepEqual((await lire(cheminCompteRendu(avecCompteRendu.id))).body.envois.map((e) => e.auteurNom), [comptes.directeur.name, conducteur.name, comptes.admin.name, secours.name]);
       assert.equal(await prisma.envoiDocument.count({ where: { interventionId: { in: [sansCompteRendu.id, annulee.id] } } }), 0);
     });
 
@@ -590,17 +593,20 @@ if (!TEST_DATABASE_URL) {
       const client = await creerClient(`TEST Client contrat droits ${s}`);
       const contrat = await creerContrat(client.id, `TEST Contrat droits ${s}`);
       const refuses = [];
-      for (const role of ['CONDUCTEUR_TRAVAUX', 'COMMERCIAL', 'ASSISTANTE_COMMERCIALE', 'TECHNICIEN', 'COMPTABLE', 'DIRECTEUR_COMMERCIAL', 'RESPONSABLE', 'DIRECTEUR']) {
+      // Le directeur n'en est plus : il a les droits de l'administration (lot « Directeur aligné sur l'administration »), et
+      // le témoin « tous les droits » est désormais un responsable.
+      for (const role of ['CONDUCTEUR_TRAVAUX', 'COMMERCIAL', 'ASSISTANTE_COMMERCIALE', 'TECHNICIEN', 'COMPTABLE', 'DIRECTEUR_COMMERCIAL', 'RESPONSABLE']) {
         refuses.push([role, await creerCompte(role, `contrat-${role.toLowerCase()}`, s)]);
       }
-      refuses.push(['DIRECTEUR (tous les droits)', await creerCompte('DIRECTEUR', 'contrat-directeur-complet', s, { permissions: TOUS_LES_SCOPES, accesFinance: true })]);
+      refuses.push(['RESPONSABLE (tous les droits)', await creerCompte('RESPONSABLE', 'contrat-responsable-complet', s, { permissions: TOUS_LES_SCOPES, accesFinance: true })]);
       for (const [libelle, compte] of refuses) {
         const lu = await sansEcriture(() => lire(cheminContrat(contrat.id), parCompte(compte)), 403, `lecture, ${libelle}`);
         assert.equal(lu.body.error, 'Accès réservé aux administrateurs', libelle);
         await sansEcriture(() => envoyer(cheminContrat(contrat.id), 'client@envoi-6a4d.test', parCompte(compte)), 403, `enregistrement, ${libelle}`);
       }
       const administrateur = await creerCompte('ADMIN', 'contrat-admin', s);
-      for (const auth of [admin(), parCompte(administrateur)]) {
+      const directeur = await creerCompte('DIRECTEUR', 'contrat-directeur', s);
+      for (const auth of [admin(), parCompte(administrateur), parCompte(directeur)]) {
         await sansEcriture(() => lire(cheminContrat(contrat.id), auth), 200, 'lecture par l’administration');
         await enregistre(() => envoyer(cheminContrat(contrat.id), 'client@envoi-6a4d.test', auth), 'enregistrement par l’administration');
       }

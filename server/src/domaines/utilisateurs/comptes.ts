@@ -4,7 +4,7 @@ import { Prisma } from '@prisma/client';
 import { prisma, transactionVerifiee } from '../../db';
 import {
   ROLE_SUPERADMIN, ROLE_ASSISTANTE_COMMERCIALE, ROLE_TECHNICIEN, ROLE_COMPTABLE, ROLE_DIRECTEUR_COMMERCIAL,
-  ROLE_RESPONSABLE, ROLE_DIRECTEUR, ROLE_SYSTEME, isAdminRole, isSuperAdminRole,
+  ROLE_RESPONSABLE, ROLE_DIRECTEUR, ROLE_SYSTEME, isSuperAdminRole, peutEtreAussiCommercial,
 } from '../../droits/roles';
 import { DROITS_INTERDITS_TECHNICIEN, permissionsEffectives } from '../../droits/permissions';
 import { type AuthRequest, brancheHierarchique, requireAuth } from '../../http/auth';
@@ -26,6 +26,15 @@ export function refuseSuperAdminTarget(req: express.Request, targetRole: string 
   if (!isSuperAdminRole(targetRole)) return null;
   if (isSuperAdminRole((req as AuthRequest).user?.role)) return null;
   return 'Seul un super administrateur peut gérer un compte super administrateur.';
+}
+
+// Un directeur a les droits de l'administration, mais voit la rentabilité des chantiers selon le
+// réglage de la société (décisions du 24-10-2026, points 14 et 17, et du 06-11-2026). En attribuant le
+// type ADMIN, à lui-même ou à un compte qu'il ouvre, il lèverait cette restriction : seuls l'ADMIN et
+// le SUPERADMIN attribuent ce type (choix par défaut, à confirmer). Renvoie le refus, sinon null.
+export function refuseTypeAdminParDirecteur(req: express.Request, nouveauRole: string | null | undefined): string | null {
+  if (nouveauRole !== 'ADMIN' || (req as AuthRequest).user?.role !== ROLE_DIRECTEUR) return null;
+  return 'Un directeur n’attribue pas le type Administrateur.';
 }
 
 // Le garde ci-dessus porte d'abord sur le compte lu avant la transaction, pour une réponse rapide.
@@ -161,14 +170,14 @@ export function enregistrerRoutesComptes(app: Express): void {
       const email = normalizeEmail(req.body.email);
       const name = String(req.body.name ?? '').trim();
       const role = ALLOWED_ROLES.includes(req.body.role) ? req.body.role : 'CONDUCTEUR_TRAVAUX';
-      const refus = refuseSuperAdminTarget(req, role);
+      const refus = refuseSuperAdminTarget(req, role) || refuseTypeAdminParDirecteur(req, role);
       if (refus) {
         return res.status(403).json({ error: refus });
       }
       // "estCommercial" n'a de sens que pour un ADMIN/SUPERADMIN (cf. isCommercialLike) :
       // ignoré pour les autres rôles, pour éviter un état orphelin sans effet mais trompeur
       // en base.
-      const estCommercial = isAdminRole(role) && !!req.body.estCommercial;
+      const estCommercial = peutEtreAussiCommercial(role) && !!req.body.estCommercial;
       // L'accès au Suivi financier ne s'accorde que par un superadmin (cf. peutVoirFinance) :
       // un administrateur qui pourrait cocher la case se l'attribuerait à lui-même.
       const accesFinance = isSuperAdminRole((req as AuthRequest).user?.role) && !!req.body.accesFinance;
@@ -323,7 +332,7 @@ export function enregistrerRoutesComptes(app: Express): void {
       }
       // Refus dans les DEUX sens : un ADMIN ne peut ni rétrograder un superadmin, ni
       // promouvoir qui que ce soit (lui compris) au rang de superadmin.
-      const refus = refuseSuperAdminTarget(req, target.role) || refuseSuperAdminTarget(req, role);
+      const refus = refuseSuperAdminTarget(req, target.role) || refuseSuperAdminTarget(req, role) || refuseTypeAdminParDirecteur(req, role);
       if (refus) {
         return res.status(403).json({ error: refus });
       }
@@ -345,7 +354,7 @@ export function enregistrerRoutesComptes(app: Express): void {
         // commercial peut le conserver en changeant de fonction. Pour un technicien, il reste
         // enregistré mais sans effet (cf. DROITS_INTERDITS_TECHNICIEN, peutVoirFinance), comme ses
         // droits individuels : il retrouve son effet si le compte reprend un autre type.
-        data: isAdminRole(role) ? { role } : { role, estCommercial: false },
+        data: peutEtreAussiCommercial(role) ? { role } : { role, estCommercial: false },
         select: { id: true, name: true, email: true, role: true, estCommercial: true, accesFinance: true, permissions: true, actif: true }
         });
         await journaliserDroitsCompte(tx, req, 'TYPE_COMPTE', avant, apres, ['role', 'estCommercial']);
@@ -441,7 +450,7 @@ export function enregistrerRoutesComptes(app: Express): void {
       if (!target) {
         return res.status(404).json({ error: 'Utilisateur introuvable.' });
       }
-      if (!isAdminRole(target.role)) {
+      if (!peutEtreAussiCommercial(target.role)) {
         return res.status(400).json({ error: 'Seul un compte Administrateur peut être marqué "aussi commercial".' });
       }
       const refus = refuseSuperAdminTarget(req, target.role);
@@ -454,7 +463,7 @@ export function enregistrerRoutesComptes(app: Express): void {
         refuserCibleSuperAdminSousVerrou(req, avant.role);
         // Même relecture pour le type : un compte qui a quitté l'administration entre-temps ne
         // reçoit pas un « aussi commercial » orphelin (le changement de type le retire).
-        if (!isAdminRole(avant.role)) throw Object.assign(new Error('Seul un compte Administrateur peut être marqué "aussi commercial".'), { code: 'TYPE_CHANGE' });
+        if (!peutEtreAussiCommercial(avant.role)) throw Object.assign(new Error('Seul un compte Administrateur peut être marqué "aussi commercial".'), { code: 'TYPE_CHANGE' });
         const apres = await tx.user.update({
           where: { id: target.id },
           data: { estCommercial: !!req.body.estCommercial },

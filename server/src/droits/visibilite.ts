@@ -56,8 +56,10 @@ export function saisieSelonDroits(req: express.Request): <T>(valeur: T) => T {
   return (valeur) => valeur;
 }
 
-// Prix d'achat prévu d'une ligne de devis : une donnée interne de coût. Session humaine : un
-// administrateur seulement (choix par défaut, à confirmer), comme le prix d'achat du catalogue ;
+// Prix d'achat prévu d'une ligne de devis : une donnée interne de coût. Session humaine : l'administration
+// seulement, directeur compris (réponse de Nelson du 06-11-2026, « Chantiers seulement » : le réglage de
+// rentabilité ne masque au directeur que les chantiers, cf. voitCoutPrevuParPrixAchat), comme le prix
+// d'achat du catalogue ;
 // clé d'intégration : le scope finances:read, comme la rentabilité. Les autres porteurs du droit
 // devis ne le reçoivent jamais, sous aucune route, et ne peuvent pas l'écrire.
 export function voitPrixAchatDevis(req: express.Request): boolean {

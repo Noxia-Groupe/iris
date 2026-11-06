@@ -37,7 +37,9 @@ const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
 const REFUS_ADMINISTRATION = 'Accès réservé aux administrateurs';
 const CHANTIER_INTROUVABLE = 'Chantier introuvable';
 const identiteIncomplete = (champs) => `Identité de la société incomplète : renseignez ${champs} dans l’écran Société avant d’imprimer un rapport de chantier.`;
-const ROLES_NON_ADMINISTRATEURS = ['CONDUCTEUR_TRAVAUX', 'COMMERCIAL', 'ASSISTANTE_COMMERCIALE', 'TECHNICIEN', 'COMPTABLE', 'DIRECTEUR_COMMERCIAL', 'RESPONSABLE', 'DIRECTEUR'];
+// Le directeur n'en est plus : il a les droits de l'administration (lot « Directeur aligné sur l'administration », décision
+// de Nelson du 24-10-2026, point 14).
+const ROLES_NON_ADMINISTRATEURS = ['CONDUCTEUR_TRAVAUX', 'COMMERCIAL', 'ASSISTANTE_COMMERCIALE', 'TECHNICIEN', 'COMPTABLE', 'DIRECTEUR_COMMERCIAL', 'RESPONSABLE'];
 const TOUS_LES_SCOPES = ['clients:read', 'clients:write', 'catalogue:read', 'catalogue:write', 'equipements:read', 'equipements:write', 'devis:read', 'devis:write', 'company:read', 'chantiers:read', 'chantiers:write', 'chantiers:archive', 'finances:read'];
 
 // --- Outils sans base : texte et tracés d'un PDF, dates attendues ---
@@ -876,9 +878,11 @@ if (!TEST_DATABASE_URL) {
       await planifier(intervention.id, [affecte.intervenantId]);
       await demarrer(intervention.id);
       await ajouterCompteRendu(intervention.id, 'TEST Compte rendu des droits.', affecte.jeton);
-      // Le titulaire, le commercial et le directeur lisent la fiche du chantier : le refus n'est pas de périmètre.
-      const directeurTousDroits = await creerCompte('DIRECTEUR', 'directeur-tous-droits', s, { permissions: TOUS_LES_SCOPES, accesFinance: true });
-      for (const compte of [titulaire, commercialDuChantier, directeurTousDroits]) {
+      // Le titulaire et le commercial lisent la fiche du chantier : le refus n'est pas de périmètre. Un responsable porteur
+      // de tous les droits et de l'accès aux finances est refusé aussi (le directeur, ancien témoin, a les droits de
+      // l'administration et imprime, plus bas).
+      const responsableTousDroits = await creerCompte('RESPONSABLE', 'responsable-tous-droits', s, { permissions: TOUS_LES_SCOPES, accesFinance: true });
+      for (const compte of [titulaire, commercialDuChantier]) {
         assert.equal((await appeler('get', `/chantiers/${chantier.id}`, null, entete(jetonDe(compte)))).status, 200, `${compte.role} lit la fiche`);
       }
 
@@ -887,7 +891,7 @@ if (!TEST_DATABASE_URL) {
         ['CONDUCTEUR_TRAVAUX (titulaire du chantier)', titulaire],
         ['COMMERCIAL (commercial du chantier)', commercialDuChantier],
         ['RESPONSABLE (du titulaire)', responsable],
-        ['DIRECTEUR (tous les droits, accès aux finances)', directeurTousDroits],
+        ['RESPONSABLE (tous les droits, accès aux finances)', responsableTousDroits],
         ['TECHNICIEN (affecté à une intervention du chantier)', affecte.compte],
       ];
       for (const [libelle, compte] of refuses) {
@@ -911,6 +915,7 @@ if (!TEST_DATABASE_URL) {
         ['SUPERADMIN', admin()],
         ['ADMIN', entete(jetonDe(await creerCompte('ADMIN', 'admin', s)))],
         ['ADMIN commercial', entete(jetonDe(await creerCompte('ADMIN', 'admin-commercial', s, { estCommercial: true })))],
+        ['DIRECTEUR', entete(jetonDe(await creerCompte('DIRECTEUR', 'directeur-admis', s)))],
       ]) {
         const avant = await etatBase();
         const { plat } = await lirePdf(chantier.id, auth);

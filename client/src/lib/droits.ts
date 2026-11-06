@@ -2,7 +2,7 @@
 // directement et servent au menu comme aux routes. roles.ts les réexporte à l'identique.
 // Rôles de l'application — source unique de vérité côté client.
 // Le serveur applique exactement les mêmes règles (cf. isAdminRole / isSuperAdminRole
-// dans server/index.ts) : ce qui est masqué ici est également refusé côté API, l'affichage
+// dans server/src/droits/roles.ts) : ce qui est masqué ici est également refusé côté API, l'affichage
 // n'est jamais la sécurité. Un compte sans rôle (cas qui n'existe pas en base, où le rôle est
 // obligatoire) n'a aucun rôle à l'écran : ni repli sur un autre type, ni planning, ni
 // administration (#206, choix par défaut, à confirmer) ; le serveur reste seul juge.
@@ -15,11 +15,35 @@ export const ROLE_TECHNICIEN = 'TECHNICIEN';
 export const ROLE_COMPTABLE = 'COMPTABLE';
 export const ROLE_DIRECTEUR_COMMERCIAL = 'DIRECTEUR_COMMERCIAL';
 export const ROLE_RESPONSABLE = 'RESPONSABLE';
-/** Pilotage de toute la société, en lecture seule, sans administration ni paramétrage. */
+/**
+ * Directeur : les droits de l'administration, paramètres et comptes compris, hors réglages du
+ * super administrateur (points 14 et 17 du 24-10-2026). Il voit la rentabilité des chantiers
+ * selon le réglage de la société (réponse de Nelson du 06-11-2026, « Chantiers seulement ») et
+ * n'est jamais « aussi commercial ».
+ */
 export const ROLE_DIRECTEUR = 'DIRECTEUR';
 
-/** Un SUPERADMIN possède TOUS les droits d'un ADMIN, plus ceux réservés à la direction. */
+/**
+ * Types qui ont les droits de l'administration : même liste que TYPES_ADMINISTRATION côté
+ * serveur. Les listes de l'écran (routes privées, annuaire) s'écrivent à partir d'elle, et non
+ * en citant les types un à un.
+ */
+export const TYPES_ADMINISTRATION: readonly string[] = [ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_DIRECTEUR];
+
+/**
+ * Droits de l'administration : ADMIN, SUPERADMIN, qui y ajoute ceux réservés à la direction,
+ * et DIRECTEUR, sans ces derniers.
+ */
 export function isAdminRole(role?: string | null): boolean {
+  return !!role && TYPES_ADMINISTRATION.includes(role);
+}
+
+/**
+ * Case « aussi commercial » : réservée aux types ADMIN et SUPERADMIN (décision 7 de la
+ * proposition de droits, #182). Le directeur, qui a les droits de l'administration, ne la porte
+ * pas. Même règle que peutEtreAussiCommercial côté serveur.
+ */
+export function peutEtreAussiCommercial(role?: string | null): boolean {
   return role === ROLE_ADMIN || role === ROLE_SUPERADMIN;
 }
 
@@ -47,9 +71,13 @@ export const TYPES_COMPTE: ReadonlyArray<{ valeur: string; libelle: string }> = 
   { valeur: ROLE_SUPERADMIN, libelle: 'Super administrateur' },
 ];
 
-/** Types qu'un compte peut attribuer : seul un super administrateur peut en désigner un autre. */
-export function typesCompteProposes(estSuperAdmin: boolean): ReadonlyArray<{ valeur: string; libelle: string }> {
-  return TYPES_COMPTE.filter((type) => estSuperAdmin || type.valeur !== ROLE_SUPERADMIN);
+/**
+ * Types qu'un compte peut attribuer : seul un super administrateur peut en désigner un autre, et un
+ * directeur n'attribue pas le type Administrateur, qui lèverait sa restriction de rentabilité (choix
+ * par défaut, à confirmer ; miroir de refuseTypeAdminParDirecteur côté serveur).
+ */
+export function typesCompteProposes(estSuperAdmin: boolean, sansAdministrateur = false): ReadonlyArray<{ valeur: string; libelle: string }> {
+  return TYPES_COMPTE.filter((type) => (estSuperAdmin || type.valeur !== ROLE_SUPERADMIN) && (!sansAdministrateur || type.valeur !== ROLE_ADMIN));
 }
 
 /** Libellé d'un type de compte ; '' pour un rôle absent ou inconnu, qui n'affiche rien (#206). */
@@ -99,13 +127,13 @@ export function peutVoirStatistiques(user?: CurrentUser | null): boolean {
 
 /**
  * Comptes exclus des écrans opérationnels (planning, administration, saisies) : le
- * commercial, qui a son propre résultat, et le directeur, qui consulte sans modifier (hors la
- * clôture d'un chantier en cours, depuis la liste des chantiers).
- * Même règle que blockCommercial côté serveur, pour ces deux types ; un rôle absent, qui n'existe
- * pas côté serveur, est écarté par les aides ci-dessous (#206).
+ * commercial, qui a son propre résultat. Le directeur, qui a les droits de l'administration
+ * depuis les décisions du 24-10-2026, n'en est plus exclu.
+ * Même règle que blockCommercial côté serveur ; un rôle absent, qui n'existe pas côté serveur,
+ * est écarté par les aides ci-dessous (#206).
  */
 export function estExcluDesOperations(role?: string | null): boolean {
-  return role === ROLE_COMMERCIAL || role === ROLE_DIRECTEUR;
+  return role === ROLE_COMMERCIAL;
 }
 
 /**
@@ -137,12 +165,12 @@ export function peutOuvrirAdministration(role?: string | null): boolean {
 }
 
 /**
- * Annuaire des clients (clients, contacts, sites) : les administrateurs, qui le tiennent à jour,
- * puis, en consultation seule, le technicien (décision de Nelson du 13-10-2026), par exemple pour
+ * Annuaire des clients (clients, contacts, sites) : les administrateurs (TYPES_ADMINISTRATION,
+ * directeur compris), qui le tiennent à jour, puis, en consultation seule, le technicien (décision de Nelson du 13-10-2026), par exemple pour
  * retrouver une adresse, et le conducteur de travaux (décision du 16-10-2026). Le serveur applique
  * la permission clients:read.
  */
-export const ROLES_ANNUAIRE = [ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_TECHNICIEN, ROLE_CONDUCTEUR];
+export const ROLES_ANNUAIRE = [...TYPES_ADMINISTRATION, ROLE_TECHNICIEN, ROLE_CONDUCTEUR];
 // Même liste pour le menu et pour la route /clients (App.tsx) : l'un ne s'ouvre pas sans l'autre.
 export function peutConsulterAnnuaire(user?: CurrentUser | null): boolean {
   return !!user && ROLES_ANNUAIRE.includes(user.role || '');

@@ -76,7 +76,9 @@ if (!TEST_DATABASE_URL) {
   };
   // Motif de l'annulation du devis, que le contrat annulé reprend : jamais imprimé (cadrage, « Statuts »).
   const MOTIF_ANNULATION = 'TEST Motif confidentiel de l’annulation 6a4b';
-  const ROLES_NON_ADMINISTRATEURS = ['CONDUCTEUR_TRAVAUX', 'COMMERCIAL', 'ASSISTANTE_COMMERCIALE', 'TECHNICIEN', 'COMPTABLE', 'DIRECTEUR_COMMERCIAL', 'RESPONSABLE', 'DIRECTEUR'];
+  // Le directeur n'en est plus : il a les droits de l'administration (lot « Directeur aligné sur l'administration », décision
+  // de Nelson du 24-10-2026, point 14).
+  const ROLES_NON_ADMINISTRATEURS = ['CONDUCTEUR_TRAVAUX', 'COMMERCIAL', 'ASSISTANTE_COMMERCIALE', 'TECHNICIEN', 'COMPTABLE', 'DIRECTEUR_COMMERCIAL', 'RESPONSABLE'];
   const TOUS_LES_SCOPES = ['clients:read', 'clients:write', 'catalogue:read', 'catalogue:write', 'equipements:read', 'equipements:write', 'devis:read', 'devis:write', 'company:read', 'chantiers:read', 'chantiers:write', 'chantiers:archive', 'finances:read'];
   const suffixe = `${Date.now()}`;
 
@@ -424,9 +426,10 @@ if (!TEST_DATABASE_URL) {
         const email = `contrat-pdf.${role.toLowerCase()}@iris.test`;
         comptes.push([role, await prisma.user.upsert({ where: { email }, update: { role, actif: true, permissions: [] }, create: { email, name: `TEST ${role} 6a4b`, role } })]);
       }
-      // Un directeur qui porte tous les droits accordables et l'accès aux finances reste refusé.
-      const emailComplet = 'contrat-pdf.directeur-tous-droits@iris.test';
-      comptes.push(['DIRECTEUR (tous les droits)', await prisma.user.upsert({ where: { email: emailComplet }, update: {}, create: { email: emailComplet, name: 'TEST Directeur tous droits 6a4b', role: 'DIRECTEUR', permissions: TOUS_LES_SCOPES, accesFinance: true } })]);
+      // Un responsable qui porte tous les droits accordables et l'accès aux finances reste refusé (le directeur, qui tenait
+      // ce rôle de témoin, a désormais les droits de l'administration et imprime, plus bas).
+      const emailComplet = 'contrat-pdf.responsable-tous-droits@iris.test';
+      comptes.push(['RESPONSABLE (tous les droits)', await prisma.user.upsert({ where: { email: emailComplet }, update: {}, create: { email: emailComplet, name: 'TEST Responsable tous droits 6a4b', role: 'RESPONSABLE', permissions: TOUS_LES_SCOPES, accesFinance: true } })]);
       for (const [libelle, compte] of comptes) {
         for (const contrat of [f.actif, f.annule]) {
           const res = await refusSansEcriture(() => request(app).get(cheminPdf(contrat.id)).set(jetonDe(compte.id)), 403, `${libelle}, contrat ${contrat.titre}`);
@@ -437,6 +440,10 @@ if (!TEST_DATABASE_URL) {
       const email = 'contrat-pdf.admin@iris.test';
       const administrateur = await prisma.user.upsert({ where: { email }, update: { role: 'ADMIN', actif: true }, create: { email, name: 'TEST Administrateur 6a4b', role: 'ADMIN' } });
       assert.ok((await lirePdf(f.actif.id, jetonDe(administrateur.id))).texte.includes('TEST Maintenance annuelle chaufferie'));
+      // Le directeur, sans droit individuel, imprime comme l'administrateur.
+      const emailDirecteur = 'contrat-pdf.directeur@iris.test';
+      const directeur = await prisma.user.upsert({ where: { email: emailDirecteur }, update: { role: 'DIRECTEUR', actif: true, permissions: [] }, create: { email: emailDirecteur, name: 'TEST Directeur 6a4b', role: 'DIRECTEUR' } });
+      assert.ok((await lirePdf(f.actif.id, jetonDe(directeur.id))).texte.includes('TEST Maintenance annuelle chaufferie'));
     });
 
     // Cadrage : « les refus 403 [...] pour une clé » ; il n'y a pas de route /api/v1. Lecture confirmée

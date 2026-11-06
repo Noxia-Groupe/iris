@@ -1,6 +1,6 @@
 import express from 'express';
 import type { AuthRequest } from './auth';
-import { ROLE_ASSISTANTE_COMMERCIALE, ROLE_COMPTABLE, ROLE_DIRECTEUR, ROLE_DIRECTEUR_COMMERCIAL, ROLE_RESPONSABLE, ROLE_TECHNICIEN, isAdminRole, isSuperAdminRole } from '../droits/roles';
+import { ROLE_ASSISTANTE_COMMERCIALE, ROLE_COMPTABLE, ROLE_DIRECTEUR_COMMERCIAL, ROLE_RESPONSABLE, ROLE_TECHNICIEN, isAdminRole, isSuperAdminRole } from '../droits/roles';
 
 export const requireAdmin: express.RequestHandler = (req, res, next) => {
   if (!isAdminRole((req as AuthRequest).user?.role)) {
@@ -28,17 +28,13 @@ export const requireTravauxRead: express.RequestHandler = (req, res, next) => {
 
 // Un commercial a un accès strictement en lecture à ses propres chantiers : ni création,
 // ni modification (chantiers, achats, heures), et pas d'accès aux statistiques
-// globales/conducteur — uniquement à son propre résultat commercial.
-// Le directeur en est exclu de la même façon : il pilote depuis la liste, le tableau de bord
-// et les fiches chantier, sans saisie, planning, SAV ni référentiel à modifier.
+// globales/conducteur — uniquement à son propre résultat commercial. Le directeur, qui en était
+// exclu de la même façon, a désormais les droits de l'administration (décision de Nelson du
+// 24-10-2026, point 14).
 export const blockCommercial: express.RequestHandler = (req, res, next) => {
   const role = (req as AuthRequest).user?.role;
   if (role === 'COMMERCIAL') {
     res.status(403).json({ error: 'Accès non autorisé pour un compte commercial.' });
-    return;
-  }
-  if (role === ROLE_DIRECTEUR) {
-    res.status(403).json({ error: 'Accès non autorisé pour un compte directeur.' });
     return;
   }
   next();
@@ -48,7 +44,7 @@ export const blockCommercial: express.RequestHandler = (req, res, next) => {
 // l'assistante commerciale et le comptable en sont refusés comme le commercial (décision 11 de la
 // proposition de droits, #179, placée avant la fin du pilote par Nelson le 21-10-2026). Rien ne les
 // y prévoit, et ils ne consultent que les chantiers dont ils sont titulaires. Le message nomme le
-// type de compte, comme pour le commercial et le directeur. Ailleurs (fiche chantier, SAV),
+// type de compte, comme pour le commercial. Ailleurs (fiche chantier, SAV),
 // blockCommercial seul s'applique jusqu'à l'harmonisation des droits (lot D2).
 const TYPES_SANS_PLANNING_NI_REFERENTIELS: Record<string, string> = {
   [ROLE_DIRECTEUR_COMMERCIAL]: 'directeur commercial',

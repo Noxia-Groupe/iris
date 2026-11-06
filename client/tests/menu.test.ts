@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { sectionsMenu } from '../src/lib/menu.ts';
-import { estExcluDesOperations, peutConsulterPlanning, peutOuvrirAdministration, peutVoirFinance, roleLabel } from '../src/lib/droits.ts';
+import {
+  estExcluDesOperations, isAdminRole, isSuperAdminRole, peutConsulterAnnuaire, peutConsulterPlanning, peutEtreAussiCommercial, peutOuvrirAdministration,
+  peutVoirFinance, peutVoirStatistiques, roleLabel, ROLES_ANNUAIRE, TYPES_ADMINISTRATION, TYPES_COMPTE,
+} from '../src/lib/droits.ts';
 
 const liens = (role: string, planningActif = true, permissions: string[] = []) =>
   sectionsMenu({ role, permissions }, planningActif).flatMap((s) => s.entrees.map((e) => e.to)).sort();
@@ -10,13 +13,15 @@ const liens = (role: string, planningActif = true, permissions: string[] = []) =
 // doit ni montrer ni cacher une seule entrée par rapport à elles. Seules évolutions depuis :
 // l'annuaire des clients ouvert au technicien (décision de Nelson du 13-10-2026), puis au
 // conducteur de travaux (décision du 16-10-2026), l'écran des règlements, réservé à
-// l'administration (décision A3 du 16-10-2026), et le planning et l'administration fermés au
-// directeur commercial, à l'assistante commerciale et au comptable (#179, décision 11).
+// l'administration (décision A3 du 16-10-2026), le planning et l'administration fermés au
+// directeur commercial, à l'assistante commerciale et au comptable (#179, décision 11), et le directeur, qui a les
+// droits de l'administration depuis le lot « Directeur aligné sur l'administration » (décision de Nelson du 24-10-2026,
+// point 14, « Tout, réglages compris »), hors réglages du super administrateur.
 function attendu(role: string, planningActif: boolean, permissions: string[]) {
-  const admin = role === 'ADMIN' || role === 'SUPERADMIN';
+  const admin = role === 'ADMIN' || role === 'SUPERADMIN' || role === 'DIRECTEUR';
   const commercial = role === 'COMMERCIAL';
-  // Directeur : exclu des opérations comme le commercial (estExcluDesOperations), sans résultat commercial.
-  const exclu = commercial || role === 'DIRECTEUR';
+  // Seul le commercial est exclu des opérations (estExcluDesOperations) : le directeur ne l'est plus.
+  const exclu = commercial;
   const sansPlanning = ['DIRECTEUR_COMMERCIAL', 'ASSISTANTE_COMMERCIALE', 'COMPTABLE'].includes(role);
   const travaux = admin || role === 'CONDUCTEUR_TRAVAUX' || role === 'RESPONSABLE';
   const regles: [string, boolean][] = [
@@ -89,15 +94,64 @@ test('sans compte connu ni type de compte, le menu ne reprend plus celui d’un 
   assert.deepEqual(sectionsMenu(null, true).map((s) => s.titre ?? 'Accueil'), ['Accueil', 'Chantiers']);
 });
 
-test('un directeur pilote sans écran opérationnel : tableau de bord et chantiers, devis s’il en a reçu le droit', () => {
+// Lot « Directeur aligné sur l'administration » (cadrage version 3) : décision de Nelson du 24-10-2026, point 14 (« Tout,
+// réglages compris »), la lecture de Claude Code consignée au même point gardant au super administrateur ses réglages.
+// Le directeur a le menu de l'administrateur, permissions égales (celles que /api/me rend aux deux types sont les mêmes),
+// planning actif ou coupé ; il n'a pas l'entrée « API d'intégration » du super administrateur.
+test('un directeur a le menu de l’administrateur, sans les entrées du super administrateur ; seul le commercial reste exclu des opérations', () => {
+  const droitsAdministration = ['devis:read', 'devis:write', 'clients:read', 'chantiers:read', 'chantiers:write', 'chantiers:archive'];
   for (const planningActif of [true, false]) {
-    assert.deepEqual(liens('DIRECTEUR', planningActif), ['/', '/chantiers']);
-    assert.deepEqual(liens('DIRECTEUR', planningActif, ['devis:read']), ['/', '/chantiers', '/devis']);
+    for (const permissions of [[], droitsAdministration]) {
+      assert.deepEqual(liens('DIRECTEUR', planningActif, permissions), liens('ADMIN', planningActif, permissions), `planning=${planningActif} ${permissions.join(',')}`);
+    }
+    const directeur = liens('DIRECTEUR', planningActif, droitsAdministration);
+    for (const to of ['/admin', '/catalogue', '/factures', '/reglements', '/comptabilite', '/contrats-maintenance', '/interventions', '/achats', '/heures', '/statistiques', '/performances', '/commerciaux', '/clients', '/societe', '/devis']) {
+      assert.equal(directeur.includes(to), true, `planning=${planningActif} : ${to}`);
+    }
+    assert.equal(directeur.includes('/planning'), planningActif, `planning=${planningActif} : /planning`);
+    // Entrée du super administrateur : jamais pour le directeur, toujours pour le super administrateur.
+    assert.equal(directeur.includes('/administration/api'), false);
+    assert.equal(liens('SUPERADMIN', planningActif, droitsAdministration).includes('/administration/api'), true);
+    assert.equal(directeur.includes('/resultat-commercial'), false, 'pas « aussi commercial »');
   }
+  // Mêmes sections que l'administrateur, dans le même ordre.
+  assert.deepEqual(sectionsMenu({ role: 'DIRECTEUR', permissions: ['devis:read'] }, true).map((s) => [s.titre ?? 'Accueil', s.entrees.map((e) => e.to)]),
+    sectionsMenu({ role: 'ADMIN', permissions: ['devis:read'] }, true).map((s) => [s.titre ?? 'Accueil', s.entrees.map((e) => e.to)]));
   assert.equal(roleLabel('DIRECTEUR'), 'Directeur');
-  // Même exclusion que blockCommercial côté serveur : commercial et directeur seulement.
+  // Même exclusion que blockCommercial côté serveur : le commercial seulement (le directeur en sort avec ce lot).
   assert.deepEqual(['SUPERADMIN', 'ADMIN', 'CONDUCTEUR_TRAVAUX', 'RESPONSABLE', 'TECHNICIEN', 'COMMERCIAL', 'COMPTABLE', 'ASSISTANTE_COMMERCIALE', 'DIRECTEUR_COMMERCIAL', 'DIRECTEUR']
-    .filter((role) => estExcluDesOperations(role)), ['COMMERCIAL', 'DIRECTEUR']);
+    .filter((role) => estExcluDesOperations(role)), ['COMMERCIAL']);
+  assert.equal(estExcluDesOperations('DIRECTEUR'), false);
+});
+
+test('une seule liste des types de l’administration : le directeur y est, avec l’administrateur et le super administrateur ; « aussi commercial » reste aux deux derniers (décision 7 de #182)', () => {
+  assert.deepEqual([...TYPES_ADMINISTRATION].sort(), ['ADMIN', 'DIRECTEUR', 'SUPERADMIN']);
+  for (const { valeur } of TYPES_COMPTE) {
+    assert.equal(isAdminRole(valeur), ['ADMIN', 'DIRECTEUR', 'SUPERADMIN'].includes(valeur), `isAdminRole(${valeur})`);
+    assert.equal(isSuperAdminRole(valeur), valeur === 'SUPERADMIN', `isSuperAdminRole(${valeur})`);
+    // Case « aussi commercial » : ni le directeur, qui a pourtant les droits de l'administration, ni un autre type.
+    assert.equal(peutEtreAussiCommercial(valeur), ['ADMIN', 'SUPERADMIN'].includes(valeur), `peutEtreAussiCommercial(${valeur})`);
+  }
+  for (const role of ['', null, undefined]) {
+    assert.equal(isAdminRole(role), false);
+    assert.equal(peutEtreAussiCommercial(role), false);
+  }
+  // Lecture écartée, nommée : « aussi commercial » ouvert à tout type de l'administration (isAdminRole).
+  assert.notEqual(peutEtreAussiCommercial('DIRECTEUR'), isAdminRole('DIRECTEUR'));
+});
+
+test('l’annuaire, les statistiques, le planning et l’administration s’ouvrent au directeur, comme à l’administrateur', () => {
+  // Annuaire : la liste des routes privées (/clients) et du menu part des types de l'administration (R2 du contrôle).
+  for (const role of TYPES_ADMINISTRATION) assert.ok(ROLES_ANNUAIRE.includes(role), role);
+  assert.deepEqual([...ROLES_ANNUAIRE].sort(), ['ADMIN', 'CONDUCTEUR_TRAVAUX', 'DIRECTEUR', 'SUPERADMIN', 'TECHNICIEN']);
+  const directeur = { role: 'DIRECTEUR', permissions: [] };
+  assert.equal(peutConsulterAnnuaire(directeur), true);
+  assert.equal(peutVoirStatistiques(directeur), true);
+  assert.equal(peutConsulterPlanning('DIRECTEUR'), true);
+  assert.equal(peutOuvrirAdministration('DIRECTEUR'), true);
+  // L'accès financier reste une décision du super administrateur : le directeur ne l'a pas par son type.
+  assert.equal(peutVoirFinance(directeur), false);
+  assert.equal(peutVoirFinance({ ...directeur, accesFinance: true }), true);
 });
 
 test('le technicien garde le planning en consultation, sans l’administration (lot pilote 3)', () => {
@@ -128,23 +182,27 @@ test('le technicien et le conducteur consultent l’annuaire des clients, dans l
     const referentiels = sections.find((s) => s.titre === 'Référentiels');
     assert.deepEqual(referentiels?.entrees.map((e) => e.to), ['/clients'], role);
   }
-  // Les autres profils qui portent clients:read (commercial, comptable…) n'ont pas l'écran.
-  for (const role of ['COMMERCIAL', 'COMPTABLE', 'ASSISTANTE_COMMERCIALE', 'DIRECTEUR_COMMERCIAL', 'RESPONSABLE', 'DIRECTEUR']) {
+  // Les autres profils qui portent clients:read (commercial, comptable…) n'ont pas l'écran ; le directeur, qui a les droits
+  // de l'administration, l'a dans ses référentiels, avec le catalogue.
+  for (const role of ['COMMERCIAL', 'COMPTABLE', 'ASSISTANTE_COMMERCIALE', 'DIRECTEUR_COMMERCIAL', 'RESPONSABLE']) {
     assert.equal(liens(role, true, ['clients:read']).includes('/clients'), false, role);
   }
+  const referentielsDirecteur = sectionsMenu({ role: 'DIRECTEUR', permissions: ['clients:read'] }, true).find((s) => s.titre === 'Référentiels');
+  assert.deepEqual(referentielsDirecteur?.entrees.map((e) => e.to), ['/clients', '/catalogue']);
 });
 
 // #179 (décision 11 de la proposition de droits) : le directeur commercial, l'assistante commerciale
-// et le comptable n'ont ni le planning ni l'administration, comme le commercial et le directeur. #206 (C7 du contrôle du
-// cadrage de A4) : un rôle absent non plus, et non plus le repli du conducteur.
+// et le comptable n'ont ni le planning ni l'administration, comme le commercial. #206 (C7 du contrôle du
+// cadrage de A4) : un rôle absent non plus, et non plus le repli du conducteur. Le directeur les a depuis le lot
+// « Directeur aligné sur l'administration ».
 test('le directeur commercial, l’assistante commerciale et le comptable n’ont ni planning ni administration (#179), ni un compte sans type (#206)', () => {
-  for (const role of ['DIRECTEUR_COMMERCIAL', 'ASSISTANTE_COMMERCIALE', 'COMPTABLE', 'COMMERCIAL', 'DIRECTEUR']) {
+  for (const role of ['DIRECTEUR_COMMERCIAL', 'ASSISTANTE_COMMERCIALE', 'COMPTABLE', 'COMMERCIAL']) {
     assert.equal(peutConsulterPlanning(role), false, role);
     assert.equal(peutOuvrirAdministration(role), false, role);
     assert.equal(liens(role).includes('/planning'), false, role);
     assert.equal(liens(role).includes('/admin'), false, role);
   }
-  for (const role of ['SUPERADMIN', 'ADMIN', 'CONDUCTEUR_TRAVAUX', 'RESPONSABLE', 'TECHNICIEN']) {
+  for (const role of ['SUPERADMIN', 'ADMIN', 'DIRECTEUR', 'CONDUCTEUR_TRAVAUX', 'RESPONSABLE', 'TECHNICIEN']) {
     assert.equal(peutConsulterPlanning(role), true, role);
     assert.equal(liens(role).includes('/planning'), true, role);
   }

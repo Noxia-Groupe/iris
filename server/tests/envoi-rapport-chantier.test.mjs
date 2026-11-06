@@ -49,7 +49,9 @@ const CHAMPS_ENVOI = ['auteurNom', 'canal', 'createdAt', 'destinataire', 'expedi
 // l'est pas ici : la connexion Microsoft n'est pas configurée dans l'environnement des tests (AZURE_TENANT_ID et
 // AZURE_CLIENT_ID absents, comme en CI) ; le mode d'envoi garde sa valeur par défaut, MICROSOFT_365.
 const MICROSOFT_365_PROPOSE = false;
-const ROLES_NON_ADMINISTRATEURS = ['CONDUCTEUR_TRAVAUX', 'COMMERCIAL', 'ASSISTANTE_COMMERCIALE', 'TECHNICIEN', 'COMPTABLE', 'DIRECTEUR_COMMERCIAL', 'RESPONSABLE', 'DIRECTEUR'];
+// Le directeur n'en est plus : il a les droits de l'administration (lot « Directeur aligné sur l'administration », décision
+// de Nelson du 24-10-2026, point 14).
+const ROLES_NON_ADMINISTRATEURS = ['CONDUCTEUR_TRAVAUX', 'COMMERCIAL', 'ASSISTANTE_COMMERCIALE', 'TECHNICIEN', 'COMPTABLE', 'DIRECTEUR_COMMERCIAL', 'RESPONSABLE'];
 const TOUS_LES_SCOPES = ['clients:read', 'clients:write', 'catalogue:read', 'catalogue:write', 'equipements:read', 'equipements:write', 'devis:read', 'devis:write', 'company:read', 'chantiers:read', 'chantiers:write', 'chantiers:archive', 'finances:read'];
 
 // --- Ni montant ni heures (réponse de Nelson du 31-10-2026 ; cadrage, « Objet et texte » : « Le texte ne porte
@@ -494,7 +496,9 @@ if (!TEST_DATABASE_URL) {
       const commercialDuChantier = await creerCompte('COMMERCIAL', 'commercial-du-chantier', s, { permissions: TOUS_LES_SCOPES });
       const responsable = await creerCompte('RESPONSABLE', 'responsable-du-titulaire', s, { permissions: TOUS_LES_SCOPES });
       await prisma.user.update({ where: { id: titulaire.id }, data: { responsableHierarchiqueId: responsable.id } });
-      const directeurTousDroits = await creerCompte('DIRECTEUR', 'directeur-tous-droits', s, { permissions: TOUS_LES_SCOPES, accesFinance: true });
+      // Témoin « tous les droits et l'accès aux finances » : un responsable hors de la branche du titulaire (le directeur, ancien
+      // témoin, a les droits de l'administration et passe, plus bas).
+      const responsableTousDroits = await creerCompte('RESPONSABLE', 'responsable-tous-droits', s, { permissions: TOUS_LES_SCOPES, accesFinance: true });
       const affecte = await compteTechnicien('affecte', s);
       const { chantier: enCours } = await chantierConverti(client.id, `TEST Chantier droits ${s}`);
       await prisma.chantier.update({ where: { id: enCours.id }, data: { responsableId: titulaire.id, commercialId: commercialDuChantier.id } });
@@ -504,7 +508,7 @@ if (!TEST_DATABASE_URL) {
       await ajouterCompteRendu(intervention.id, 'TEST Compte rendu des droits.', entete(affecte.jeton));
       const { chantier: annule, annuler } = await chantierConverti(client.id, `TEST Chantier droits annulé ${s}`);
       await annuler();
-      for (const compte of [titulaire, commercialDuChantier, directeurTousDroits]) {
+      for (const compte of [titulaire, commercialDuChantier]) {
         assert.equal((await appeler('get', `/chantiers/${enCours.id}`, null, parCompte(compte))).status, 200, `${compte.role} lit la fiche du chantier`);
       }
 
@@ -513,13 +517,14 @@ if (!TEST_DATABASE_URL) {
         ['CONDUCTEUR_TRAVAUX (titulaire du chantier, tous les droits)', parCompte(titulaire)],
         ['COMMERCIAL (commercial du chantier, tous les droits)', parCompte(commercialDuChantier)],
         ['RESPONSABLE (du titulaire, tous les droits)', parCompte(responsable)],
-        ['DIRECTEUR (tous les droits, accès aux finances)', parCompte(directeurTousDroits)],
+        ['RESPONSABLE (tous les droits, accès aux finances)', parCompte(responsableTousDroits)],
         ['TECHNICIEN (affecté à une intervention du chantier)', entete(affecte.jeton)],
       ];
       const admis = [
         ['SUPERADMIN', admin()],
         ['ADMIN', parCompte(await creerCompte('ADMIN', 'admin', s))],
         ['ADMIN commercial', parCompte(await creerCompte('ADMIN', 'admin-commercial', s, { estCommercial: true }))],
+        ['DIRECTEUR', parCompte(await creerCompte('DIRECTEUR', 'directeur-admis', s))],
       ];
       const cibles = [[enCours.id, 'en cours'], [annule.id, 'annulé'], [randomUUID(), 'introuvable']];
       //                                en cours, annulé, introuvable
@@ -549,10 +554,10 @@ if (!TEST_DATABASE_URL) {
           }
         }
       }
-      // Les trois envois admis sont au journal du chantier, du plus récent au plus ancien ; aucun sur l'annulé.
+      // Les quatre envois admis (directeur compris) sont au journal du chantier, du plus récent au plus ancien ; aucun sur l'annulé.
       const comptesAdmis = await prisma.envoiDocument.findMany({ where: { chantierId: enCours.id }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], select: { auteurNom: true } });
       assert.deepEqual((await lire(enCours.id)).body.envois.map((e) => e.auteurNom), comptesAdmis.map((e) => e.auteurNom));
-      assert.equal(comptesAdmis.length, 3);
+      assert.equal(comptesAdmis.length, 4);
       assert.equal(await prisma.envoiDocument.count({ where: { chantierId: annule.id } }), 0);
     });
 

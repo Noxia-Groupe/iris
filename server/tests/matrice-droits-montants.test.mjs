@@ -73,7 +73,9 @@ const REFERENCE = join(DOSSIER_MATRICES, 'montants.txt');
 // finances:read peut écrire sans voir le montant (G7 et G8 : en session, seule l'administration les écrit).
 const REFERENCE_CLES = join(DOSSIER_MATRICES, 'cles-montants.txt');
 const SA = 'SA';
-const ADMINISTRATION = ['SA', 'AD', 'AD-COM'];
+// Le directeur en fait partie depuis le lot « Directeur aligné sur l'administration » (décision de Nelson du 24-10-2026,
+// point 14), sauf pour la rentabilité des chantiers, qu'il ne lit que si la société la lui laisse (voitRentabilite, plus bas).
+const ADMINISTRATION = ['SA', 'AD', 'AD-COM', 'DIR'];
 // Porteurs du droit devis par leur type (5a et 5b : 2xx sur les routes des devis au contexte « défaut »).
 const DEVIS_HORS_ADMINISTRATION = ['COM', 'DC', 'AC', 'CPT', 'CPT-FINANCE'];
 // Réglages de la rentabilité (chantiers/droits.ts:23-35), coupés un à un par SA en préalable (cadrage §5.1).
@@ -581,9 +583,11 @@ if (!TEST_DATABASE_URL) {
 
     // --- Règles de visibilité des 8 groupes (attendus du code : chantiers/droits.ts:23-35 et :133-139,
     // droits/visibilite.ts:11-14, :36-57 et :63-70) ---
+    // Le directeur est testé avant l'administration (chantiers/droits.ts, voitRentabilite ; réponse de Nelson du 06-11-2026,
+    // « Chantiers seulement ») : le réglage lui retire la rentabilité des chantiers bien qu'il ait les droits de l'administration.
     const voitRentabilite = (compte, chantier, contexte) => {
-      if (ADMINISTRATION.includes(compte)) return true;
       if (compte === 'DIR') return !contexte.startsWith('rentabiliteDirecteurs=non');
+      if (ADMINISTRATION.includes(compte)) return true;
       if (['CT', 'RESP'].includes(compte) && TITULAIRE[chantier] === compte) return !contexte.startsWith('rentabiliteConducteur=non');
       if (compte === 'RESP' && BRANCHE_DE_RESP.includes(chantier)) return !contexte.startsWith('rentabiliteHierarchie=non');
       return false;
@@ -591,10 +595,13 @@ if (!TEST_DATABASE_URL) {
     const VOIT = {
       1: (c) => (champ) => {
         if (champ === 'budgetGlobalVendu') return voitRentabilite(c.compte, c.cible, c.contexte);
-        if (champ === 'coutMaterielPrevu') return ADMINISTRATION.includes(c.compte) || voitRentabilite(c.compte, c.cible, c.contexte);
+        // Coût prévu : par les prix d'achat pour l'administration hors directeur, par la rentabilité pour le directeur
+        // (voitCoutPrevuParPrixAchat ; décisions de Nelson du 30-10-2026 et du 06-11-2026).
+        if (champ === 'coutMaterielPrevu') return (ADMINISTRATION.includes(c.compte) && c.compte !== 'DIR') || voitRentabilite(c.compte, c.cible, c.contexte);
         return c.compte !== 'TECH';
       },
-      2: (c) => () => ADMINISTRATION.includes(c.compte),
+      // Réponse de la conversion : coût prévu selon la même règle (devis/routes.ts, convertirDevis).
+      2: (c) => () => (ADMINISTRATION.includes(c.compte) && c.compte !== 'DIR') || (c.compte === 'DIR' && voitRentabilite(c.compte, c.cible, c.contexte.split(',')[0])),
       3: (c) => () => ADMINISTRATION.includes(c.compte),
       4: (c) => () => ADMINISTRATION.includes(c.compte),
       5: () => () => false,
@@ -622,26 +629,32 @@ if (!TEST_DATABASE_URL) {
       for (const [contexte, reglage] of CONTEXTES_RENTABILITE) {
         const prealables = prealableReglage(reglage);
         const ctx = (corps) => `${contexte}, corps ${corps}`;
-        // Fiche, corps montant vendu : chaque compte admis sur son chantier ; la hiérarchie (404) et le directeur (403),
-        // état décrit (cadrage §5.1) ; le chantier terminé : CT refusé (403), SA et AD écrivent.
-        const vendu = [['SA', 'chantier-ct'], ['AD', 'chantier-ct'], ['AD-COM', 'chantier-ct'], ['CT', 'chantier-ct'], ['RESP', 'chantier-resp'], ['RESP', 'chantier-ct-branche-resp'], ['DC', 'chantier-dc'], ['AC', 'chantier-ac'], ['CPT', 'chantier-cpt'], ['DIR', 'chantier-dir'], ['CT', 'chantier-termine'], ['SA', 'chantier-termine'], ['AD', 'chantier-termine']];
+        // Fiche, corps montant vendu : chaque compte admis sur son chantier ; la hiérarchie (404), état décrit (cadrage
+        // §5.1) ; le chantier terminé : CT refusé (403), SA et AD écrivent. Le directeur, qui a les droits de
+        // l'administration, est joué comme AD (lot « Directeur aligné sur l'administration ») : il écrit le vendu avec le
+        // réglage, et il lui est refusé sans lui (403), sur le chantier en cours comme sur le chantier terminé (réponses de
+        // Nelson du 06-11-2026).
+        const vendu = [['SA', 'chantier-ct'], ['AD', 'chantier-ct'], ['AD-COM', 'chantier-ct'], ['DIR', 'chantier-ct'], ['CT', 'chantier-ct'], ['RESP', 'chantier-resp'], ['RESP', 'chantier-ct-branche-resp'], ['DC', 'chantier-dc'], ['AC', 'chantier-ac'], ['CPT', 'chantier-cpt'], ['CT', 'chantier-termine'], ['SA', 'chantier-termine'], ['AD', 'chantier-termine'], ['DIR', 'chantier-termine']];
         for (const [compte, nom] of vendu) {
           let code = 403;
-          if (ADMINISTRATION.includes(compte)) code = 200;
+          if (compte === 'DIR') code = voitRentabilite(compte, nom, contexte) ? 200 : 403;
+          else if (ADMINISTRATION.includes(compte)) code = 200;
           else if (nom === 'chantier-ct-branche-resp') code = 404;
           else if (['CT', 'RESP'].includes(compte) && nom !== 'chantier-termine' && voitRentabilite(compte, nom, contexte)) code = 200;
           ajouterGroupe(1, compte, 'PATCH /api/chantiers/:id', nom, ctx('montant vendu'), `/api/chantiers/${chantier(nom)}`, () => ({ budgetGlobalVendu: MONTANTS.vendu }), { prealables, code, montant: { genre: 'vendu', chantier: chantier(nom) } });
         }
-        // Fiche, corps nom : DC, AC et CPT, dont la réponse masque le montant vendu (cadrage §5.1).
-        for (const [compte, nom] of [['DC', 'chantier-dc'], ['AC', 'chantier-ac'], ['CPT', 'chantier-cpt']]) {
+        // Fiche, corps nom : DC, AC et CPT, dont la réponse masque le montant vendu (cadrage §5.1) ; AD et DIR, dont la
+        // réponse le garde, sauf pour le directeur sans la rentabilité (lot « Directeur aligné sur l'administration »,
+        // réponse de Nelson du 06-11-2026, « Chantiers seulement » : réponses de modification).
+        for (const [compte, nom] of [['DC', 'chantier-dc'], ['AC', 'chantier-ac'], ['CPT', 'chantier-cpt'], ['AD', 'chantier-ct'], ['DIR', 'chantier-ct']]) {
           ajouterGroupe(1, compte, 'PATCH /api/chantiers/:id', nom, ctx('nom'), `/api/chantiers/${chantier(nom)}`, () => ({ nom: `TEST ${nom} renommé par la matrice des montants` }), { prealables, code: 200, montant: null });
         }
         // Statut : chaque compte admis sur son chantier (5a), dont DIR et RESP par sa branche.
         for (const [compte, nom] of [['SA', 'chantier-ct'], ['AD', 'chantier-ct'], ['AD-COM', 'chantier-ct'], ['CT', 'chantier-ct'], ['DIR', 'chantier-ct'], ['RESP', 'chantier-resp'], ['RESP', 'chantier-tech-branche-resp'], ['DC', 'chantier-dc'], ['AC', 'chantier-ac'], ['CPT', 'chantier-cpt']]) {
           ajouterGroupe(1, compte, 'PATCH /api/chantiers/:id/statut', nom, ctx('statut=TERMINE'), `/api/chantiers/${chantier(nom)}/statut`, () => ({ statut: 'TERMINE' }), { prealables, code: 200, montant: null });
         }
-        // Commercial : chaque compte admis sur son chantier (5b).
-        for (const [compte, nom] of [['SA', 'chantier-ct'], ['AD', 'chantier-ct'], ['AD-COM', 'chantier-ct'], ['CT', 'chantier-ct'], ['RESP', 'chantier-resp'], ['DC', 'chantier-dc'], ['AC', 'chantier-ac'], ['CPT', 'chantier-cpt']]) {
+        // Commercial : chaque compte admis sur son chantier (5b), le directeur comme AD.
+        for (const [compte, nom] of [['SA', 'chantier-ct'], ['AD', 'chantier-ct'], ['AD-COM', 'chantier-ct'], ['DIR', 'chantier-ct'], ['CT', 'chantier-ct'], ['RESP', 'chantier-resp'], ['DC', 'chantier-dc'], ['AC', 'chantier-ac'], ['CPT', 'chantier-cpt']]) {
           ajouterGroupe(1, compte, 'PATCH /api/chantiers/:id/commercial', nom, ctx('commercialId=COM'), `/api/chantiers/${chantier(nom)}/commercial`, () => ({ commercialId: comptes.COM.id }), { prealables, code: 200, montant: null, refuses: refusesCommercial });
         }
       }
@@ -678,22 +691,23 @@ if (!TEST_DATABASE_URL) {
         return { totaux: duplication ? { ...totaux, tauxAcompte: MONTANTS.tauxAcompteDuJour, acompteMontant: null } : totaux, lignes: await lignesDuDevis('instantane', P[cible]) };
       };
       for (const cible of ['devis-acompte-prix-achat', 'devis-acompte-recu']) {
-        for (const compte of [SA, 'AD']) {
+        for (const compte of [SA, 'AD', 'DIR']) {
           ajouterGroupe(3, compte, 'POST /api/devis/:id/revisions', cible, 'défaut, corps sans corps', `/api/devis/${P[cible]}/revisions`, corpsVide, { code: 201, montant: { genre: 'copie', source: sourceAcompte(cible, false) } });
           ajouterGroupe(3, compte, 'POST /api/devis/:id/duplication', cible, 'défaut, corps sans corps', `/api/devis/${P[cible]}/duplication`, corpsVide, { code: 201, montant: { genre: 'copie', source: sourceAcompte(cible, true) } });
         }
       }
-      // Triplets « droit … » de 5b (R-B non appliquée) : CT, DIR et RESP avec le droit devis ou le scope devis:write.
-      for (const compte of ['CT', 'DIR', 'RESP']) {
+      // Triplets « droit … » de 5b (R-B non appliquée) : CT et RESP avec le droit devis ou le scope devis:write. Le
+      // directeur, qui a désormais ces droits par son type (lot « Directeur aligné sur l'administration »), n'en est plus.
+      for (const compte of ['CT', 'RESP']) {
         for (const droit of ['droit devis', 'droit devis:write']) {
           devisG3(compte, droit, prealableDroit(compte, droit));
           conversion(compte, droit, prealableDroit(compte, droit));
         }
       }
       // §5.3 : prix d'achat prévu saisi sur une ligne. Administration : écrit, relu ; tout autre compte : refusé (403),
-      // inchangé (devis/metier.ts:203-205), dont CT, DIR et RESP avec le droit devis.
+      // inchangé (devis/metier.ts:203-205), dont CT et RESP avec le droit devis ; le directeur l'écrit, comme l'administration.
       const corpsDevisPrixAchat = () => ({ clientId: d.clientActif, objet: 'TEST Devis au prix d’achat saisi par la matrice des montants', lignes: [ligneLibre('TEST Ligne au prix d’achat saisi par la matrice des montants', 'FOURNITURE', MONTANTS.ligne.quantite, MONTANTS.ligne.prixUnitaireHt, { prixAchatUnitaireHt: MONTANTS.prixAchatLigne })] });
-      const auteursPrixAchat = [...ADMINISTRATION.map((c) => [c, 'défaut', []]), ...DEVIS_HORS_ADMINISTRATION.map((c) => [c, 'défaut', []]), ...['CT', 'DIR', 'RESP'].map((c) => [c, 'droit devis', prealableDroit(c, 'droit devis')])];
+      const auteursPrixAchat = [...ADMINISTRATION.map((c) => [c, 'défaut', []]), ...DEVIS_HORS_ADMINISTRATION.map((c) => [c, 'défaut', []]), ...['CT', 'RESP'].map((c) => [c, 'droit devis', prealableDroit(c, 'droit devis')])];
       for (const [compte, contexte, prealables] of auteursPrixAchat) {
         const admis = ADMINISTRATION.includes(compte);
         ajouterGroupe(3, compte, 'POST /api/devis', 'clientId=client-actif', `${contexte}, corps ligne au prix d’achat prévu`, '/api/devis', corpsDevisPrixAchat, { prealables, code: admis ? 201 : 403, montant: admis ? { genre: 'devis', attendu: devisCree(MONTANTS.prixAchatLigne) } : null });
@@ -704,10 +718,10 @@ if (!TEST_DATABASE_URL) {
 
       // §5.2, G4 : heures d'un chantier (création, correction, restauration) ; montants relus par 5c.
       const corpsHeures = (nom) => () => ({ chantierId: chantier(nom), intervenantId: d.ficheLibre, date: d.hier, nbrHeures: 2.75 });
-      for (const [compte, nom] of [['SA', 'chantier-ct'], ['AD', 'chantier-ct'], ['AD-COM', 'chantier-ct'], ['CT', 'chantier-ct'], ['RESP', 'chantier-resp']]) {
+      for (const [compte, nom] of [['SA', 'chantier-ct'], ['AD', 'chantier-ct'], ['AD-COM', 'chantier-ct'], ['DIR', 'chantier-ct'], ['CT', 'chantier-ct'], ['RESP', 'chantier-resp']]) {
         ajouterGroupe(4, compte, 'POST /api/heures', `chantierId=${nom}`, 'défaut, corps heures', '/api/heures', corpsHeures(nom), { code: 200, montant: null });
       }
-      for (const [compte, nom] of [['SA', 'heure-chantier-ct'], ['AD', 'heure-chantier-ct'], ['AD-COM', 'heure-chantier-ct'], ['CT', 'heure-chantier-ct'], ['RESP', 'heure-chantier-ct-branche-resp']]) {
+      for (const [compte, nom] of [['SA', 'heure-chantier-ct'], ['AD', 'heure-chantier-ct'], ['AD-COM', 'heure-chantier-ct'], ['DIR', 'heure-chantier-ct'], ['CT', 'heure-chantier-ct'], ['RESP', 'heure-chantier-ct-branche-resp']]) {
         ajouterGroupe(4, compte, 'PATCH /api/heures/:id', nom, 'défaut, corps commentaire, heures et motif', `/api/heures/${id('heure', nom)}`, () => ({ motifCorrection: motif('correction'), commentaire: 'TEST Pointage corrigé par la matrice des montants', nbrHeures: 3.25 }), { code: 200, montant: null });
       }
       const restaurer = (compte, contexte, prealables = []) => ajouterGroupe(4, compte, 'POST /api/heures/:id/restaurer', 'heure-archivee-chantier-ct', `${contexte}, corps motif de restauration`, `/api/heures/${id('heure', 'heure-archivee-chantier-ct')}/restaurer`, () => ({ motifRestauration: motif('restauration') }), { prealables, code: 200, montant: null });
@@ -723,6 +737,7 @@ if (!TEST_DATABASE_URL) {
       for (const [compte, cible, chemin] of [
         ['SA', 'heures-tech-prix-vente', action(id('intervention', 'intervention-affectee-tech'), 'heures', P['heures-tech-prix-vente'])],
         ['AD', 'materiel-intervention-affectee', action(coutMateriel.id, 'achats', coutMateriel.coutId)],
+        ['DIR', 'materiel-intervention-affectee', action(coutMateriel.id, 'achats', coutMateriel.coutId)],
         ['AD-COM', 'heures-tech-prix-vente', action(id('intervention', 'intervention-affectee-tech'), 'heures', P['heures-tech-prix-vente'])],
         ['CT', 'heures-tech-chantier-ct', action(P['intervention-chantier-ct-tech'], 'heures', P['heures-tech-chantier-ct'])],
       ]) ajouterGroupe(6, compte, 'POST /api/interventions/:id/couts/:type/:coutId/:action', cible, 'défaut, corps motif', chemin, () => ({ motif: motif('l’archivage') }), { code: 200, montant: null });
@@ -737,12 +752,12 @@ if (!TEST_DATABASE_URL) {
         ajouterGroupe(7, compte, 'PUT /api/catalogue/:family/:id', 'prestation-prix-achat', 'défaut, corps prix d’achat changé', pa, corpsPa({ prixAchatHt: MONTANTS.ficheAchatModifie }), { code: 200, montant: { genre: 'fiche', fiche: P['prestation-prix-achat'], attendu: { prixAchatHt: MONTANTS.ficheAchatModifie } } });
         ajouterGroupe(7, compte, 'DELETE /api/catalogue/:family/:id', 'prestation-prix-achat', 'défaut', pa, corpsVide, { code: 200, montant: { genre: 'fiche', fiche: P['prestation-prix-achat'], attendu: {} } });
       }
-      // §5.3 : mains d'œuvre, par SA et AD (catalogue/main-oeuvre.ts).
+      // §5.3 : mains d'œuvre, par SA, AD et DIR (catalogue/main-oeuvre.ts).
       const mo = (nom) => `/api/catalogue/prestations/${P[nom]}`;
       const corpsMo = (nom, prix = MONTANTS.mainOeuvre, extra = {}) => () => ({ ...d.corpsMainOeuvre(nom === 'creee' ? 'TEST-MONTANTS-MO-CREEE' : 'TEST-MONTANTS-MO', `TEST Main d’œuvre ${nom === 'creee' ? 'créée' : ''} de la matrice des montants`.replace('  ', ' '), prix), ...extra });
       const corpsRetour = (reference) => () => ({ estMainOeuvre: false, reference, nom: 'TEST Main d’œuvre rendue prestation par la matrice des montants', unite: 'forfait', prixVenteHt: MONTANTS.prestationRetour, tauxTva: 20 });
       const retourAttendu = { prixVenteHt: MONTANTS.prestationRetour, ...Object.fromEntries(PRIX_MAIN_OEUVRE.slice(1).map((c) => [c, null])) };
-      for (const compte of [SA, 'AD']) {
+      for (const compte of [SA, 'AD', 'DIR']) {
         const moCas = (route, cible, contexte, chemin, corps, options) => ajouterGroupe(7, compte, route, cible, contexte, chemin, corps, options);
         moCas('POST /api/catalogue/:family', 'family=prestations', 'défaut, corps main d’œuvre, six prix et heures par jour', '/api/catalogue/prestations', corpsMo('creee'), { code: 201, montant: { genre: 'mainOeuvre', attendu: { tauxTva: 20, ...MONTANTS.mainOeuvre } } });
         moCas('POST /api/catalogue/:family', 'family=prestations', 'défaut, corps main d’œuvre avec une durée indicative', '/api/catalogue/prestations', corpsMo('creee', MONTANTS.mainOeuvre, { dureeIndicativeMin: 30 }), { code: 400, montant: null });
@@ -774,7 +789,7 @@ if (!TEST_DATABASE_URL) {
         ['POST /api/interventions/:id/remise-a-planifier', 'curative-sans-chantier-branche', `/api/interventions/${id('intervention', 'curative-sans-chantier-branche')}/remise-a-planifier`, 'motif', () => ({ motif: motif('la remise à planifier') })],
       ];
       for (const [route, cible, chemin, corpsNom, corps] of planning) {
-        for (const compte of [SA, 'AD']) {
+        for (const compte of [SA, 'AD', 'DIR']) {
           ajouter(compte, route, cible, `planningActif=non, corps ${corpsNom}`, chemin, corps, { prealables: [{ compte: SA, methode: 'PUT', chemin: '/api/modules', corps: { planningActif: false } }], code: compte === SA ? '2xx' : 403, planning: true });
         }
       }
@@ -954,7 +969,9 @@ if (!TEST_DATABASE_URL) {
         if (!cas.some((c) => c.route === route && c.compte === compte && c.contexte.startsWith(`${droit},`) && c.code !== null && c.code < 300)) manquants.push(cle);
       }
       assert.deepEqual(manquants, [], 'couples et triplets des 8 groupes sans cas');
-      assert.equal(triplets.size, 31, 'triplets « droit … » de 5b sur les routes des 8 groupes');
+      // 21 : les 10 triplets du directeur (cinq routes des devis, droit devis et devis:write) ont quitté 5b avec le lot
+      // « Directeur aligné sur l'administration », qui lui donne ces droits par son type (31 auparavant).
+      assert.equal(triplets.size, 21, 'triplets « droit … » de 5b sur les routes des 8 groupes');
       const parGroupe = [...couples.values()].reduce((a, g) => ({ ...a, [g]: (a[g] ?? 0) + 1 }), {});
       diagnostics.push(`couples (route, compte) des 8 groupes : ${couples.size} (${Object.entries(parGroupe).map(([g, n]) => `G${g} ${n}`).join(', ')}) ; triplets « droit … » : ${triplets.size}`);
       diagnostics.push(`cas : ${cas.length} (groupes ${cas.filter((c) => c.groupe).length}, planning ${cas.filter((c) => c.planning).length}, relecture propre d’un montant ${cas.filter((c) => c.montant).length}, refus du montant vendu compris)`);
@@ -1016,7 +1033,7 @@ if (!TEST_DATABASE_URL) {
         const ok = c.code === '2xx' ? /^2\d\d /.test(r) : r.startsWith(`${c.code} `);
         if (!ok) ecarts.push(`${c.compte} ${c.route} sur ${c.cible} (${c.contexte}) : attendu ${c.code}, obtenu « ${r} »`);
         else if (typeof c.code === 'number' && c.code >= 300 && !/ inchangé ; aucune entrée( ; |$)/.test(r)) ecarts.push(`${c.compte} ${c.route} sur ${c.cible} (${c.contexte}) : refus qui écrit`);
-        else if (c.planning && c.compte === 'AD' && !r.startsWith('403 PLANNING_DESACTIVE ')) ecarts.push(`${c.compte} ${c.route} : refus PLANNING_DESACTIVE attendu`);
+        else if (c.planning && ['AD', 'DIR'].includes(c.compte) && !r.startsWith('403 PLANNING_DESACTIVE ')) ecarts.push(`${c.compte} ${c.route} : refus PLANNING_DESACTIVE attendu`);
       }
       assert.deepEqual(ecarts, [], 'réponses différentes de l’attendu');
       assert.equal(chiffres.prealablesRefuses, 0, 'aucun préalable refusé');

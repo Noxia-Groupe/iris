@@ -54,7 +54,8 @@ const TITRE = 'Lot D1a-5d-1 : factures, avoirs et règlements, écritures réell
 const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
 const REFERENCE = join(DOSSIER_MATRICES, 'factures.txt');
 const SA = 'SA';
-const ADMINISTRATION = ['SA', 'AD', 'AD-COM'];
+// Le directeur en fait partie depuis le lot « Directeur aligné sur l'administration » (décision de Nelson du 24-10-2026, point 14).
+const ADMINISTRATION = ['SA', 'AD', 'AD-COM', 'DIR'];
 // Les 12 comptes refusés à l'entrée de chaque route des factures (entrees.txt, vérifié par le test de couverture).
 const REFUSES = COMPTES_JOUES.filter((c) => !ADMINISTRATION.includes(c));
 const REFUS_ENTREE = '403 « Accès réservé aux administrateurs »';
@@ -697,8 +698,9 @@ if (!TEST_DATABASE_URL) {
       const casDeSa = cas.filter((c) => c.compte === SA);
       for (const compte of REFUSES) for (const c of casDeSa) cas.push({ ...c, compte, code: 403, montant: null, enLot: true });
 
-      // Écritures indirectes jouées avec le constat des pièces figées (cadrage §4.1), par SA et AD.
-      for (const compte of [SA, 'AD']) {
+      // Écritures indirectes jouées avec le constat des pièces figées (cadrage §4.1), par SA, AD et DIR (droits de
+      // l'administration, comme AD).
+      for (const compte of [SA, 'AD', 'DIR']) {
         const indirect = (route, cible, contexte, chemin, corps) => ajouter(compte, route, cible, contexte, chemin, corps, { indirect: true });
         indirect('PUT /api/company', SANS_CIBLE, 'défaut, corps raison sociale changée', '/api/company', () => ({ ...SOCIETE, raisonSociale: 'TEST Société matrice des droits renommée' }));
         indirect('PUT /api/clients/:id', 'client-actif', 'défaut, corps raison sociale changée', `/api/clients/${d.clientActif}`, () => ({ raisonSociale: 'TEST Client actif matrice renommé' }));

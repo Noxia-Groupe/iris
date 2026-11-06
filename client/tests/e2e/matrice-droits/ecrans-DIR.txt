@@ -1,44 +1,49 @@
-DIR | administration | onglet par défaut | défaut | redirigé vers /
-DIR | devis | hors lignes | défaut | redirigé vers /
-DIR | factures | hors lignes | défaut | redirigé vers /
-DIR | fiche chantier | chantier-annule | défaut | titre « Écrans annulé <s> » ; boutons : Rapport interne (PDF), Retour au tableau de bord
-DIR | fiche chantier | chantier-en-cours | défaut | titre « Écrans en cours <s> » ; boutons : Rapport interne (PDF), Retour au tableau de bord
-DIR | fiche chantier | chantier-termine | défaut | titre « Écrans terminé <s> » ; boutons : Rapport interne (PDF), Retour au tableau de bord
-DIR | fiche chantier | chantier-titulaire-dc | défaut | titre « Écrans titulaire DC <s> » ; boutons : Rapport interne (PDF), Retour au tableau de bord
-DIR | fiche chantier | chantier-titulaire-tech | défaut | titre « Écrans titulaire TECH <s> » ; boutons : Rapport interne (PDF), Retour au tableau de bord
-DIR | fiche intervention | intervention-planifiee | défaut | redirigé vers /
-DIR | fiche intervention | intervention-terminee | défaut | redirigé vers /
+DIR | administration | catégorie | défaut | boutons : Modifier, Supprimer
+DIR | administration | fournisseur | défaut | boutons : Modifier, Supprimer
+DIR | administration | onglet par défaut | défaut | titre « Administration & Paramétrage » ; boutons : Catégories, Chantiers, Fournisseurs, Intervenants, Journal, Marges & Commissions, Ouvrir le chantier (désactivé), Utilisateurs
+DIR | administration › utilisateurs | compte CT | défaut | bouton « Révoquer », case « Accès financier — <CT> » (désactivé), case « Archiver Travaux — <CT> » (désactivé), case « Corriger Travaux — <CT> » (désactivé), case « Droit devis — <CT> » (désactivé), case « Oui », liste « Modifier le rôle » (options : Conducteur de travaux, Commercial, Assistante commerciale, Technicien, Comptable, Directeur commercial, Responsable, Directeur), liste « Responsable hiérarchique de <CT> »
+DIR | devis | devis-brouillon | défaut | boutons : Annuler, Constater l’acompte, Dupliquer, Envoyer le devis <devis-brouillon> version #, Faire signer le client, Marquer envoyé, Modifier, PDF du devis <devis-brouillon> version #
+DIR | devis | devis-signe | défaut | boutons : Annuler, Créer le contrat, Créer l’intervention, Créer une révision, Dupliquer, Envoyer le devis <devis-signe> version #, Ouvrir le chantier, PDF du devis <devis-signe> version #
+DIR | devis | hors lignes | défaut | titre « Devis » ; boutons : Actualiser, Ajouter la ligne au jour ou à la demi-journée (désactivé), Ajouter une ligne, Créer le brouillon
+DIR | factures | hors lignes | défaut | titre « Factures » ; boutons : Actualiser, Export comptable, Nouvelle facture
+DIR | fiche chantier | chantier-annule | défaut | titre « Écrans annulé <s> » ; boutons : Rapport client (PDF), Rapport interne (PDF), Retour au tableau de bord
+DIR | fiche chantier | chantier-en-cours | défaut | titre « Écrans en cours <s> » ; boutons : Archiver ce pointage, Archiver cet achat, Corriger ce pointage, Corriger cet achat, Envoyer le rapport de chantier Écrans en cours <s>, Modifier, Modifier, PDF, Rapport client (PDF), Rapport interne (PDF), Retour au tableau de bord
+DIR | fiche chantier | chantier-termine | défaut | titre « Écrans terminé <s> » ; boutons : Archiver ce pointage, Archiver cet achat, Corriger ce pointage, Corriger cet achat, Envoyer le rapport de chantier Écrans terminé <s>, Modifier, Modifier, Non encaissé, Rapport client (PDF), Rapport interne (PDF), Retour au tableau de bord, Valider l'encaissement
+DIR | fiche chantier | chantier-titulaire-dc | défaut | titre « Écrans titulaire DC <s> » ; boutons : Archiver ce pointage, Archiver cet achat, Corriger ce pointage, Corriger cet achat, Envoyer le rapport de chantier Écrans titulaire DC <s>, Modifier, Modifier, Rapport client (PDF), Rapport interne (PDF), Retour au tableau de bord
+DIR | fiche chantier | chantier-titulaire-tech | défaut | titre « Écrans titulaire TECH <s> » ; boutons : Archiver ce pointage, Archiver cet achat, Corriger ce pointage, Corriger cet achat, Envoyer le rapport de chantier Écrans titulaire TECH <s>, Modifier, Modifier, Rapport client (PDF), Rapport interne (PDF), Retour au tableau de bord
+DIR | fiche intervention | intervention-planifiee | défaut | titre « Fiche intervention » ; boutons : Annuler, Créer la suite, Démarrer, Enregistrer l’achat matériel, Remettre à planifier
+DIR | fiche intervention | intervention-terminee | défaut | titre « Fiche intervention » ; boutons : Créer la suite, Enregistrer l’achat matériel, Envoyer le compte rendu de l’intervention <intervention-terminee>, Faire signer ce compte rendu, Marquer « à suivre », PDF du compte rendu de l’intervention <intervention-terminee>
 DIR | liste des chantiers | chantier-annule | défaut | ligne absente
 DIR | liste des chantiers | chantier-en-cours | défaut | boutons : Clôturer
-DIR | liste des chantiers | chantier-termine | défaut | boutons : aucun
+DIR | liste des chantiers | chantier-termine | défaut | boutons : Réouvrir
 DIR | liste des chantiers | chantier-titulaire-dc | défaut | boutons : Clôturer
 DIR | liste des chantiers | chantier-titulaire-tech | défaut | boutons : Clôturer
-DIR | liste des chantiers | hors lignes | défaut | titre « Liste des Chantiers » ; boutons : Chantiers Terminés / Archivés# chantier(s), En cours#, En perte, En perte#, Heures dépassées, Main-d’œuvre dépassée, Marge faible, Matériel dépassé, Sans saisie, Tous, À surveiller, À surveiller#
-DIR | liste des interventions | hors lignes | défaut | redirigé vers /
-DIR | menu | — | défaut | sections : Accueil, Chantiers ; type affiché : Directeur
-DIR | planning | hors lignes | défaut | redirigé vers /
+DIR | liste des chantiers | hors lignes | défaut | titre « Liste des Chantiers » ; boutons : Chantiers Terminés / Archivés# chantier(s), Créer une affaire (devis), En cours#, En perte, En perte#, Heures dépassées, Main-d’œuvre dépassée, Marge faible, Matériel dépassé, Sans saisie, Tous, À surveiller, À surveiller#
+DIR | liste des interventions | hors lignes | défaut | titre « Interventions SAV » ; boutons : Nouvelle intervention
+DIR | menu | — | défaut | sections : Accueil, Chantiers, Interventions, Facturation, Pilotage, Référentiels, Réglages ; type affiché : Directeur
+DIR | planning | hors lignes | défaut | titre « Planning d'intervention » ; boutons : <partage du planning>, Affectation, Semaine #, Semaine précédente, Semaine suivante, Types d'événements
 DIR | route / | — | défaut | menu « Accueil › Tableau de bord » ; accessible
-DIR | route /achats | — | défaut | hors menu ; redirigée vers /
-DIR | route /admin | — | défaut | hors menu ; redirigée vers /
+DIR | route /achats | — | défaut | menu « Chantiers › Journal des achats » ; accessible
+DIR | route /admin | — | défaut | menu « Réglages › Administration » ; accessible
 DIR | route /administration/api | — | défaut | hors menu ; redirigée vers /
-DIR | route /catalogue | — | défaut | hors menu ; redirigée vers /
+DIR | route /catalogue | — | défaut | menu « Référentiels › Catalogue » ; accessible
 DIR | route /chantiers | — | défaut | menu « Chantiers › Liste des chantiers » ; accessible
 DIR | route /chantiers/:id | chantier-en-cours | défaut | hors menu ; accessible
-DIR | route /clients | — | défaut | hors menu ; redirigée vers /
-DIR | route /clients/:id | client | défaut | hors menu ; redirigée vers /
-DIR | route /commerciaux | — | défaut | hors menu ; redirigée vers /
-DIR | route /comptabilite | — | défaut | hors menu ; redirigée vers /
-DIR | route /contrats-maintenance | — | défaut | hors menu ; redirigée vers /
-DIR | route /devis | — | défaut | hors menu ; redirigée vers /
-DIR | route /factures | — | défaut | hors menu ; redirigée vers /
-DIR | route /heures | — | défaut | hors menu ; redirigée vers /
-DIR | route /interventions | — | défaut | hors menu ; redirigée vers /
-DIR | route /interventions/:id | intervention-planifiee | défaut | hors menu ; redirigée vers /
-DIR | route /mentions-legales | — | défaut | hors menu ; redirigée vers /
-DIR | route /performances | — | défaut | hors menu ; redirigée vers /
-DIR | route /planning | — | défaut | hors menu ; redirigée vers /
-DIR | route /prete-a-facturer | — | défaut | hors menu ; redirigée vers /
-DIR | route /reglements | — | défaut | hors menu ; redirigée vers /
+DIR | route /clients | — | défaut | menu « Référentiels › Clients » ; accessible
+DIR | route /clients/:id | client | défaut | hors menu ; accessible
+DIR | route /commerciaux | — | défaut | menu « Pilotage › Mes commerciaux » ; accessible
+DIR | route /comptabilite | — | défaut | menu « Facturation › Plan comptable » ; accessible
+DIR | route /contrats-maintenance | — | défaut | menu « Interventions › Contrats de maintenance » ; accessible
+DIR | route /devis | — | défaut | menu « Chantiers › Devis » ; accessible
+DIR | route /factures | — | défaut | menu « Facturation › Factures » ; accessible
+DIR | route /heures | — | défaut | menu « Chantiers › Journal des heures » ; accessible
+DIR | route /interventions | — | défaut | menu « Interventions › Interventions SAV » ; accessible
+DIR | route /interventions/:id | intervention-planifiee | défaut | hors menu ; accessible
+DIR | route /mentions-legales | — | défaut | menu « Facturation › Mentions & CGV » ; accessible
+DIR | route /performances | — | défaut | menu « Pilotage › Performances » ; accessible
+DIR | route /planning | — | défaut | menu « Chantiers › Planning » ; accessible
+DIR | route /prete-a-facturer | — | défaut | menu « Facturation › Prêt à facturer » ; accessible
+DIR | route /reglements | — | défaut | menu « Facturation › Règlements » ; accessible
 DIR | route /resultat-commercial | — | défaut | hors menu ; redirigée vers /
-DIR | route /societe | — | défaut | hors menu ; redirigée vers /
-DIR | route /statistiques | — | défaut | hors menu ; redirigée vers /
+DIR | route /societe | — | défaut | menu « Réglages › Société » ; accessible
+DIR | route /statistiques | — | défaut | menu « Pilotage › Statistiques » ; accessible

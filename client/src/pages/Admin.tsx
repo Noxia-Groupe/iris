@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { apiFetch } from '../api';
 import { Link } from 'react-router-dom';
-import { getCurrentUser, isAdminRole, isSuperAdminRole, roleLabel, useCurrentRole } from '../roles';
+import { getCurrentUser, isAdminRole, isSuperAdminRole, ROLE_DIRECTEUR, roleLabel, useCurrentRole } from '../roles';
 import { refreshModules } from '../modules';
 import { useSociete } from '../companyTimezoneContext';
 import OuvrirChantierAffaire from '../components/OuvrirChantierAffaire';
@@ -27,6 +27,7 @@ const Admin = () => {
   const userRole = useCurrentRole();
   const isAdmin = isAdminRole(userRole);
   const isSuper = isSuperAdminRole(userRole);
+  const estDirecteur = userRole === ROLE_DIRECTEUR;
 
   const [activeTab, setActiveTab] = useState(isAdmin ? 'chantiers' : 'fournisseurs');
   const [users, setUsers] = useState<any[]>([]);
@@ -47,7 +48,7 @@ const Admin = () => {
   // Ligne en cours d'édition : { type: 'intervenant'|'fournisseur'|'categorie', id, ...champs }
   const [editRow, setEditRow] = useState<any>(null);
   // Rôle sélectionné dans le formulaire "Autoriser un compte" — contrôlé uniquement pour
-  // afficher la case "estCommercial" quand le rôle choisi est Administrateur.
+  // afficher la case "estCommercial" quand le rôle choisi la permet (peutEtreAussiCommercial).
   const [newUserRole, setNewUserRole] = useState('CONDUCTEUR_TRAVAUX');
   // Modules activables (onglet « Modules », superadmin) : état global du Planning.
   const [planningActif, setPlanningActif] = useState<boolean | null>(null);
@@ -212,7 +213,8 @@ const Admin = () => {
       joursSansSaisie: String(formData.get('joursSansSaisie') ?? '').trim(),
       rentabiliteConducteur: formData.get('rentabiliteConducteur') === 'on',
       rentabiliteHierarchie: formData.get('rentabiliteHierarchie') === 'on',
-      rentabiliteDirecteurs: formData.get('rentabiliteDirecteurs') === 'on',
+      // Case non modifiable par un directeur (refus du serveur) : il ne l'envoie pas.
+      ...(estDirecteur ? {} : { rentabiliteDirecteurs: formData.get('rentabiliteDirecteurs') === 'on' }),
     };
     const res = await apiFetch('/parametres', { method: 'PUT', body: JSON.stringify(payload) });
     if (res.ok) {
@@ -622,7 +624,8 @@ const Admin = () => {
                 <div className="grid grid-cols-2 gap-2 mt-4 pt-4 border-t">
                   <div>
                     <div className="text-xs text-muted uppercase">Global Vendu</div>
-                    <div className="font-bold">{c.budgetGlobalVendu.toLocaleString()} €</div>
+                    {/* Vendu nul (null) : non communiqué au directeur sans la rentabilité des chantiers (réponse de Nelson du 06-11-2026). */}
+                    <div className="font-bold">{c.budgetGlobalVendu == null ? '—' : `${c.budgetGlobalVendu.toLocaleString()} €`}</div>
                   </div>
                   <div>
                     <div className="text-xs text-muted uppercase">Heures Vendues</div>
@@ -682,6 +685,7 @@ const Admin = () => {
       {activeTab === 'marges' && isAdmin && (
         <AdminMarges
           isSuper={isSuper}
+          estDirecteur={estDirecteur}
           parametres={parametres}
           setParametres={setParametres}
           remuneration={remuneration}
@@ -697,6 +701,7 @@ const Admin = () => {
         <AdminUtilisateurs
           user={user}
           isSuper={isSuper}
+          estDirecteur={estDirecteur}
           users={users}
           newUserRole={newUserRole}
           setNewUserRole={setNewUserRole}

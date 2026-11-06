@@ -299,7 +299,8 @@ test('fiche chantier, de 375 à 1 920 px : barre d’actions au-dessus du titre 
 });
 
 // Hors administration, la barre d'actions de la fiche n'a que deux boutons (« Modifier » et « Rapport interne (PDF) »
-// pour le conducteur titulaire) ou un seul (« Rapport interne (PDF) » pour le directeur), sans « Rapport client (PDF) »
+// pour le conducteur titulaire) ou un seul (« Rapport interne (PDF) » pour le commercial du chantier ; c'était le
+// directeur jusqu'au lot « Directeur aligné sur l'administration », qui lui donne les écrans de l'administration), sans « Rapport client (PDF) »
 // ni « Envoyer » (lot 6a-4e, réservé à l'administration). Elle reste dans le flux, au-dessus du titre, à toute largeur
 // (contrôle de cohérence de #397, B1) : à chaque largeur, ses boutons sont tous visibles dans l'écran, et ni coupés ni
 // posés sur le titre. Issue #398, T1, sous sa forme revue après B1 de #397 (commentaire du 31-10-2026), versée par le
@@ -319,11 +320,12 @@ test('fiche chantier hors administration, de 375 à 1 536 px : boutons exacts, s
   await envoyer('post', `/devis/${devis.id}/signature`, { signataire: 'Client E2E', confirme: true });
   const chantier = await envoyer('post', `/devis/${devis.id}/convertir`, { cible: 'CHANTIER' }) as { id: string; nom: string };
   const conducteur = await envoyer('post', '/users', { email: `fiche.hors.admin.conducteur.${suffixe}@iris.test`, name: `Conducteur fiche ${suffixe}`, role: 'CONDUCTEUR_TRAVAUX' }) as { id: string; role: string };
-  const directeur = await envoyer('post', '/users', { email: `fiche.hors.admin.directeur.${suffixe}@iris.test`, name: `Directeur fiche ${suffixe}`, role: 'DIRECTEUR' }) as { id: string; role: string };
+  const commercial = await envoyer('post', '/users', { email: `fiche.hors.admin.commercial.${suffixe}@iris.test`, name: `Commercial fiche ${suffixe}`, role: 'COMMERCIAL' }) as { id: string; role: string };
   await envoyer('patch', `/chantiers/${chantier.id}`, { responsableId: conducteur.id });
+  await envoyer('patch', `/chantiers/${chantier.id}/commercial`, { commercialId: commercial.id });
   const comptes: Array<[{ id: string; role: string }, string[]]> = [
     [conducteur, ['Modifier', 'Rapport interne (PDF)']],
-    [directeur, ['Rapport interne (PDF)']],
+    [commercial, ['Rapport interne (PDF)']],
   ];
   for (const [compte, boutons] of comptes) {
     await dansUnePageNeuve(browser, jetonPour(compte.id), JSON.stringify({ ...compte, permissions: [] }), async (page) => {

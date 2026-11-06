@@ -2,8 +2,9 @@ import { AvisSansPlanCommercial } from './AvisSansPlanCommercial';
 import { EditeurBareme } from './EditeurBareme';
 import { ReglageTempsPasse } from './ReglageTempsPasse';
 
-export function AdminMarges({ isSuper, parametres, setParametres, remuneration, setRemuneration, erreurRemuneration, messageRemuneration, enregistrerRemuneration, handleParamsSubmit }: {
+export function AdminMarges({ isSuper, estDirecteur, parametres, setParametres, remuneration, setRemuneration, erreurRemuneration, messageRemuneration, enregistrerRemuneration, handleParamsSubmit }: {
   isSuper: boolean;
+  estDirecteur: boolean;
   parametres: any;
   setParametres: React.Dispatch<React.SetStateAction<any>>;
   remuneration: any;
@@ -82,7 +83,7 @@ export function AdminMarges({ isSuper, parametres, setParametres, remuneration, 
                 <legend className="text-sm font-bold text-gray-700 px-1">Qui suit la rentabilité des chantiers&nbsp;?</legend>
                 <p className="text-xs text-gray-500 m-0">
                   Montant vendu global, marge du jour, marge estimée, alertes « en perte » ou « marge faible » et
-                  facturation de la fiche. Les administrateurs les voient toujours. Les budgets par poste (matériel,
+                  facturation de la fiche. L’administrateur et le super administrateur les voient toujours. Les budgets par poste (matériel,
                   main-d’œuvre, heures) restent affichés pour suivre les dépassements : ils permettent d’en déduire le vendu,
                   donc la marge du jour. Exception : les techniciens ne voient aucun montant, ni les alertes de dépassement.
                 </p>
@@ -94,10 +95,15 @@ export function AdminMarges({ isSuper, parametres, setParametres, remuneration, 
                   <input type="checkbox" name="rentabiliteHierarchie" defaultChecked={parametres?.rentabiliteHierarchie ?? true} className="w-4 h-4" />
                   <span className="text-sm text-gray-700">Ses responsables hiérarchiques, à tous les niveaux</span>
                 </label>
-                <label className="flex items-center gap-2 cursor-pointer w-fit">
-                  <input type="checkbox" name="rentabiliteDirecteurs" defaultChecked={parametres?.rentabiliteDirecteurs ?? true} className="w-4 h-4" />
+                {/* Un directeur ne règle pas sa propre restriction (refus du serveur) : la case lui est
+                    montrée sans pouvoir la changer, et n'est pas envoyée (handleParamsSubmit). */}
+                <label className={estDirecteur ? 'flex items-center gap-2 w-fit' : 'flex items-center gap-2 cursor-pointer w-fit'}>
+                  <input type="checkbox" name="rentabiliteDirecteurs" defaultChecked={parametres?.rentabiliteDirecteurs ?? true} disabled={estDirecteur} className="w-4 h-4" />
                   <span className="text-sm text-gray-700">Les directeurs (tous les chantiers)</span>
                 </label>
+                {estDirecteur && (
+                  <p className="text-xs text-gray-500 m-0">Cette case est réglée par l’administrateur ou le super administrateur.</p>
+                )}
                 <p className="text-xs text-gray-500 m-0">
                   La chaîne hiérarchique se règle dans l’onglet « Utilisateurs », compte par compte.
                 </p>

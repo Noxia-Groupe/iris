@@ -32,15 +32,18 @@ import Comptabilite from './pages/Comptabilite';
 import MentionsLegales from './pages/MentionsLegales';
 import PreteAFacturer from './pages/PreteAFacturer';
 import { ErrorBoundary } from './ErrorBoundary';
-import { useCurrentUser, peutAccederAuxDevis, peutConsulterPlanning, peutOuvrirAdministration, ROLES_ANNUAIRE, ROLE_ADMIN, ROLE_COMMERCIAL, ROLE_CONDUCTEUR, ROLE_RESPONSABLE, ROLE_SUPERADMIN, ROLE_TECHNICIEN } from './roles';
+import { useCurrentUser, peutAccederAuxDevis, peutConsulterPlanning, peutOuvrirAdministration, ROLES_ANNUAIRE, ROLE_COMMERCIAL, ROLE_CONDUCTEUR, ROLE_RESPONSABLE, ROLE_SUPERADMIN, ROLE_TECHNICIEN, TYPES_ADMINISTRATION } from './roles';
 import { useModules } from './modules';
 import { CompanyTimezoneProvider } from './companyTimezone';
 
-// Rôles autorisés sur les écrans d'administration : un SUPERADMIN a tous les droits d'un
-// ADMIN, il doit donc figurer partout où l'ADMIN était jusqu'ici seul admis.
-const ROLES_ADMIN = [ROLE_SUPERADMIN, ROLE_ADMIN];
-const ROLES_INTERVENTIONS = [ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_CONDUCTEUR, ROLE_RESPONSABLE, ROLE_TECHNICIEN];
-const ROLES_TRAVAUX = [ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_CONDUCTEUR, ROLE_RESPONSABLE];
+// Rôles autorisés sur les écrans d'administration : les types qui ont les droits de
+// l'administration (TYPES_ADMINISTRATION : ADMIN, SUPERADMIN et DIRECTEUR), même liste que
+// isAdminRole et que le serveur. Les autres listes partent d'elle, sans citer ces types un à un.
+const ROLES_ADMIN = [...TYPES_ADMINISTRATION];
+const ROLES_INTERVENTIONS = [...TYPES_ADMINISTRATION, ROLE_CONDUCTEUR, ROLE_RESPONSABLE, ROLE_TECHNICIEN];
+const ROLES_TRAVAUX = [...TYPES_ADMINISTRATION, ROLE_CONDUCTEUR, ROLE_RESPONSABLE];
+// Même règle que peutVoirStatistiques (menu) : l'administration, le responsable et le conducteur.
+const ROLES_STATISTIQUES = [...TYPES_ADMINISTRATION, ROLE_RESPONSABLE, ROLE_CONDUCTEUR];
 
 const PrivateRoute = ({ children, requiredRoles, planning, administration }: { children: JSX.Element, requiredRoles?: string[], planning?: boolean, administration?: boolean }) => {
   const token = localStorage.getItem('token');
@@ -251,7 +254,7 @@ function App() {
         } />
 
         <Route path="/statistiques" element={
-          <PrivateRoute requiredRoles={[ROLE_SUPERADMIN, ROLE_ADMIN, ROLE_RESPONSABLE, ROLE_CONDUCTEUR]}>
+          <PrivateRoute requiredRoles={ROLES_STATISTIQUES}>
             <Statistiques />
           </PrivateRoute>
         } />

@@ -180,8 +180,11 @@ export function enregistrerRoutesStatistiques(app: Express): void {
         agg.depensesTotal = sommeExacte(agg.depensesTotal, m.totalDepenses);
         // CA et marge : l'administration les voit toujours. Un responsable, comme sur la liste et
         // la fiche : le CA (le vendu) sur les chantiers dont la société le laisse destinataire (cf.
-        // voitRentabilite), la marge en plus seulement si la marge commerciale est active.
-        if (isAdmin || voitRentabilite(req, c, params)) {
+        // voitRentabilite), la marge en plus seulement si la marge commerciale est active. Le
+        // directeur, qui a les droits de l'administration, ne voit ce CA que si la société le laisse
+        // destinataire (réponse de Nelson du 06-11-2026, « Chantiers seulement ») : voitRentabilite
+        // seul en décide, et rend toujours vrai pour l'administration.
+        if (voitRentabilite(req, c, params)) {
           agg.caVisible = true;
           agg.caTotal = sommeExacte(agg.caTotal, c.budgetGlobalVendu);
           if (isAdmin || params.margeCommercialeActive) {
