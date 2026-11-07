@@ -46,8 +46,9 @@ export function isSuperAdminRole(role: string | undefined | null): boolean {
   return role === ROLE_SUPERADMIN;
 }
 
-// Capacité « lit toutes les affaires » (liste, fiche, journal des saisies, historique client, tableau de bord) :
-// l'administration, et l'assistante technique, qui travaille sur toute la société. Ce que la fiche en montre
+// Capacité « lit toutes les affaires » (liste, fiche, journal des saisies, journaux des achats et des heures,
+// historique client, tableau de bord) : l'administration, et l'assistante technique, qui travaille sur toute
+// la société. Ce que la fiche en montre
 // (rentabilité, coût prévu, taux et coût de main-d'œuvre) reste décidé à part (voitRentabilite,
 // voitCoutPrevuParPrixAchat, voitCoutMainOeuvre), et cette lecture n'ouvre aucune écriture.
 export function litToutesLesAffaires(role: string | undefined | null): boolean {

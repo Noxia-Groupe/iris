@@ -1,5 +1,5 @@
 import express from 'express';
-import { ROLE_TECHNICIEN, ROLE_RESPONSABLE, ROLE_DIRECTEUR, isAdminRole, isSuperAdminRole } from '../../droits/roles';
+import { ROLE_ASSISTANTE_TECHNIQUE, ROLE_TECHNICIEN, ROLE_RESPONSABLE, ROLE_DIRECTEUR, isAdminRole, isSuperAdminRole } from '../../droits/roles';
 import { requirePermission } from '../../droits/permissions';
 import { voitMontantsChantier, voitPrixAchatDevis, sansMontantsSaisie, sansTauxHoraire } from '../../droits/visibilite';
 import type { AuthRequest } from '../../http/auth';
@@ -124,7 +124,9 @@ export const REFUS_COMMERCIAL = { technicien: REFUS_TECHNICIEN_COMMERCIAL, annul
 export function peutCloturerChantier(user: AuthRequest['user'], chantier: { responsableId: string | null; responsableRole?: string | null }): boolean {
   if (!user) return false;
   if (isAdminRole(user.role)) return true;
-  if (user.role === 'COMMERCIAL' || user.role === ROLE_TECHNICIEN) return false;
+  // L'assistante technique ne modifie aucune affaire, même titulaire (lot « Assistante technique », première PR ; cf.
+  // refuserAssistanteTechnique, chantiers/routes.ts) : la clôture ne lui est pas proposée.
+  if (user.role === 'COMMERCIAL' || user.role === ROLE_TECHNICIEN || user.role === ROLE_ASSISTANTE_TECHNIQUE) return false;
   if (chantier.responsableId === user.id) return true;
   return user.role === ROLE_RESPONSABLE && !!chantier.responsableId
     && chantier.responsableRole === ROLE_TECHNICIEN && user.equipeIds.includes(chantier.responsableId);

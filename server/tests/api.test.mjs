@@ -27686,6 +27686,59 @@ if (!TEST_DATABASE_URL) {
       for (const champ of ['caTotal', 'margeTotal', 'margePct', 'commissionCommercialeTotal', 'commissionTotal', 'nbTerminesNonEncaisses']) assert.equal(champ in tableauAt, false, champ);
     });
 
+    // Audits d'AT-1 : C1 de l'auditeur-montants (bloquante) et T1 de l'auditeur-droits-securite, fusionnés (même affaire, toutes
+    // leurs assertions). Une assistante technique titulaire d'une affaire : l'écran choisit le titulaire parmi les conducteurs,
+    // mais un conducteur passé assistante technique garde ses affaires (refusTitulaire admet tout compte actif ; changement de
+    // type testé plus haut). Réglages du bloc : rentabilité ouverte au conducteur titulaire. Lecture écartée : sur ses propres
+    // affaires, elle suivrait le réglage du conducteur titulaire (« comme le conducteur », mutant M03/M22 : AT ajoutée à la
+    // branche rentabiliteConducteur de voitRentabilite) ; réponse 2 de Nelson du 06-11-2026 (« Décochée (Recommandé) ») : ni
+    // vendu, ni marge, ni estimation, ni coût prévu, jusqu'au réglage propre d'AT-2. Même compte, même affaire, seul le type
+    // change. Valeurs distinctes : vendu 1 234,57 €, budgets par poste 321,09 € et 456,78 € (somme 777,87 €), coût prévu
+    // 87,65 €, achat 23,45 € : marge du jour 1 211,12 € lue par le conducteur (lectures écartées : 1 234,57 € sans l'achat,
+    // 456,78 € ou 777,87 € à partir des budgets). Aucune écriture de l'affaire ne lui est ouverte (refuserAssistanteTechnique).
+    // Témoins : le même compte, conducteur titulaire, lit vendu, coût prévu, marge et facturation ; puis un autre conducteur,
+    // devenu titulaire de la même affaire, lit le vendu.
+    test('affaire dont elle est titulaire (conducteur passé assistante technique) : ni vendu, ni marge, ni estimation, ni coût prévu, ni facturation, malgré la rentabilité ouverte au conducteur titulaire ; budgets par poste et matériel gardés ; aucune écriture de l’affaire (403) ; le conducteur titulaire, témoin, lit le vendu', async () => {
+      const compte = await prisma.user.create({ data: { email: `at1.titulaire.${suffixe}@iris.test`, name: 'TEST AT-1 titulaire passée assistante technique', role: 'CONDUCTEUR_TRAVAUX' } });
+      const auth = { Authorization: `Bearer ${jwt.sign({ id: compte.id }, process.env.JWT_SECRET)}` };
+      const affaire = await chantierDe('titulaire', compte.id, { budgetGlobalVendu: 1234.57, budgetMaterielVendu: 321.09, budgetMainOeuvreVendu: 456.78, heuresVendues: 12, coutMaterielPrevu: 87.65 });
+      const achat = await envoyer('post', '/api/achats', sa, { chantierId: affaire.id, categorieId: categorie.id, fournisseurId: fournisseur.id, date: await aujourdhui(), description: 'TEST AT-1 achat de la titulaire', montantHT: 23.45 });
+      assert.equal(achat.status, 200, JSON.stringify(achat.body));
+      const lecture = async (enTete = auth) => {
+        const fiche = await lire(`/api/chantiers/${affaire.id}`, enTete);
+        assert.equal(fiche.status, 200, JSON.stringify(fiche.body));
+        const liste = await lire('/api/chantiers', enTete);
+        assert.equal(liste.status, 200, JSON.stringify(liste.body));
+        return [fiche.body, liste.body.find((c) => c.id === affaire.id)];
+      };
+      // Témoin : conducteur titulaire, il lit la rentabilité et le coût prévu (réglage du bloc).
+      const [ficheCt, ligneCt] = await lecture();
+      assert.deepEqual([ficheCt.budgetGlobalVendu, ficheCt.coutMaterielPrevu, ficheCt.metrics.margeBrute, 'facturation' in ficheCt, ligneCt.budgetGlobalVendu], [1234.57, 87.65, 1211.12, true, 1234.57]);
+      // Le même compte passé assistante technique par l'administration.
+      const passage = await envoyer('patch', `/api/users/${compte.id}/role`, jeton('admin'), { role: 'ASSISTANTE_TECHNIQUE' });
+      assert.equal(passage.status, 200, JSON.stringify(passage.body));
+      const [fiche, ligne] = await lecture();
+      for (const [ou, c] of [['fiche', fiche], ['liste', ligne]]) {
+        assert.deepEqual([c.budgetGlobalVendu, c.coutMaterielPrevu], [null, null], ou);
+        for (const champ of ['margeBrute', 'margeCommerciale', 'margePct', 'margeEstimee', 'margeEstimeePct', 'estimation', 'moReel', 'totalDepenses']) {
+          assert.equal(c.metrics[champ] ?? null, null, `${ou} : metrics.${champ}`);
+        }
+        assert.deepEqual([c.budgetMaterielVendu, c.budgetMainOeuvreVendu, c.metrics.materielReel], [321.09, 456.78, 23.45], ou);
+      }
+      assert.equal('facturation' in fiche, false);
+      // Aucune écriture de son affaire : fiche, statut et commercial refusés (403, message exact), rien n'est écrit.
+      const avant = await empreinte();
+      for (const [chemin, corps] of [[`/api/chantiers/${affaire.id}`, { nom: `TEST AT-1 titulaire renommé ${suffixe}` }], [`/api/chantiers/${affaire.id}/statut`, { statut: 'TERMINE' }], [`/api/chantiers/${affaire.id}/commercial`, { commercialId: null }]]) {
+        const res = await envoyer('patch', chemin, auth, corps);
+        assert.deepEqual([res.status, res.body.error], [403, REFUS_AFFAIRE], chemin);
+      }
+      assert.equal(await empreinte(), avant, 'aucune écriture');
+      // Témoin : un autre conducteur, devenu titulaire de la même affaire, lit le vendu.
+      await prisma.chantier.update({ where: { id: affaire.id }, data: { responsableId: comptes.conducteur.id } });
+      const [ficheTemoin] = await lecture(jeton('conducteur'));
+      assert.equal(ficheTemoin.budgetGlobalVendu, 1234.57, 'témoin : le conducteur titulaire lit le vendu');
+    });
+
     // Cadrage, C6 et « Écriture du matériel SAV par elle » (réponse 7 du 06-11-2026, « Oui, comme le conducteur ») : deux
     // curatives jumelles hors contrat, sans devis ni chantier, créées par le conducteur, aux mêmes heures du technicien
     // (1,5 h à 45,50 € de prix de vente, soit 68,25 €, et 30,00 € de coût, soit 45,00 €). Sur la première, l'assistante
@@ -27808,6 +27861,27 @@ if (!TEST_DATABASE_URL) {
           assert.equal(parAdmin.status, 200, JSON.stringify(parAdmin.body));
         }
       }
+    });
+
+    // Audit des montants d'AT-1 (auditeur-montants, R1, bloquante) : la clôture d'une affaire, qui la fait compter, une fois
+    // encaissée, dans le CA et la marge validés de son commercial, lui est refusée même titulaire (refuserAssistanteTechnique) ;
+    // le serveur ne la lui propose donc pas (peutCloturer, qui fait afficher le bouton « Clôturer » de la liste des chantiers ;
+    // peutCloturerChantier exclut l'assistante technique, comme le commercial et le technicien). Le titulaire se choisit parmi
+    // les conducteurs, mais un conducteur passé assistante technique garde ses affaires. Témoin : le même compte, conducteur
+    // titulaire, se la voit proposer.
+    test('affaire dont elle est titulaire (conducteur passé assistante technique) : la clôture ne lui est pas proposée (peutCloturer), et lui est refusée sans écriture', async () => {
+      const compte = await prisma.user.create({ data: { email: `at1.cloture.${suffixe}@iris.test`, name: 'TEST AT-1 titulaire, clôture', role: 'CONDUCTEUR_TRAVAUX' } });
+      const auth = { Authorization: `Bearer ${jwt.sign({ id: compte.id }, process.env.JWT_SECRET)}` };
+      const affaire = await chantierDe('clôture de la titulaire', compte.id, { budgetGlobalVendu: 654.32, budgetMaterielVendu: 123.45, budgetMainOeuvreVendu: 234.56 });
+      const proposee = async () => [(await lire(`/api/chantiers/${affaire.id}`, auth)).body.peutCloturer, (await lire('/api/chantiers', auth)).body.find((c) => c.id === affaire.id)?.peutCloturer];
+      assert.deepEqual(await proposee(), [true, true], 'témoin : conducteur titulaire');
+      assert.equal((await envoyer('patch', `/api/users/${compte.id}/role`, jeton('admin'), { role: 'ASSISTANTE_TECHNIQUE' })).status, 200);
+      assert.deepEqual(await proposee(), [false, false], 'assistante technique titulaire');
+      const avant = await empreinte();
+      const cloture = await envoyer('patch', `/api/chantiers/${affaire.id}/statut`, auth, { statut: 'TERMINE' });
+      assert.deepEqual([cloture.status, cloture.body.error], [403, REFUS_AFFAIRE]);
+      assert.equal(await empreinte(), avant, 'aucune écriture');
+      assert.equal((await prisma.chantier.findUniqueOrThrow({ where: { id: affaire.id } })).statut, 'EN_COURS');
     });
   });
 }
