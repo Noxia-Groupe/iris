@@ -13,7 +13,8 @@ export const ROLE_COMMERCIAL = 'COMMERCIAL';
 export const ROLE_ASSISTANTE_COMMERCIALE = 'ASSISTANTE_COMMERCIALE';
 /**
  * Assistante technique : la partie technique de toute la société (SAV, planning, suivi, chantiers en
- * lecture), sans les droits de l'administration (décisions de Nelson du 24-10-2026 et du 06-11-2026).
+ * lecture ; devis, clients et contrats depuis AT-2a), sans les droits de l'administration (décisions de
+ * Nelson du 24-10-2026 et du 06-11-2026) : ses capacités sont ajoutées une à une aux aides qui les décident.
  * Distincte de l'assistante commerciale, qui reste sans planning. Même type que ROLE_ASSISTANTE_TECHNIQUE
  * côté serveur.
  */
@@ -164,7 +165,8 @@ export function peutConsulterPlanning(role?: string | null): boolean {
 /**
  * Administration : complète pour les administrateurs, réduite aux référentiels des achats
  * (fournisseurs, catégories) pour le conducteur, le responsable et l'assistante technique, qui saisit le
- * matériel des interventions SAV, chacun lié à un fournisseur. Le technicien n'y a plus rien à faire depuis le
+ * matériel des interventions SAV, chacun lié à un fournisseur ; l'assistante technique y ouvre aussi le
+ * chantier d'une affaire (onglet Chantiers, cf. gereLesChantiersEnCours). Le technicien n'y a plus rien à faire depuis le
  * lot pilote 3, qui lui retire ces écritures (choix par défaut), ni le directeur commercial,
  * l'assistante commerciale et le comptable depuis #179 ; le serveur les leur refuse aussi. Un rôle
  * absent ('', null ou undefined) ne l'ouvre pas non plus (#206, choix par défaut, à confirmer).
@@ -209,6 +211,62 @@ export function estEncadrementSav(role?: string | null): boolean {
  */
 export function estEncadrementSuivi(role?: string | null): boolean {
   return estEncadrementSav(role) || role === ROLE_RESPONSABLE;
+}
+
+/**
+ * Capacité « lit toutes les affaires » (liste, fiche, journaux, historique client) : l'administration et
+ * l'assistante technique, qui travaille sur toute la société. Ce que la fiche en montre (rentabilité, coût
+ * prévu, coût de main-d'œuvre) reste décidé à part, et cette lecture n'ouvre aucune écriture. Même règle que
+ * litToutesLesAffaires côté serveur.
+ */
+export function litToutesLesAffaires(role?: string | null): boolean {
+  return isAdminRole(role) || role === ROLE_ASSISTANTE_TECHNIQUE;
+}
+
+/**
+ * Capacités de la gestion « comme l'administration » ouvertes à l'assistante technique par la deuxième PR de
+ * son lot (AT-2a ; réponses de Nelson du 06-11-2026, 3, 4, 5, 8 et 9). Chacune est le miroir exact d'une aide
+ * du serveur (server/src/droits/roles.ts), nommée à sa suite ; ce qui reste à l'administration garde isAdminRole.
+ *
+ * Gestion des clients : écritures de la fiche, des contacts et des sites, désactivation, et lecture du parc
+ * installé. L'écriture du parc et le catalogue restent à l'administration. Même règle que gereLesClients
+ * côté serveur.
+ */
+export function gereLesClients(role?: string | null): boolean {
+  return isAdminRole(role) || role === ROLE_ASSISTANTE_TECHNIQUE;
+}
+
+/**
+ * Gestion des contrats de maintenance (liste, statut, visites, passage manuel de la génération, PDF, envois,
+ * journal) et conversion d'un devis en contrat. La création hors devis, la couverture et le réglage de
+ * l'anticipation restent à l'administration. Même règle que gereLesContrats côté serveur.
+ */
+export function gereLesContrats(role?: string | null): boolean {
+  return isAdminRole(role) || role === ROLE_ASSISTANTE_TECHNIQUE;
+}
+
+/**
+ * Écran des contrats de maintenance : l'administration et l'assistante technique, même liste pour le menu
+ * et la route /contrats-maintenance (cf. gereLesContrats).
+ */
+export const ROLES_CONTRATS = [...TYPES_ADMINISTRATION, ROLE_ASSISTANTE_TECHNIQUE];
+
+/**
+ * Prix d'achat prévu des lignes de devis (lecture et écriture) et, en lecture, celui des fiches du catalogue
+ * et du parc : l'administration et l'assistante technique (réponses 4 et 8 : « Prix d'achat oui, coûts
+ * non »), jamais le taux horaire ni le coût de main-d'œuvre. Miroir de litEtEcritPrixAchatDevis côté serveur.
+ */
+export function voitPrixAchatDevis(role?: string | null): boolean {
+  return isAdminRole(role) || role === ROLE_ASSISTANTE_TECHNIQUE;
+}
+
+/**
+ * Chantiers en cours : ouverture d'un chantier avec ses attributions (titulaire, commercial, types, date de
+ * début ; réponse 5), depuis l'onglet Administration > Chantiers. La clôture, la réouverture et
+ * l'encaissement restent à l'administration. Même règle que gereLesChantiersEnCours côté serveur.
+ */
+export function gereLesChantiersEnCours(role?: string | null): boolean {
+  return isAdminRole(role) || role === ROLE_ASSISTANTE_TECHNIQUE;
 }
 
 /** Accès interface aux devis ; le serveur applique toujours la permission réelle. */

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Building2, Plus, Search } from 'lucide-react';
 import { apiFetch } from '../api';
-import { isAdminRole, useCurrentUser } from '../roles';
+import { gereLesClients, useCurrentUser } from '../roles';
 import { LIMITE_CLIENTS } from '../components/SelecteurClient';
 import { ChampsIdentiteClient, type IdentiteClientSaisie } from '../components/IdentiteClient';
 
@@ -18,8 +18,9 @@ interface ClientResume {
 
 export default function Clients() {
   const navigate = useNavigate();
-  // Seule l'administration crée une fiche ; le technicien et le conducteur consultent l'annuaire.
-  const modifiable = isAdminRole(useCurrentUser()?.role);
+  // L'administration et l'assistante technique créent une fiche (cf. gereLesClients) ; le technicien et le
+  // conducteur consultent l'annuaire.
+  const modifiable = gereLesClients(useCurrentUser()?.role);
   const [clients, setClients] = useState<ClientResume[]>([]);
   const [query, setQuery] = useState('');
   const [identite, setIdentite] = useState<IdentiteClientSaisie>({ raisonSociale: '', siren: '', sansSiret: false });

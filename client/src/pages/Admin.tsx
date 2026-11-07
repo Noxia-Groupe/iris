@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { apiFetch } from '../api';
 import { Link } from 'react-router-dom';
-import { getCurrentUser, isAdminRole, isSuperAdminRole, ROLE_DIRECTEUR, roleLabel, useCurrentRole } from '../roles';
+import { gereLesChantiersEnCours, getCurrentUser, isAdminRole, isSuperAdminRole, ROLE_DIRECTEUR, roleLabel, useCurrentRole } from '../roles';
 import { refreshModules } from '../modules';
 import { useSociete } from '../companyTimezoneContext';
 import OuvrirChantierAffaire from '../components/OuvrirChantierAffaire';
@@ -12,10 +12,17 @@ import { AdminUtilisateurs } from '../components/AdminUtilisateurs';
 import { AdminModules } from '../components/AdminModules';
 import type { MainOeuvreResumee } from '../lib/mainOeuvre';
 
-// Onglets ouverts aux CONDUCTEURS DE TRAVAUX : uniquement les référentiels du Journal des
-// Achats, qu'ils alimentent au quotidien. Tout le reste de l'Administration (chantiers,
-// intervenants et leurs taux, marges, comptes) reste réservé aux administrateurs.
-const ONGLETS_CONDUCTEUR = ['fournisseurs', 'categories'];
+// Onglets ouverts hors droits de l'administration, par capacité et non par type de compte :
+// - les référentiels du Journal des Achats, que le conducteur de travaux, le responsable et
+//   l'assistante technique alimentent au quotidien (cf. peutOuvrirAdministration) ;
+// - placé avant eux, l'onglet Chantiers (ouverture du chantier d'une affaire avec ses attributions), pour
+//   qui gère les chantiers en cours : l'assistante technique (réponse de Nelson du 06-11-2026, 5 ; cf.
+//   gereLesChantiersEnCours), et non le conducteur ni le responsable.
+// Tout le reste de l'Administration (intervenants et leurs taux, marges, comptes, journal) reste réservé
+// aux administrateurs.
+const ONGLETS_REFERENTIELS_ACHATS = ['fournisseurs', 'categories'];
+const ongletsHorsAdministration = (role: string): string[] =>
+  [...(gereLesChantiersEnCours(role) ? ['chantiers'] : []), ...ONGLETS_REFERENTIELS_ACHATS];
 
 const Admin = () => {
   // Le fuseau enregistré ici sert aux dates de toute l'application : il est relu aussitôt.
@@ -28,8 +35,12 @@ const Admin = () => {
   const isAdmin = isAdminRole(userRole);
   const isSuper = isSuperAdminRole(userRole);
   const estDirecteur = userRole === ROLE_DIRECTEUR;
+  // Onglet Chantiers : l'administration et l'assistante technique (cf. gereLesChantiersEnCours).
+  const ouvreChantiers = gereLesChantiersEnCours(userRole);
 
-  const [activeTab, setActiveTab] = useState(isAdmin ? 'chantiers' : 'fournisseurs');
+  // Premier onglet ouvert au compte : Chantiers pour l'administration et l'assistante technique,
+  // Fournisseurs pour les autres.
+  const [activeTab, setActiveTab] = useState(() => (isAdmin ? 'chantiers' : ongletsHorsAdministration(userRole)[0]));
   const [users, setUsers] = useState<any[]>([]);
   const [intervenants, setIntervenants] = useState<any[]>([]);
   // Mains d'œuvre du catalogue proposées au rattachement des intervenants (prix de vente).
@@ -64,11 +75,13 @@ const Admin = () => {
     fetchData();
   }, [activeTab]);
 
-  // Filet de sécurité : un conducteur de travaux ne peut jamais rester sur un onglet
-  // réservé aux administrateurs (rôle changé en cours de session, onglet mémorisé...).
+  // Filet de sécurité : un compte sans les droits de l'administration ne peut jamais rester sur un
+  // onglet qui ne lui est pas ouvert (rôle changé en cours de session, onglet mémorisé...).
   useEffect(() => {
-    if (!isAdmin && !ONGLETS_CONDUCTEUR.includes(activeTab)) setActiveTab(ONGLETS_CONDUCTEUR[0]);
-  }, [activeTab, isAdmin]);
+    if (isAdmin) return;
+    const ouverts = ongletsHorsAdministration(userRole);
+    if (!ouverts.includes(activeTab)) setActiveTab(ouverts[0]);
+  }, [activeTab, isAdmin, userRole]);
 
   const fetchData = async () => {
     // Onglets qui affichent une liste ; les autres (marges, utilisateurs, modules)
@@ -550,16 +563,12 @@ const Admin = () => {
         </div>
       </div>
 
-      {/* Hors administration (conducteur de travaux, responsable, assistante technique), seuls les
-          référentiels Fournisseurs et Catégories (cf. ONGLETS_CONDUCTEUR) ; les onglets réservés ne
-          sont même pas proposés. */}
+      {/* Hors administration, seuls les onglets ouverts par capacité (cf. ongletsHorsAdministration) :
+          Chantiers pour l'assistante technique, puis Fournisseurs et Catégories pour tous ; les onglets
+          réservés ne sont même pas proposés. */}
       <div className="flex gap-2 mb-4 overflow-x-auto pb-2">
-        {isAdmin && (
-          <>
-            <button className={`btn ${activeTab === 'chantiers' ? 'btn-primary' : 'bg-white'}`} onClick={() => setActiveTab('chantiers')}>Chantiers</button>
-            <button className={`btn ${activeTab === 'intervenants' ? 'btn-primary' : 'bg-white'}`} onClick={() => setActiveTab('intervenants')}>Intervenants</button>
-          </>
-        )}
+        {ouvreChantiers && <button className={`btn ${activeTab === 'chantiers' ? 'btn-primary' : 'bg-white'}`} onClick={() => setActiveTab('chantiers')}>Chantiers</button>}
+        {isAdmin && <button className={`btn ${activeTab === 'intervenants' ? 'btn-primary' : 'bg-white'}`} onClick={() => setActiveTab('intervenants')}>Intervenants</button>}
         <button className={`btn ${activeTab === 'fournisseurs' ? 'btn-primary' : 'bg-white'}`} onClick={() => setActiveTab('fournisseurs')}>Fournisseurs</button>
         <button className={`btn ${activeTab === 'categories' ? 'btn-primary' : 'bg-white'}`} onClick={() => setActiveTab('categories')}>Catégories</button>
         {isAdmin && (
@@ -583,15 +592,17 @@ const Admin = () => {
         <div role="alert" className="mb-4 p-4 bg-red-50 text-red-800 rounded text-sm">Cette liste n’a pas pu être chargée. Rechargez la page pour réessayer.</div>
       )}
 
+      {/* Bandeau hors administration : ce que le compte y fait, onglet Chantiers compris pour qui l'ouvre. */}
       {!isAdmin && (
         <div className="mb-4 p-4 bg-blue-50 text-blue-800 rounded text-sm">
-          Vous pouvez créer, modifier et supprimer les <strong>fournisseurs</strong> et les{' '}
+          Vous pouvez {ouvreChantiers && <>ouvrir le <strong>chantier d'une affaire</strong> à partir de son devis signé, avec son
+          responsable, son commercial, ses types et sa date de début, et </>}créer, modifier et supprimer les <strong>fournisseurs</strong> et les{' '}
           <strong>catégories d'achats</strong> utilisés dans le Journal des Achats ; les fournisseurs servent
           aussi au matériel des interventions SAV. Les autres réglages de l'application sont réservés à la Direction.
         </div>
       )}
 
-      {activeTab === 'chantiers' && isAdmin && (
+      {activeTab === 'chantiers' && ouvreChantiers && (
         <div className="card">
           <OuvrirChantierAffaire onOuvert={fetchData} />
 
@@ -625,7 +636,7 @@ const Admin = () => {
                 <div className="grid grid-cols-2 gap-2 mt-4 pt-4 border-t">
                   <div>
                     <div className="text-xs text-muted uppercase">Global Vendu</div>
-                    {/* Vendu nul (null) : non communiqué au directeur sans la rentabilité des chantiers (réponse de Nelson du 06-11-2026). */}
+                    {/* Vendu nul (null) : non communiqué au directeur ni à l'assistante technique sans la rentabilité des chantiers (réponse de Nelson du 06-11-2026). */}
                     <div className="font-bold">{c.budgetGlobalVendu == null ? '—' : `${c.budgetGlobalVendu.toLocaleString()} €`}</div>
                   </div>
                   <div>

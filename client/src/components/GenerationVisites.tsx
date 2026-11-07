@@ -7,8 +7,10 @@ import { formatCompanyDateTime, formatDateOnly } from '../lib/dateFormatting';
 import { bilanGeneration, pluriel } from '../lib/generationVisites';
 
 // Génération automatique des visites de maintenance (lot pilote 5) : réglage de l'anticipation,
-// dernier passage, contrats laissés de côté, erreurs, alerte et passage lancé à la main. Réservé à
-// l'administration, comme les contrats.
+// dernier passage, contrats laissés de côté, erreurs, alerte et passage lancé à la main. Ouverte à la
+// gestion des contrats (administration et assistante technique, réponse de Nelson du 06-11-2026, 9 :
+// « génération des visites » ; cf. gereLesContrats), comme les contrats ; le réglage de l'anticipation
+// reste à l'administration (PUT /api/parametres), comme le serveur.
 type ExecutionGeneration = {
   id: string; jour: string; declenchement: 'AUTOMATIQUE' | 'MANUEL'; auteurNom: string | null; anticipationJours: number;
   debut: string; fin: string | null; statut: 'EN_COURS' | 'REUSSIE' | 'ECHEC'; visitesCreees: number; echeancesAvancees: number;
@@ -34,8 +36,9 @@ function AlerteGeneration({ texte, lien }: { texte: string; lien?: boolean }) {
   </div>;
 }
 
-// Alerte seule, en tête de l'écran des interventions : l'administration la voit là où elle suit
-// la file à planifier. Rien ne s'affiche sans alerte ni si l'état ne se lit pas.
+// Alerte seule, en tête de l'écran des interventions : la gestion des contrats (administration et
+// assistante technique, choix par défaut, à confirmer) la voit là où elle suit la file à planifier. Rien ne
+// s'affiche sans alerte ni si l'état ne se lit pas.
 export function AlerteGenerationVisites() {
   const [alerte, setAlerte] = useState<string | null>(null);
   useEffect(() => {
@@ -46,7 +49,9 @@ export function AlerteGenerationVisites() {
   return alerte ? <AlerteGeneration texte={alerte} lien /> : null;
 }
 
-export function GenerationVisites({ onGeneration }: { onGeneration: () => void }) {
+// `regleAnticipation` : formulaire de l'anticipation et « Enregistrer » (administration) ; `lanceGeneration` :
+// « Lancer la génération maintenant » (gestion des contrats).
+export function GenerationVisites({ onGeneration, regleAnticipation, lanceGeneration }: { onGeneration: () => void; regleAnticipation: boolean; lanceGeneration: boolean }) {
   const fuseau = useCompanyTimezone();
   const [etat, setEtat] = useState<EtatGenerationVisites | null>(null);
   const [erreur, setErreur] = useState('');
@@ -99,6 +104,7 @@ export function GenerationVisites({ onGeneration }: { onGeneration: () => void }
   });
 
   const derniere = etat?.derniereExecution;
+  const boutonLancer = etat && lanceGeneration && <button type="button" className="btn btn-primary" disabled={enCours || etat.anticipationVisitesJours === null} onClick={lancer}>{enCours ? 'Génération…' : 'Lancer la génération maintenant'}</button>;
   return <section aria-labelledby="titre-generation-visites" className="rounded-xl border bg-white p-5 shadow-sm space-y-3 break-words">
     <h2 id="titre-generation-visites" className="flex items-center gap-2 font-semibold text-gray-900"><CalendarClock size={18} /> Génération automatique des visites</h2>
     <p className="text-sm text-gray-600">Chaque jour, le serveur crée l’intervention à planifier d’une échéance dès qu’elle tombe dans l’anticipation, et passe à l’échéance suivante quand la visite est terminée.</p>
@@ -106,13 +112,18 @@ export function GenerationVisites({ onGeneration }: { onGeneration: () => void }
     {erreur && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-red-700">{erreur}</div>}
     {succes && <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-700">{succes}</div>}
     {etat && !etat.minuteurActif && <p className="text-sm text-amber-700">La génération automatique est arrêtée sur ce serveur : seules les générations lancées ici s’exécutent.</p>}
-    {etat && <form key={String(etat.anticipationVisitesJours)} onSubmit={enregistrerAnticipation} className="flex flex-col gap-2 sm:flex-row sm:items-end">
+    {etat && regleAnticipation && <form key={String(etat.anticipationVisitesJours)} onSubmit={enregistrerAnticipation} className="flex flex-col gap-2 sm:flex-row sm:items-end">
       <label className="text-sm text-gray-700">Anticipation (jours avant l’échéance)
         <input name="anticipationVisitesJours" type="number" min="0" max="365" step="1" defaultValue={etat.anticipationVisitesJours ?? ''} className="form-input mt-1" placeholder="Vide : désactivée" />
       </label>
       <button type="submit" className="btn btn-secondary" disabled={enCours}>Enregistrer</button>
-      <button type="button" className="btn btn-primary" disabled={enCours || etat.anticipationVisitesJours === null} onClick={lancer}>{enCours ? 'Génération…' : 'Lancer la génération maintenant'}</button>
+      {boutonLancer}
     </form>}
+    {/* Hors administration : l'anticipation se lit sans se régler, et le passage se lance à la main. */}
+    {etat && !regleAnticipation && <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+      {etat.anticipationVisitesJours !== null && <p className="text-sm text-gray-700">Anticipation : {pluriel(etat.anticipationVisitesJours, 'jour', 'jours')} avant l’échéance, réglée par l’administration.</p>}
+      {boutonLancer}
+    </div>}
     {etat && etat.anticipationVisitesJours === null && <p className="text-sm text-gray-500">Génération automatique désactivée : les actions de chaque contrat restent disponibles.</p>}
     {derniere && <div className="text-sm text-gray-700 space-y-2">
       <p>
