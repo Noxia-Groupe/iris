@@ -963,8 +963,10 @@ if (!TEST_DATABASE_URL) {
         'main d’œuvre existante, corps ordinaire': [/^PUT \/api\/v1\/catalogue\/:family\/:id$/, /^défaut, corps prestation ordinaire$/, '403 « Une clé d’intégration ne crée, ne modifie, ne désactive ni ne réactive une main d’œuvre, et ne fait pas passer une prestation en main d’œuvre ou l’inverse : réservé à l’administration, en session. » inchangé', 'main-oeuvre-catalogue'],
         'main d’œuvre existante, désactivation': [/^DELETE \/api\/v1\/catalogue\/:family\/:id$/, /^défaut$/, '403 « Une clé d’intégration ne crée, ne modifie, ne désactive ni ne réactive une main d’œuvre, et ne fait pas passer une prestation en main d’œuvre ou l’inverse : réservé à l’administration, en session. » inchangé', 'main-oeuvre-catalogue'],
         'corps de main d’œuvre': [/^(POST|PUT) \/api\/v1\/catalogue\/:family(\/:id)?$/, /corps main d’œuvre$/, '403 « Une clé d’intégration ne crée, ne modifie, ne désactive ni ne réactive une main d’œuvre, et ne fait pas passer une prestation en main d’œuvre ou l’inverse : réservé à l’administration, en session. » inchangé'],
-        'champs d’ouverture du chantier': [/^POST \/api\/v1\/devis\/:id\/convertir$/, /cible=CHANTIER et /, '403 « Seule l’administration choisit le titulaire, le commercial, les types et la date de début à l’ouverture du chantier ; ils se modifient ensuite depuis sa fiche. » inchangé'],
-        'prix d’achat prévu': [/^(POST|PATCH) \/api\/v1\/devis(\/:id)?$/, /au prix d’achat prévu$/, '403 « Le prix d’achat prévu est réservé aux administrateurs. » inchangé'],
+        // Messages reformulés par AT-2a (réponses 4, 5 et 8 du 06-11-2026) : l'assistante technique fixe aussi ces choix et
+        // écrit aussi ce prix en session ; une clé reste refusée, quel que soit son scope.
+        'champs d’ouverture du chantier': [/^POST \/api\/v1\/devis\/:id\/convertir$/, /cible=CHANTIER et /, '403 « Seules l’administration et l’assistante technique choisissent le titulaire, le commercial, les types et la date de début à l’ouverture du chantier ; ils se modifient ensuite depuis sa fiche. » inchangé'],
+        'prix d’achat prévu': [/^(POST|PATCH) \/api\/v1\/devis(\/:id)?$/, /au prix d’achat prévu$/, '403 « Le prix d’achat prévu est réservé à l’administration et à l’assistante technique. » inchangé'],
       };
       for (const [quoi, [route, contexte, debut, cible]] of Object.entries(REFUS)) {
         const vises = cas.filter((c) => route.test(c.route) && contexte.test(c.contexte) && (!cible || c.cible === cible));

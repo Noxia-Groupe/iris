@@ -13,6 +13,8 @@ const api = `http://127.0.0.1:${process.env.E2E_API_PORT || '3001'}/api`;
 // Clients, Administration réduite à ses deux onglets ; ni Devis, ni journaux Travaux, ni Contrats, ni Factures, ni
 // Statistiques, Performances, Mes commerciaux ou Catalogue), crée une intervention, en saisit le matériel au format français
 // (date JJ-MM-AAAA, montant « 12,34 »), le voit cumulé au format français, puis la place au planning depuis la file.
+// PR AT-2a (réponses 3 et 9 du 06-11-2026) : Devis et Contrats de maintenance entrent à son menu, et l'onglet Chantiers à son
+// Administration ; leur parcours est celui de assistante-technique-devis-contrats.spec.ts.
 
 test('assistante technique : autorisée dans l’administration, elle a son menu, crée une intervention, en saisit le matériel au format français et la place au planning', async ({ connexion, request, session, creerClient }) => {
   test.slow();
@@ -55,19 +57,21 @@ test('assistante technique : autorisée dans l’administration, elle a son menu
   const menu = page.locator('#menu-principal');
   await expect(menu.getByRole('link', { name: 'Interventions SAV' })).toBeVisible();
   const entrees = await menu.locator('a').evaluateAll((liens) => liens.map((lien) => (lien.textContent || '').trim()));
-  expect(entrees).toEqual(['Tableau de bord', 'Liste des chantiers', 'Planning', 'Interventions SAV', 'Clients', 'Administration']);
-  for (const ferme of ['Devis', 'Journal des achats', 'Journal des heures', 'Contrats de maintenance', 'Factures', 'Statistiques', 'Performances', 'Mes commerciaux', 'Catalogue']) {
+  expect(entrees).toEqual(['Tableau de bord', 'Liste des chantiers', 'Devis', 'Planning', 'Interventions SAV', 'Contrats de maintenance', 'Clients', 'Administration']);
+  for (const ferme of ['Journal des achats', 'Journal des heures', 'Factures', 'Statistiques', 'Performances', 'Mes commerciaux', 'Catalogue']) {
     await expect(menu.getByRole('link', { name: ferme, exact: true }), ferme).toHaveCount(0);
   }
-  // Administration réduite à ses deux onglets, avec le texte qui nomme le matériel des interventions SAV.
+  // Administration réduite aux référentiels des achats, avec le texte qui nomme le matériel des interventions SAV, et, depuis
+  // AT-2a, l'onglet Chantiers (ouverture du chantier d'une affaire).
   await page.goto('/admin', { waitUntil: 'networkidle' });
   const principal = page.locator('main');
+  await expect(principal.getByRole('button', { name: 'Chantiers', exact: true })).toBeVisible();
   await expect(principal.getByRole('button', { name: 'Fournisseurs', exact: true })).toBeVisible();
   await expect(principal.getByRole('button', { name: 'Catégories', exact: true })).toBeVisible();
   await expect(principal.getByRole('button', { name: 'Utilisateurs', exact: true })).toHaveCount(0);
   await expect(principal).toContainText('les fournisseurs servent aussi au matériel des interventions SAV');
-  // Une route fermée la ramène à l'accueil.
-  await page.goto('/devis', { waitUntil: 'networkidle' });
+  // Une route fermée la ramène à l'accueil (les factures : AT-3).
+  await page.goto('/factures', { waitUntil: 'networkidle' });
   await expect.poll(() => new URL(page.url()).pathname).toBe('/');
 
   // 3. Nouvelle intervention, pour un client retrouvé par la recherche.

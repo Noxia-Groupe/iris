@@ -594,27 +594,29 @@ if (!TEST_DATABASE_URL) {
     });
 
     // Cadrage : « GET et POST /api/contrats-maintenance/:id/envois : administration seule (requireAdmin),
-    // comme toutes les routes des contrats ».
-    test('droits du contrat : administration seule, 403 pour tout autre type de compte même avec tous les droits, en lecture comme en enregistrement', async () => {
+    // comme toutes les routes des contrats ». Depuis AT-2a (réponses 3 et 9 du 06-11-2026), la gestion des contrats :
+    // l'administration et l'assistante technique (requireGestionContrats), avec le refus qui le dit.
+    test('droits du contrat : administration et assistante technique seules, 403 pour tout autre type de compte même avec tous les droits, en lecture comme en enregistrement', async () => {
       const s = suffixe();
       const client = await creerClient(`TEST Client contrat droits ${s}`);
       const contrat = await creerContrat(client.id, `TEST Contrat droits ${s}`);
       const refuses = [];
       // Le directeur n'en est plus : il a les droits de l'administration (lot « Directeur aligné sur l'administration »), et
       // le témoin « tous les droits » est désormais un responsable.
-      // L'assistante technique (lot AT-1) en est aussi : les contrats restent à l'administration jusqu'à AT-2.
-      for (const role of ['CONDUCTEUR_TRAVAUX', 'COMMERCIAL', 'ASSISTANTE_COMMERCIALE', 'ASSISTANTE_TECHNIQUE', 'TECHNICIEN', 'COMPTABLE', 'DIRECTEUR_COMMERCIAL', 'RESPONSABLE']) {
+      // L'assistante technique n'en est plus depuis AT-2a : elle lit et enregistre, plus bas.
+      for (const role of ['CONDUCTEUR_TRAVAUX', 'COMMERCIAL', 'ASSISTANTE_COMMERCIALE', 'TECHNICIEN', 'COMPTABLE', 'DIRECTEUR_COMMERCIAL', 'RESPONSABLE']) {
         refuses.push([role, await creerCompte(role, `contrat-${role.toLowerCase()}`, s)]);
       }
       refuses.push(['RESPONSABLE (tous les droits)', await creerCompte('RESPONSABLE', 'contrat-responsable-complet', s, { permissions: TOUS_LES_SCOPES, accesFinance: true })]);
       for (const [libelle, compte] of refuses) {
         const lu = await sansEcriture(() => lire(cheminContrat(contrat.id), parCompte(compte)), 403, `lecture, ${libelle}`);
-        assert.equal(lu.body.error, 'Accès réservé aux administrateurs', libelle);
+        assert.equal(lu.body.error, 'Accès réservé à l’administration et à l’assistante technique.', libelle);
         await sansEcriture(() => envoyer(cheminContrat(contrat.id), 'client@envoi-6a4d.test', parCompte(compte)), 403, `enregistrement, ${libelle}`);
       }
       const administrateur = await creerCompte('ADMIN', 'contrat-admin', s);
       const directeur = await creerCompte('DIRECTEUR', 'contrat-directeur', s);
-      for (const auth of [admin(), parCompte(administrateur), parCompte(directeur)]) {
+      const assistanteTechnique = await creerCompte('ASSISTANTE_TECHNIQUE', 'contrat-assistante-technique', s);
+      for (const auth of [admin(), parCompte(administrateur), parCompte(directeur), parCompte(assistanteTechnique)]) {
         await sansEcriture(() => lire(cheminContrat(contrat.id), auth), 200, 'lecture par l’administration');
         await enregistre(() => envoyer(cheminContrat(contrat.id), 'client@envoi-6a4d.test', auth), 'enregistrement par l’administration');
       }

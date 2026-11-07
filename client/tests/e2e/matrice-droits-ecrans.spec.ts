@@ -402,7 +402,13 @@ test.describe('Matrice des droits à l’écran (lot D1a-6)', () => {
   // affaires de toute la société lues sans écriture (fiche, statut, saisies), sans les filtres de rentabilité (réponse 2 de
   // Nelson du 06-11-2026, « Décochée »). Une redirection ou un bouton nouveau ne peut donc pas être adopté par « cp » sans être
   // vu ici.
-  test('assistante technique : ecrans-AT.txt est ecrans-CT.txt, sauf la liste fermée des écarts (menu sans Pilotage, journaux Travaux et statistiques fermés, affaires de toute la société en lecture seule, sans filtres de rentabilité)', () => {
+  // PR AT-2a (cadrage AT-2, v1 « AT-2a », « Écran », et v2, T2 du contrôle ; réponses 3, 5 et 9 du 06-11-2026) : la liste
+  // fermée s'étend aux devis et aux contrats, ouverts comme à l'administration, et à l'Administration, dont l'onglet Chantiers
+  // (ouverture du chantier d'une affaire) devient son onglet par défaut. Les lignes des devis sont celles d'AD, sans
+  // « Annuler » ni « Constater l’acompte », qui restent à l'administration ; l'onglet par défaut est celui d'AD sans les
+  // onglets réservés à l'administration. Le conducteur et le responsable ne reçoivent pas l'onglet Chantiers (témoins
+  // ci-dessous, et ecrans-CT.txt, ecrans-RESP.txt inchangés).
+  test('assistante technique : ecrans-AT.txt est ecrans-CT.txt, sauf la liste fermée des écarts (menu sans Pilotage, journaux Travaux et statistiques fermés, affaires de toute la société en lecture seule, sans filtres de rentabilité ; devis et contrats comme l’administration, sans acompte ni annulation ; onglet Chantiers par défaut)', () => {
     const parCle = (cle: string) => new Map(lireReference(`ecrans-${cle}.txt`).map((ligne) => {
       const champs = ligne.split(SEPARATEUR);
       expect(champs[0], ligne).toBe(cle);
@@ -410,14 +416,19 @@ test.describe('Matrice des droits à l’écran (lot D1a-6)', () => {
     }));
     const ct = parCle('CT');
     const at = parCle('AT');
+    const ad = parCle('AD');
     const cle = (...champs: string[]) => champs.join(SEPARATEUR);
     // Boutons retirés de la ligne du conducteur (toutes leurs occurrences), l'ordre des autres gardé.
+    // Une ligne « titre « … » ; boutons : … » ou « boutons : … » (ligne d'une liste, AT-2a).
     const sansBoutons = (noms: string[]) => (ligne: string) => {
-      const [avant, boutons] = ligne.split(' ; boutons : ');
-      const restants = boutons.split(', ').filter((nom) => !noms.includes(nom));
-      return `${avant} ; boutons : ${restants.join(', ') || 'aucun'}`;
+      const debut = ligne.indexOf('boutons : ');
+      const restants = ligne.slice(debut + 'boutons : '.length).split(', ').filter((nom) => !noms.includes(nom));
+      return `${ligne.slice(0, debut)}boutons : ${restants.join(', ') || 'aucun'}`;
     };
     const ECRITURES_AFFAIRE = ['Corriger ce pointage', 'Corriger cet achat', 'Modifier'];
+    // Onglets d'Administration réservés à l'administration (AT-2a : l'assistante technique n'y ouvre que Chantiers,
+    // Fournisseurs et Catégories).
+    const ONGLETS_ADMINISTRATION = ['Intervenants', 'Journal', 'Marges & Commissions', 'Utilisateurs'];
     const LECTURE_SEULE = 'boutons : Rapport interne (PDF), Retour au tableau de bord';
     const ECARTS: Record<string, (ligne: string) => string> = {
       [cle('menu', '—', 'défaut')]: (ligne) => ligne.replace('Interventions, Pilotage, Référentiels', 'Interventions, Référentiels').replace('type affiché : Conducteur de travaux', 'type affiché : Assistante technique'),
@@ -433,8 +444,21 @@ test.describe('Matrice des droits à l’écran (lot D1a-6)', () => {
       [cle('liste des chantiers', 'chantier-titulaire-dc', 'défaut')]: () => 'boutons : aucun',
       [cle('liste des chantiers', 'chantier-titulaire-tech', 'défaut')]: () => 'boutons : aucun',
       [cle('liste des chantiers', 'hors lignes', 'défaut')]: sansBoutons(['En perte', 'En perte#', 'Marge faible']),
+      // AT-2a : devis et contrats ouverts (menu et route), écran des devis d'AD ; Administration ouverte sur l'onglet Chantiers.
+      [cle('route /devis', '—', 'défaut')]: () => 'menu « Chantiers › Devis » ; accessible',
+      [cle('route /contrats-maintenance', '—', 'défaut')]: () => 'menu « Interventions › Contrats de maintenance » ; accessible',
+      [cle('devis', 'hors lignes', 'défaut')]: () => ad.get(cle('devis', 'hors lignes', 'défaut'))!,
+      [cle('administration', 'onglet par défaut', 'défaut')]: () => sansBoutons(ONGLETS_ADMINISTRATION)(ad.get(cle('administration', 'onglet par défaut', 'défaut'))!),
     };
-    expect([...at.keys()].sort(), 'mêmes écrans, cibles et contextes que CT').toEqual([...ct.keys()].sort());
+    // Lignes des devis, que le conducteur n'a pas (écran redirigé) : celles d'AD, sans l'acompte ni l'annulation.
+    const LIGNES_DEVIS: Record<string, string> = Object.fromEntries(['devis-brouillon', 'devis-signe'].map((cible) => [
+      cle('devis', cible, 'défaut'), sansBoutons(['Annuler', 'Constater l’acompte'])(ad.get(cle('devis', cible, 'défaut'))!),
+    ]));
+    expect([...at.keys()].sort(), 'mêmes écrans, cibles et contextes que CT, plus les lignes des devis').toEqual([...ct.keys(), ...Object.keys(LIGNES_DEVIS)].sort());
+    for (const [cleLigne, attendu] of Object.entries(LIGNES_DEVIS)) {
+      expect(attendu, `${cleLigne} : la ligne d’AD porte l’acompte ou l’annulation`).not.toBe(ad.get(cleLigne));
+      expect(at.get(cleLigne), cleLigne).toBe(attendu);
+    }
     const ecarts: string[] = [];
     for (const [cleLigne, ligneCt] of ct) {
       const attendu = ECARTS[cleLigne] ? ECARTS[cleLigne](ligneCt) : ligneCt;
@@ -447,7 +471,13 @@ test.describe('Matrice des droits à l’écran (lot D1a-6)', () => {
     for (const route of ['/interventions', '/planning', '/chantiers', '/clients', '/admin']) {
       expect(at.get(cle(`route ${route}`, '—', 'défaut')), route).toMatch(/^menu « .* » ; accessible$/);
     }
-    expect(at.get(cle('administration', 'onglet par défaut', 'défaut'))).toBe('titre « Administration & Paramétrage » ; boutons : Catégories, Enregistrer, Fournisseurs');
+    // T2 du contrôle d'AT-2a : l'onglet Chantiers, ouvert par défaut (formulaire « Ouvrir le chantier »), puis Fournisseurs et
+    // Catégories ; ni Utilisateurs, ni Intervenants, ni Marges, ni Journal. Le conducteur et le responsable gardent leurs deux
+    // onglets, Fournisseurs par défaut.
+    expect(at.get(cle('administration', 'onglet par défaut', 'défaut'))).toBe('titre « Administration & Paramétrage » ; boutons : Catégories, Chantiers, Fournisseurs, Ouvrir le chantier (désactivé)');
+    for (const autre of ['CT', 'RESP']) {
+      expect(parCle(autre).get(cle('administration', 'onglet par défaut', 'défaut')), autre).toBe('titre « Administration & Paramétrage » ; boutons : Catégories, Enregistrer, Fournisseurs');
+    }
     expect(at.get(cle('administration', 'fournisseur', 'défaut'))).toBe('boutons : Modifier, Supprimer');
     expect(at.get(cle('administration', 'catégorie', 'défaut'))).toBe('boutons : Modifier, Supprimer');
     expect(at.has(cle('administration › utilisateurs', 'compte CT', 'défaut')), 'pas d’onglet Utilisateurs').toBe(false);
@@ -456,8 +486,10 @@ test.describe('Matrice des droits à l’écran (lot D1a-6)', () => {
       expect(at.get(cle('fiche intervention', 'intervention-planifiee', 'défaut')), bouton).toContain(bouton);
     }
     expect(at.get(cle('fiche intervention', 'intervention-terminee', 'défaut'))).toContain('Marquer « à suivre »');
-    // Fermés : devis, factures, contrats, catalogue, performances, mes commerciaux, Société, API (redirigés vers l'accueil).
-    for (const route of ['/devis', '/factures', '/contrats-maintenance', '/catalogue', '/performances', '/commerciaux', '/societe', '/administration/api', '/prete-a-facturer', '/reglements']) {
+    // Fermés : factures, catalogue, performances, mes commerciaux, Société, API (redirigés vers l'accueil) ; les devis et les
+    // contrats s'ouvrent avec AT-2a.
+    for (const route of ['/devis', '/contrats-maintenance']) expect(at.get(cle(`route ${route}`, '—', 'défaut')), route).toMatch(/^menu « .* » ; accessible$/);
+    for (const route of ['/factures', '/catalogue', '/performances', '/commerciaux', '/societe', '/administration/api', '/prete-a-facturer', '/reglements']) {
       expect(at.get(cle(`route ${route}`, '—', 'défaut')), route).toBe('hors menu ; redirigée vers /');
     }
   });

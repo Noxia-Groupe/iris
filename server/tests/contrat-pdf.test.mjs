@@ -78,8 +78,10 @@ if (!TEST_DATABASE_URL) {
   const MOTIF_ANNULATION = 'TEST Motif confidentiel de l’annulation 6a4b';
   // Le directeur n'en est plus : il a les droits de l'administration (lot « Directeur aligné sur l'administration », décision
   // de Nelson du 24-10-2026, point 14).
-  // L'assistante technique (lot AT-1) y entre : les contrats restent à l'administration jusqu'à AT-2 (cadrage v2.1, « Fermé à AT-1 »).
-  const ROLES_NON_ADMINISTRATEURS = ['CONDUCTEUR_TRAVAUX', 'COMMERCIAL', 'ASSISTANTE_COMMERCIALE', 'ASSISTANTE_TECHNIQUE', 'TECHNICIEN', 'COMPTABLE', 'DIRECTEUR_COMMERCIAL', 'RESPONSABLE'];
+  // L'assistante technique en sort avec AT-2a (réponses 3 et 9 du 06-11-2026 : la gestion des contrats, PDF compris ; cf.
+  // requireGestionContrats) : elle imprime, plus bas ; les autres types reçoivent le refus de la gestion des contrats.
+  const ROLES_NON_ADMINISTRATEURS = ['CONDUCTEUR_TRAVAUX', 'COMMERCIAL', 'ASSISTANTE_COMMERCIALE', 'TECHNICIEN', 'COMPTABLE', 'DIRECTEUR_COMMERCIAL', 'RESPONSABLE'];
+  const REFUS_GESTION_CONTRATS = 'Accès réservé à l’administration et à l’assistante technique.';
   const TOUS_LES_SCOPES = ['clients:read', 'clients:write', 'catalogue:read', 'catalogue:write', 'equipements:read', 'equipements:write', 'devis:read', 'devis:write', 'company:read', 'chantiers:read', 'chantiers:write', 'chantiers:archive', 'finances:read'];
   const suffixe = `${Date.now()}`;
 
@@ -421,7 +423,7 @@ if (!TEST_DATABASE_URL) {
 
     // Cadrage, « Route » : réservée à l'administration en session (requireAdmin), ligne `contrats.*` du
     // modèle de droits cible.
-    test('droits : 403 pour chaque type de compte non administrateur, même avec tous les droits ; 401 sans session ; l’administrateur imprime', async () => {
+    test('droits : 403 pour chaque type de compte hors administration et assistante technique, même avec tous les droits ; 401 sans session ; l’administration et l’assistante technique impriment', async () => {
       const comptes = [];
       for (const role of ROLES_NON_ADMINISTRATEURS) {
         const email = `contrat-pdf.${role.toLowerCase()}@iris.test`;
@@ -434,7 +436,7 @@ if (!TEST_DATABASE_URL) {
       for (const [libelle, compte] of comptes) {
         for (const contrat of [f.actif, f.annule]) {
           const res = await refusSansEcriture(() => request(app).get(cheminPdf(contrat.id)).set(jetonDe(compte.id)), 403, `${libelle}, contrat ${contrat.titre}`);
-          assert.equal(res.body.error, 'Accès réservé aux administrateurs', libelle);
+          assert.equal(res.body.error, REFUS_GESTION_CONTRATS, libelle);
         }
       }
       await refusSansEcriture(() => request(app).get(cheminPdf(f.actif.id)), 401, 'sans session');
@@ -445,6 +447,10 @@ if (!TEST_DATABASE_URL) {
       const emailDirecteur = 'contrat-pdf.directeur@iris.test';
       const directeur = await prisma.user.upsert({ where: { email: emailDirecteur }, update: { role: 'DIRECTEUR', actif: true, permissions: [] }, create: { email: emailDirecteur, name: 'TEST Directeur 6a4b', role: 'DIRECTEUR' } });
       assert.ok((await lirePdf(f.actif.id, jetonDe(directeur.id))).texte.includes('TEST Maintenance annuelle chaufferie'));
+      // L'assistante technique, sans droit individuel, imprime aussi (AT-2a, gestion des contrats).
+      const emailAssistante = 'contrat-pdf.assistante-technique@iris.test';
+      const assistante = await prisma.user.upsert({ where: { email: emailAssistante }, update: { role: 'ASSISTANTE_TECHNIQUE', actif: true, permissions: [] }, create: { email: emailAssistante, name: 'TEST Assistante technique 6a4b', role: 'ASSISTANTE_TECHNIQUE' } });
+      assert.ok((await lirePdf(f.actif.id, jetonDe(assistante.id))).texte.includes('TEST Maintenance annuelle chaufferie'));
     });
 
     // Cadrage : « les refus 403 [...] pour une clé » ; il n'y a pas de route /api/v1. Lecture confirmée

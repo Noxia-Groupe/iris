@@ -497,8 +497,9 @@ if (!TEST_DATABASE_URL) {
         ['RESPONSABLE', parCompte(c.responsable), refuse],
         ['TECHNICIEN avec devis:read accordé', parCompte(c.technicienAffecte), refuse],
         ['TECHNICIEN', parCompte(c.technicienNonAffecte), refuse],
-        // Sans devis:read par son type en AT-1 (cadrage v2.1, « Droits par défaut »).
-        ['ASSISTANTE_TECHNIQUE', parCompte(c.assistanteTechnique), refuse],
+        // Sans devis:read par son type en AT-1 (cadrage v2.1, « Droits par défaut ») ; avec, depuis AT-2a (réponse 3 du
+        // 06-11-2026 : « Tous, contrats compris »), comme les autres porteurs du droit devis.
+        ['ASSISTANTE_TECHNIQUE', parCompte(c.assistanteTechnique), lecteur],
       ], f.noms);
     });
 
@@ -768,20 +769,24 @@ if (!TEST_DATABASE_URL) {
     });
 
     // P1 et P3 : la route du contrat garde requireAdmin (403 avant tout document), puis 404 « Contrat de maintenance
-    // introuvable. », puis l'identité (409 « … avant d’imprimer un contrat. ») ; un contrat annulé s'imprime.
-    test('contrat : administration seule, 403 exact avant tout document ; 404 exact ; identité incomplète en 409 exact après le 404 ; annulé imprimé', async () => {
+    // introuvable. », puis l'identité (409 « … avant d’imprimer un contrat. ») ; un contrat annulé s'imprime. Depuis AT-2a
+    // (réponses 3 et 9 du 06-11-2026), la garde est celle de la gestion des contrats (requireGestionContrats) : l'assistante
+    // technique imprime comme l'administration, les autres reçoivent son refus, au message qui la nomme.
+    test('contrat : administration et assistante technique seules, 403 exact avant tout document ; 404 exact ; identité incomplète en 409 exact après le 404 ; annulé imprimé', async () => {
       const c = f.comptes;
       const cibles = [['contratActif', f.contratActif.id], ['contratAnnule', f.contratAnnule.id], ['introuvable', randomUUID()], ['identifiant libre', 'inexistant'], ['identifiant d’une intervention', f.avecCompteRendu.id]];
       const introuvable = [404, CONTRAT_INTROUVABLE];
-      const refuse = Array(cibles.length).fill([403, REFUS_ADMINISTRATION]);
-      // Le directeur n'en est plus : il imprime comme l'administration (lot « Directeur aligné sur l'administration »).
-      const nonAdministrateurs = ['commercial', 'assistante', 'assistanteTechnique', 'comptable', 'directeurCommercial', 'conducteur', 'responsable', 'technicienAffecte'].map((cle) => [cle, parCompte(c[cle]), refuse]);
+      const refuse = Array(cibles.length).fill([403, { error: 'Accès réservé à l’administration et à l’assistante technique.' }]);
+      // Le directeur n'en est plus : il imprime comme l'administration (lot « Directeur aligné sur l'administration ») ;
+      // l'assistante technique non plus, depuis AT-2a.
+      const nonAdministrateurs = ['commercial', 'assistante', 'comptable', 'directeurCommercial', 'conducteur', 'responsable', 'technicienAffecte'].map((cle) => [cle, parCompte(c[cle]), refuse]);
       await jouerMatrice('contrat', cibles, [
         ['SUPERADMIN', admin(), [200, 200, introuvable, introuvable, introuvable]],
         ['ADMIN', parCompte(c.admin), [200, 200, introuvable, introuvable, introuvable]],
         ['ADMIN commercial', parCompte(c.adminCommercial), [200, 200, introuvable, introuvable, introuvable]],
         ['DIRECTEUR', parCompte(c.directeur), [200, 200, introuvable, introuvable, introuvable]],
         ['DIRECTEUR avec tous les droits', parCompte(c.directeurTousDroits), [200, 200, introuvable, introuvable, introuvable]],
+        ['ASSISTANTE_TECHNIQUE', parCompte(c.assistanteTechnique), [200, 200, introuvable, introuvable, introuvable]],
         ...nonAdministrateurs,
       ], f.noms);
       await avecSociete({ siret: '', ville: '' }, async () => {

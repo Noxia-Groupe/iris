@@ -3252,7 +3252,9 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await lignesEnBase(devisId)).length, 2, 'un refus ne touche pas aux lignes');
     });
 
-    test('prix d’achat prévu : écrit par un administrateur seulement, conservé par les autres, masqué partout ailleurs', async () => {
+    // AT-2a (réponses 4 et 8 du 06-11-2026) : le prix d'achat prévu s'écrit aussi par l'assistante technique, et son refus
+    // le dit (message reformulé par le cadrage d'AT-2a, « Prix d'achat et coût prévu »).
+    test('prix d’achat prévu : écrit par l’administration (et l’assistante technique) seulement, conservé par les autres, masqué partout ailleurs', async () => {
       const lignes = async (enTete) => (await request(app).get('/api/devis').set(enTete)).body.find((d) => d.id === devisId).lignes;
       const corps = (lignesSaisies) => ({ clientId, objet: `TEST Devis catalogue ${suffixe}`, lignes: lignesSaisies });
       // Chaque enregistrement recrée les lignes : leurs identifiants sont relus avant chaque envoi.
@@ -3263,7 +3265,7 @@ if (!TEST_DATABASE_URL) {
       for (const valeur of ['10', null]) {
         const refus = await envoyer('patch', `/api/devis/${devisId}`, commercial, corps([ligneCamera({ prixAchatUnitaireHt: valeur }), ligneDeplacement()]));
         assert.equal(refus.status, 403, String(valeur));
-        assert.match(refus.body.error, /réservé aux administrateurs/);
+        assert.equal(refus.body.error, 'Le prix d’achat prévu est réservé à l’administration et à l’assistante technique.');
       }
       assert.equal((await request(app).post('/api/devis').set(commercial).send(corps([{ designation: 'Libre', quantite: '1', prixUnitaireHt: '1', prixAchatUnitaireHt: '0.5' }]))).status, 403);
       const parAdmin = await envoyer('patch', `/api/devis/${devisId}`, admin, corps([ligneCamera({ prixAchatUnitaireHt: '75,40' }), ligneDeplacement({ prixAchatUnitaireHt: '12' })]));
@@ -5308,11 +5310,12 @@ if (!TEST_DATABASE_URL) {
         assert.ok((await aConvertir()).some((d) => d.id === devis.id), 'le devis reste proposé');
       });
 
-      test('seule une session administrateur fixe le titulaire à l’ouverture ; la conversion de l’écran Devis reste ouverte', async () => {
+      // AT-2a (réponse 5 du 06-11-2026) : l'assistante technique fixe aussi ces choix ; le refus des autres le dit.
+      test('seule une session de l’administration (ou de l’assistante technique) fixe le titulaire à l’ouverture ; la conversion de l’écran Devis reste ouverte', async () => {
         const devis = await devisAccepte('TEST Ouverture par un commercial');
         const refus = await ouvrir(devis.id, { responsableId: comptes.conducteur.id }, entete('commercial'));
         assert.equal(refus.status, 403, JSON.stringify(refus.body));
-        assert.match(refus.body.error, /Seule l’administration choisit le titulaire/);
+        assert.equal(refus.body.error, 'Seules l’administration et l’assistante technique choisissent le titulaire, le commercial, les types et la date de début à l’ouverture du chantier ; ils se modifient ensuite depuis sa fiche.');
         for (const champ of ['commercialId', 'types', 'dateDebut']) {
           assert.equal((await ouvrir(devis.id, { [champ]: champ === 'types' ? [] : '' }, entete('commercial'))).status, 403, champ);
         }
@@ -5565,7 +5568,7 @@ if (!TEST_DATABASE_URL) {
         assert.equal(commercialIntervention.body.error, 'Création réservée à l’encadrement SAV.');
         const commercialContrat = await convertirEn(devis.id, 'CONTRAT', CONTRAT, entete('commercial'));
         assert.equal(commercialContrat.status, 403, JSON.stringify(commercialContrat.body));
-        assert.equal(commercialContrat.body.error, 'La création d’un contrat de maintenance est réservée à l’administration.');
+        assert.equal(commercialContrat.body.error, 'La création d’un contrat de maintenance est réservée à l’administration et à l’assistante technique.');
         // Le conducteur crée des interventions, mais n'a pas le droit devis.
         assert.equal((await convertirEn(devis.id, 'INTERVENTION', {}, entete('conducteur'))).status, 403);
         // Porteurs du droit devis hors de l'encadrement SAV et de l'administration : l'assistante
@@ -5583,7 +5586,7 @@ if (!TEST_DATABASE_URL) {
           assert.equal(intervention.body.error, 'Création réservée à l’encadrement SAV.');
           const contrat = await convertirEn(devis.id, 'CONTRAT', CONTRAT, entete(compte));
           assert.equal(contrat.status, 403, `${compte} : ${JSON.stringify(contrat.body)}`);
-          assert.equal(contrat.body.error, 'La création d’un contrat de maintenance est réservée à l’administration.');
+          assert.equal(contrat.body.error, 'La création d’un contrat de maintenance est réservée à l’administration et à l’assistante technique.');
           const directe = await request(app).post('/api/interventions').set(entete(compte)).send({ clientId, titre: 'TEST Conversion réservée' });
           assert.equal(directe.status, 403, `${compte} : ${JSON.stringify(directe.body)}`);
           assert.equal(directe.body.error, messageDirect);
@@ -5696,7 +5699,7 @@ if (!TEST_DATABASE_URL) {
           const autre = await devisAccepte('TEST Conversion conducteur contrat');
           const contrat = await convertirEn(autre.id, 'CONTRAT', CONTRAT, entete('conducteur'));
           assert.equal(contrat.status, 403, JSON.stringify(contrat.body));
-          assert.equal(contrat.body.error, 'La création d’un contrat de maintenance est réservée à l’administration.');
+          assert.equal(contrat.body.error, 'La création d’un contrat de maintenance est réservée à l’administration et à l’assistante technique.');
           assert.equal(await prisma.devisConversion.count({ where: { devisId: autre.id } }), 0);
         } finally {
           const retire = await request(app).put(`/api/users/${comptes.conducteur.id}/permissions`).set(admin()).send({ permissions: [] });
@@ -6280,7 +6283,7 @@ if (!TEST_DATABASE_URL) {
         const autre = await devisConverti('TEST Droits seconde conversion contrat', ['CHANTIER']);
         const commercialContrat = await convertirEn(autre.devis.id, 'CONTRAT', CONTRAT, entete('commercial'));
         assert.equal(commercialContrat.status, 403, JSON.stringify(commercialContrat.body));
-        assert.equal(commercialContrat.body.error, 'La création d’un contrat de maintenance est réservée à l’administration.');
+        assert.equal(commercialContrat.body.error, 'La création d’un contrat de maintenance est réservée à l’administration et à l’assistante technique.');
         // L'annulation reste réservée à l'administration, quel que soit ce que le devis a créé.
         for (const cle of ['commercial', 'conducteur']) {
           const refus = await annuler(dossier.devis.id, 'TEST essai', entete(cle));
@@ -14911,7 +14914,8 @@ if (!TEST_DATABASE_URL) {
       assert.equal(visite.createdById, passage.auteurId);
       const creation = await prisma.journalSaisieChantier.findFirstOrThrow({ where: { interventionId: visite.id } });
       assert.deepEqual([creation.auteurId, creation.auteurNom], [secours.id, secours.name]);
-      assert.equal(creation.motif, `Génération des visites lancée par un administrateur : échéance du ${dateDuJour}.`);
+      // AT-2a (cadrage v2, C1) : le préfixe nomme le passage lancé à la main, et non plus son seul auteur administrateur.
+      assert.equal(creation.motif, `Génération des visites lancée à la main : échéance du ${dateDuJour}.`);
 
       const ignores = Object.fromEntries(passage.contratsIgnores.map((c) => [c.contratId, c]));
       assert.match(ignores[desactive.id]?.motif ?? '', /Client désactivé/);
@@ -27393,7 +27397,7 @@ if (!TEST_DATABASE_URL) {
     // T2 du contrôle (cadrage, « Type ») : le type est accepté par la création et le changement de type, relu en base ; avant
     // le lot, un rôle hors ALLOWED_ROLES devenait en silence CONDUCTEUR_TRAVAUX (lecture écartée, nommée). Jamais « aussi
     // commercial » (peutEtreAussiCommercial inchangé, décision 7 de #182).
-    test('compte : créé et changé de type par le super administrateur, l’administrateur et le directeur, le type ASSISTANTE_TECHNIQUE relu en base, journalisé ; jamais « aussi commercial » ; droits clients:read et chantiers:read', async () => {
+    test('compte : créé et changé de type par le super administrateur, l’administrateur et le directeur, le type ASSISTANTE_TECHNIQUE relu en base, journalisé ; jamais « aussi commercial » ; droits clients:read et chantiers:read, puis devis:read et devis:write (AT-2a)', async () => {
       for (const [qui, auth, auteurId] of [['super administrateur', sa, saId], ['administrateur', jeton('admin'), comptes.admin.id], ['directeur', jeton('directeur'), comptes.directeur.id]]) {
         const email = `at1.cree.${qui.replace(/ /g, '-')}.${suffixe}@iris.test`;
         // La case « aussi commercial » demandée est ignorée pour ce type.
@@ -27405,11 +27409,12 @@ if (!TEST_DATABASE_URL) {
         assert.notEqual(relu.role, 'CONDUCTEUR_TRAVAUX', `${qui} : pas l’ancien repli`);
         const [entree] = await prisma.journalAdministration.findMany({ where: { cibleId: relu.id, action: 'CREATION' } });
         assert.equal(entree.auteurId, auteurId, qui);
-        // Droits du type : lecture des clients et des affaires, rien d'autre (DEFAULT_USER_PERMISSIONS).
+        // Droits du type : lecture des clients et des affaires (DEFAULT_USER_PERMISSIONS), et, depuis AT-2a, le droit devis
+        // (réponse 3 du 06-11-2026 : « Tous, contrats compris ») ; rien d'autre (ni chantiers:write ni finances:read).
         const moi = await lire('/api/me', { Authorization: `Bearer ${jwt.sign({ id: relu.id }, process.env.JWT_SECRET)}` });
         assert.equal(moi.status, 200, JSON.stringify(moi.body));
         assert.equal(moi.body.role, 'ASSISTANTE_TECHNIQUE');
-        assert.deepEqual([...moi.body.permissions].sort(), ['chantiers:read', 'clients:read'], qui);
+        assert.deepEqual([...moi.body.permissions].sort(), ['chantiers:read', 'clients:read', 'devis:read', 'devis:write'], qui);
       }
 
       // Changement de type : conducteur → assistante technique → conducteur, relu en base et journalisé (TYPE_COMPTE).
@@ -27441,8 +27446,10 @@ if (!TEST_DATABASE_URL) {
     });
 
     // T1 du contrôle (cadrage, « Fermé à AT-1 ») : chaque refus avec son message exact, rien n'est écrit (empreinte). La
-    // fiche de l'affaire lui est lisible (200) : le refus d'écriture n'est pas de périmètre.
-    test('refus : fiche, statut et commercial d’une affaire (403 « Un compte assistante technique… »), saisies Travaux, rapport de chantier, partage du planning, statistiques et performances, factures, contrats, devis, comptes, catalogue et clients ; rien n’est écrit', async () => {
+    // fiche de l'affaire lui est lisible (200) : le refus d'écriture n'est pas de périmètre. AT-2a ouvre depuis la liste des
+    // contrats, les devis et les écritures des clients (réponses 3 et 9 du 06-11-2026), retirés d'ici et prouvés par le bloc
+    // « Assistante technique (AT-2a) » ; la création d'un contrat hors devis reste refusée (choix par défaut, à confirmer).
+    test('refus : fiche, statut et commercial d’une affaire (403 « Un compte assistante technique… »), saisies Travaux, rapport de chantier, partage du planning, statistiques et performances, factures, contrat hors devis, comptes et catalogue ; rien n’est écrit', async () => {
       const assistante = jeton('assistante');
       const chantier = await chantierDe('refus', comptes.conducteur.id, { budgetGlobalVendu: 1000, budgetMaterielVendu: 300, budgetMainOeuvreVendu: 700, heuresVendues: 20, commercialId: comptes.commercial.id });
       assert.equal((await lire(`/api/chantiers/${chantier.id}`, assistante)).status, 200, 'elle lit la fiche');
@@ -27470,17 +27477,12 @@ if (!TEST_DATABASE_URL) {
         ['facture (création)', () => envoyer('post', '/api/factures', assistante, { clientId: client.id, origine: 'CHANTIER', chantierId: chantier.id, lignes: [] }), 403, REFUS_ADMINISTRATION],
         ['prêt à facturer', () => lire('/api/facturation/prete-a-facturer', assistante), 403, REFUS_ADMINISTRATION],
         ['règlements', () => lire('/api/reglements', assistante), 403, REFUS_ADMINISTRATION],
-        ['contrats (liste)', () => lire('/api/contrats-maintenance', assistante), 403, REFUS_ADMINISTRATION],
-        ['contrat (création)', () => envoyer('post', '/api/contrats-maintenance', assistante, { clientId: client.id, titre: 'TEST AT-1 contrat refusé', periodiciteMois: 12, dureePrevisionnelleMinutes: 60, dateDebut: date }), 403, REFUS_ADMINISTRATION],
-        ['devis (liste)', () => lire('/api/devis', assistante), 403, 'Permission requise : devis:read'],
-        ['devis (création)', () => envoyer('post', '/api/devis', assistante, { clientId: client.id, objet: 'TEST AT-1 devis refusé', lignes: [{ designation: 'TEST Pose', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 100, tauxTva: 20 }] }), 403, 'Permission requise : devis:write'],
+        ['contrat (création hors devis)', () => envoyer('post', '/api/contrats-maintenance', assistante, { clientId: client.id, titre: 'TEST AT-1 contrat refusé', periodiciteMois: 12, dureePrevisionnelleMinutes: 60, dateDebut: date }), 403, REFUS_ADMINISTRATION],
         ['comptes (liste)', () => lire('/api/users', assistante), 403, REFUS_ADMINISTRATION],
         ['compte (création)', () => envoyer('post', '/api/users', assistante, { email: `at1.refus.${suffixe}@iris.test`, name: 'TEST AT-1 refus', role: 'ASSISTANTE_TECHNIQUE' }), 403, REFUS_ADMINISTRATION],
         ['type de son propre compte', () => envoyer('patch', `/api/users/${comptes.assistante.id}/role`, assistante, { role: 'ADMIN' }), 403, REFUS_ADMINISTRATION],
         ['paramètres', () => envoyer('put', '/api/parametres', assistante, { rentabiliteConducteur: false }), 403, REFUS_ADMINISTRATION],
         ['catalogue (création)', () => envoyer('post', '/api/catalogue/prestations', assistante, { reference: `TEST-AT1-REFUS-${suffixe}`, nom: 'TEST AT-1 prestation refusée', prixVenteHt: '10', tauxTva: '20' }), 403, REFUS_ADMINISTRATION],
-        ['client (création)', () => envoyer('post', '/api/clients', assistante, { raisonSociale: `TEST AT-1 client refusé ${suffixe}` }), 403, REFUS_ADMINISTRATION],
-        ['client (modification)', () => envoyer('put', `/api/clients/${client.id}`, assistante, { raisonSociale: `TEST AT-1 client renommé ${suffixe}` }), 403, REFUS_ADMINISTRATION],
       ];
       for (const [cas, appel, code, message] of refus) {
         const res = await appel();
@@ -27882,6 +27884,547 @@ if (!TEST_DATABASE_URL) {
       assert.deepEqual([cloture.status, cloture.body.error], [403, REFUS_AFFAIRE]);
       assert.equal(await empreinte(), avant, 'aucune écriture');
       assert.equal((await prisma.chantier.findUniqueOrThrow({ where: { id: affaire.id } })).statut, 'EN_COURS');
+    });
+  });
+
+  // Lot « Assistante technique », PR AT-2a « Devis, clients et contrats » (cadrage AT-2, version 1, section « AT-2a », et
+  // version 2 : C1 contrats, C2 catalogue et parc, T1 à T3, choix par défaut N10, à confirmer). Réponses de Nelson du
+  // 06-11-2026 (docs/HISTORIQUE-DECISIONS.md#décisions-du-06-11-2026-sur-lassistante-technique) : 3 (« Tous, contrats
+  // compris » ; elle « gère les clients »), 4 (« Prix d'achat oui, coûts non »), 5 (« Oui, comme l'admin » : titulaire,
+  // commercial, types et date de début à l'ouverture du chantier), 8 (catalogue et parc en lecture seule) et 9 (génération
+  // des visites). Piège P1 du cadrage : le prix d'achat qu'elle lit ne lui ouvre pas le coût prévu des chantiers, qui suit sa
+  // rentabilité (coutPrevuSuitRentabilite), fermée jusqu'à AT-2b (réponse 2, « Décochée »).
+  //
+  // Montants (règle des montants du rédacteur des tests : chaque autre lecture plausible donne un résultat différent) :
+  //  - fiche article du catalogue : vente 129,90 €, achat 74,35 € ; modèle d'équipement : vente 449,90 €, achat 318,60 €.
+  //    Lecture écartée : le prix de vente rendu sous le nom du prix d'achat (valeurs distinctes) ;
+  //  - devis converti en chantier (LIGNES_COUT_PREVU) : 3 × 87,40 + 0,5 × 4,20 + 0,5 × 7,10 + 2,5 × 64,00 = 427,85 € HT, dont
+  //    267,85 € de fournitures ; coût prévu = Σ quantité × prix d'achat prévu, chaque ligne arrondie au centime (demi-centime
+  //    supérieur exact), main-d'œuvre sans prix d'achat pour zéro : 3 × 52,15 = 156,45 ; 0,5 × 3,01 = 1,505 → 1,51 ;
+  //    0,5 × 5,03 = 2,515 → 2,52 ; soit 160,48 €. Lectures écartées : arrondi du seul total (160,47 €), arrondi flottant ou
+  //    troncature par ligne (1,50 et 2,51 : 160,46 €), prix de vente des fournitures (267,85 €), vendu du devis (427,85 €),
+  //    main-d'œuvre comptée à son prix de vente (320,48 €), prix d'achat unitaire de la première ligne (52,15 €).
+  describe('Assistante technique (AT-2a) : devis et prix d’achat prévu, sans coût prévu des chantiers ; clients et parc en lecture ; contrats et génération des visites ; acompte, annulation, contrat hors devis, couverture, anticipation, écriture du parc et catalogue à l’administration', () => {
+    let sa = {};
+    let saJeton = '';
+    const comptes = {};
+    const suffixe = `${Date.now()}`;
+    const reference = `TEST-AT2A-${suffixe}`;
+    let client = null;
+    let site = null;
+    let article = null;
+    let modele = null;
+    let equipement = null;
+    let reglagesInitiaux = null;
+    const REFUS_ADMINISTRATION = 'Accès réservé aux administrateurs';
+    // Gardes de la gestion des clients et des contrats (requireGestionClients, requireGestionContrats) : message exact du cadrage.
+    const REFUS_GESTION = 'Accès réservé à l’administration et à l’assistante technique.';
+    const REFUS_PRIX_ACHAT = 'Le prix d’achat prévu est réservé à l’administration et à l’assistante technique.';
+    const REFUS_CONTRAT = 'La création d’un contrat de maintenance est réservée à l’administration et à l’assistante technique.';
+    const REFUS_ATTRIBUTIONS = 'Seules l’administration et l’assistante technique choisissent le titulaire, le commercial, les types et la date de début à l’ouverture du chantier ; ils se modifient ensuite depuis sa fiche.';
+    const REFUS_CLE_CONVERSION = 'Une intervention ou un contrat ne se crée depuis un devis que dans une session de l’application.';
+    // Les sept types hors administration et hors assistante technique : chacun reçoit le refus des gardes de la gestion.
+    const AUTRES_TYPES = [
+      ['conducteur', 'CONDUCTEUR_TRAVAUX'], ['responsable', 'RESPONSABLE'], ['technicien', 'TECHNICIEN'], ['commercial', 'COMMERCIAL'],
+      ['directeurCommercial', 'DIRECTEUR_COMMERCIAL'], ['assistanteCommerciale', 'ASSISTANTE_COMMERCIALE'], ['comptable', 'COMPTABLE'],
+    ];
+    const jeton = (cle) => ({ Authorization: `Bearer ${jwt.sign({ id: comptes[cle].id }, process.env.JWT_SECRET)}` });
+    // Le corps est calculé avant la requête (cf. les autres blocs) : request(app) ouvre un serveur éphémère.
+    const envoyer = (methode, chemin, auth, corps) => request(app)[methode](chemin).set(auth).send(corps);
+    const lire = (chemin, auth) => request(app).get(chemin).set(auth);
+    const jourIso = async () => jourCivilEntreprise(new Date(), (await prisma.companySettings.findUnique({ where: { id: 'singleton' } }))?.fuseauHoraire || 'Europe/Paris');
+    const aujourdhui = async () => (await jourIso()).split('-').reverse().join('-');
+    const enBase = (valeur) => (valeur === null || valeur === undefined ? null : valeur.toString());
+    const LIGNES_COUT_PREVU = [
+      { designation: 'TEST Détecteur AT-2a', nature: 'FOURNITURE', quantite: '3', prixUnitaireHt: '87.40', tauxTva: 20, prixAchatUnitaireHt: '52.15' },
+      { designation: 'TEST Cosse AT-2a A', nature: 'FOURNITURE', quantite: '0.5', prixUnitaireHt: '4.20', tauxTva: 20, prixAchatUnitaireHt: '3.01' },
+      { designation: 'TEST Cosse AT-2a B', nature: 'FOURNITURE', quantite: '0.5', prixUnitaireHt: '7.10', tauxTva: 20, prixAchatUnitaireHt: '5.03' },
+      { designation: 'TEST Pose AT-2a', nature: 'MAIN_OEUVRE', quantite: '2.5', prixUnitaireHt: '64', tauxTva: 20 },
+    ];
+    const LIGNE_SIMPLE = [{ designation: 'TEST Visite AT-2a', nature: 'MAIN_OEUVRE', quantite: 1, prixUnitaireHt: 150, tauxTva: 20 }];
+    // Devis créé, envoyé et signé par un compte (l'assistante technique par défaut) : chaque étape au statut attendu.
+    const devisSigne = async (objet, lignes = LIGNE_SIMPLE, auteur = 'assistante', extra = {}) => {
+      const auth = auteur === 'sa' ? sa : jeton(auteur);
+      const devis = await envoyer('post', '/api/devis', auth, { clientId: client.id, objet: `TEST AT-2a ${objet} ${suffixe}`, lignes, ...extra });
+      assert.equal(devis.status, 201, JSON.stringify(devis.body));
+      assert.equal((await envoyer('put', `/api/devis/${devis.body.id}/statut`, auth, { statut: 'ENVOYE' })).status, 200);
+      const signature = await envoyer('post', `/api/devis/${devis.body.id}/signature`, auth, { signataire: 'TEST Signataire AT-2a', confirme: true });
+      assert.equal(signature.status, 201, JSON.stringify(signature.body));
+      return devis.body;
+    };
+    const cle = async (nom, scopes) => {
+      const creee = await envoyer('post', '/api/admin/api-keys', sa, { nom: `${nom} ${suffixe}`, scopes });
+      assert.equal(creee.status, 201, JSON.stringify(creee.body));
+      return { Authorization: `Bearer ${creee.body.apiKey}` };
+    };
+    const nouveauContrat = async (titre, extra = {}) => {
+      const cree = await envoyer('post', '/api/contrats-maintenance', sa, { clientId: client.id, titre: `TEST AT-2a ${titre} ${suffixe}`, periodiciteMois: 3, dureePrevisionnelleMinutes: 60, dateDebut: await aujourdhui(), ...extra });
+      assert.equal(cree.status, 201, JSON.stringify(cree.body));
+      return cree.body;
+    };
+    // Empreinte des tables qu'un refus ne doit pas toucher : devis et leurs lignes, conversions, chantiers, contrats, réglages,
+    // clients, contacts, sites, parc, catalogue, interventions, journaux, envois et passages de la génération.
+    const empreinte = async () => JSON.stringify([
+      await prisma.devis.findMany({ where: { clientId: client.id }, orderBy: { id: 'asc' }, select: { id: true, statut: true, acompteRecuLe: true, acompteMontant: true, annuleLe: true, totalHt: true } }),
+      await prisma.devisLigne.findMany({ where: { devis: { clientId: client.id } }, orderBy: { id: 'asc' }, select: { id: true, prixAchatUnitaireHt: true, prixUnitaireHt: true } }),
+      await prisma.devisConversion.count(), await prisma.chantier.count(), await prisma.intervention.count(),
+      await prisma.contratMaintenance.findMany({ where: { clientId: client.id }, orderBy: { id: 'asc' }, select: { id: true, statut: true, prochaineEcheance: true, noteCouverture: true, politiqueMateriel: true } }),
+      await prisma.parametres.findUniqueOrThrow({ where: { id: 'singleton' }, select: { anticipationVisitesJours: true } }),
+      await prisma.client.findMany({ where: { raisonSociale: { startsWith: 'TEST ' } }, orderBy: { id: 'asc' }, select: { id: true, raisonSociale: true, actif: true, email: true } }),
+      await prisma.clientContact.count(), await prisma.clientSite.count(), await prisma.equipementInstalle.findMany({ orderBy: { id: 'asc' }, select: { id: true, statut: true } }),
+      await prisma.catalogueArticle.findMany({ where: { reference: { startsWith: 'TEST-AT2A-' } }, orderBy: { id: 'asc' }, select: { id: true, nom: true, prixAchatHt: true, prixVenteHt: true, actif: true } }),
+      await prisma.catalogueEquipement.count(), await prisma.journalSaisieChantier.count(), await prisma.envoiDocument.count(), await prisma.executionGenerationVisites.count(),
+    ]);
+
+    before(async () => {
+      const secours = await request(app).post('/api/auth/secours').send({ token: process.env.BREAK_GLASS_TOKEN });
+      assert.equal(secours.status, 200);
+      saJeton = secours.body.token;
+      sa = { Authorization: `Bearer ${saJeton}` };
+      for (const [cleCompte, role] of [['assistante', 'ASSISTANTE_TECHNIQUE'], ['admin', 'ADMIN'], ['directeur', 'DIRECTEUR'], ...AUTRES_TYPES]) {
+        const email = `at2a.${cleCompte}@iris.test`;
+        comptes[cleCompte] = await prisma.user.upsert({ where: { email }, update: { role, actif: true, permissions: [], estCommercial: false, accesFinance: false, responsableHierarchiqueId: null }, create: { email, name: `TEST AT-2a ${cleCompte}`, role } });
+      }
+      reglagesInitiaux = await prisma.parametres.findUniqueOrThrow({ where: { id: 'singleton' } });
+      // Rentabilité ouverte au conducteur titulaire et aux directeurs : la lecture du coût prévu par l'assistante technique se
+      // distingue de la leur (lecture écartée : elle lirait ce que lit le conducteur titulaire ou le directeur).
+      assert.equal((await envoyer('put', '/api/parametres', sa, { margeCommercialeActive: true, rentabiliteConducteur: true, rentabiliteHierarchie: true, rentabiliteDirecteurs: true })).status, 200);
+      const cree = await envoyer('post', '/api/clients', sa, { raisonSociale: `TEST Client AT-2a ${suffixe}`, siren: await sirenLibre() });
+      assert.equal(cree.status, 201, JSON.stringify(cree.body));
+      client = cree.body;
+      const facturation = await envoyer('post', `/api/clients/${client.id}/sites`, sa, { nom: 'TEST Facturation AT-2a', adresse: '2 rue des Devis', codePostal: '14000', ville: 'Caen', estSiteFacturation: true, estSiteIntervention: true });
+      assert.equal(facturation.status, 201, JSON.stringify(facturation.body));
+      site = facturation.body;
+      const fiche = await envoyer('post', '/api/catalogue/articles', sa, { reference: `${reference}-ART`, nom: `TEST Article AT-2a ${suffixe}`, prixVenteHt: '129.90', prixAchatHt: '74.35', tauxTva: '20' });
+      assert.equal(fiche.status, 201, JSON.stringify(fiche.body));
+      article = fiche.body;
+      const modeleCree = await envoyer('post', '/api/catalogue/equipements', sa, { reference: `${reference}-EQ`, nom: `TEST Modèle AT-2a ${suffixe}`, fabricant: 'Iris', prixVenteHt: '449.90', prixAchatHt: '318.60', tauxTva: '20' });
+      assert.equal(modeleCree.status, 201, JSON.stringify(modeleCree.body));
+      modele = modeleCree.body;
+      const installe = await envoyer('post', `/api/clients/${client.id}/equipements`, sa, { catalogueEquipementId: modele.id, clientSiteId: site.id, numeroSerie: `${reference}-SN1` });
+      assert.equal(installe.status, 201, JSON.stringify(installe.body));
+      equipement = installe.body;
+    });
+
+    after(async () => {
+      if (reglagesInitiaux) await prisma.parametres.update({ where: { id: 'singleton' }, data: {
+        margeCommercialeActive: reglagesInitiaux.margeCommercialeActive, rentabiliteConducteur: reglagesInitiaux.rentabiliteConducteur,
+        rentabiliteHierarchie: reglagesInitiaux.rentabiliteHierarchie, rentabiliteDirecteurs: reglagesInitiaux.rentabiliteDirecteurs,
+        anticipationVisitesJours: reglagesInitiaux.anticipationVisitesJours,
+      } });
+      // Le journal des envois retient ses contrats, que le nettoyage commun purge (clients « TEST ») sans purger leurs envois :
+      // ceux des contrats de ce bloc partent ici, garde d'ajout seul suspendu le temps d'une transaction (cf. nettoyer).
+      await prisma.$transaction([
+        prisma.$executeRawUnsafe('ALTER TABLE "EnvoiDocument" DISABLE TRIGGER "envoi_document_ajout_seul"'),
+        prisma.envoiDocument.deleteMany({ where: { contratMaintenance: { client: { raisonSociale: { startsWith: 'TEST ' } } } } }),
+        prisma.$executeRawUnsafe('ALTER TABLE "EnvoiDocument" ENABLE TRIGGER "envoi_document_ajout_seul"'),
+      ]);
+    });
+
+    // Cadrage, « Devis » : droits par défaut devis:read et devis:write (permissions.ts) ; prix d'achat prévu lu et écrit
+    // (litEtEcritPrixAchatDevis, réponses 4 et 8) ; refusé aux autres porteurs du droit devis, au message reformulé, et masqué
+    // pour eux dans chaque réponse.
+    test('devis : créé, modifié, envoyé et signé par elle, à son nom ; prix d’achat prévu écrit et relu (réponse, liste, base) ; refusé au commercial et à l’assistante commerciale au message exact, masqué pour eux, rien n’est écrit', async () => {
+      const assistante = jeton('assistante');
+      const moi = await lire('/api/me', assistante);
+      assert.deepEqual([...moi.body.permissions].sort(), ['chantiers:read', 'clients:read', 'devis:read', 'devis:write']);
+      const objet = `TEST AT-2a prix d’achat ${suffixe}`;
+      const cree = await envoyer('post', '/api/devis', assistante, { clientId: client.id, objet, lignes: [LIGNES_COUT_PREVU[0], LIGNES_COUT_PREVU[3]] });
+      assert.equal(cree.status, 201, JSON.stringify(cree.body));
+      assert.deepEqual(cree.body.lignes.map((l) => l.prixAchatUnitaireHt), [52.15, null], 'réponse de création');
+      const lignesEnBase = async () => (await prisma.devisLigne.findMany({ where: { devisId: cree.body.id }, orderBy: { ordre: 'asc' } })).map((l) => [enBase(l.prixUnitaireHt), enBase(l.prixAchatUnitaireHt)]);
+      assert.deepEqual(await lignesEnBase(), [['87.4', '52.15'], ['64', null]]);
+      // Modification par elle, saisie au format français : 53,20 € remplace 52,15 €.
+      const [premiere, seconde] = cree.body.lignes;
+      const modifie = await envoyer('patch', `/api/devis/${cree.body.id}`, assistante, { clientId: client.id, objet, lignes: [
+        { ...LIGNES_COUT_PREVU[0], ligneId: premiere.id, prixAchatUnitaireHt: '53,20' }, { ...LIGNES_COUT_PREVU[3], ligneId: seconde.id },
+      ] });
+      assert.equal(modifie.status, 200, JSON.stringify(modifie.body));
+      assert.deepEqual(modifie.body.lignes.map((l) => l.prixAchatUnitaireHt), [53.2, null]);
+      assert.deepEqual(await lignesEnBase(), [['87.4', '53.2'], ['64', null]]);
+      const vuParElle = (await lire('/api/devis', assistante)).body.find((d) => d.id === cree.body.id);
+      assert.deepEqual(vuParElle.lignes.map((l) => l.prixAchatUnitaireHt), [53.2, null], 'liste des devis');
+      // Le commercial et l'assistante commerciale lisent le devis, sans le prix d'achat prévu (clé absente).
+      for (const autre of ['commercial', 'assistanteCommerciale']) {
+        const vu = (await lire('/api/devis', jeton(autre))).body.find((d) => d.id === cree.body.id);
+        assert.ok(vu, `${autre} : devis listé`);
+        assert.ok(vu.lignes.every((l) => !('prixAchatUnitaireHt' in l)), `${autre} : prix d’achat prévu masqué`);
+      }
+      // Refus : écriture du prix d'achat prévu par le commercial (modification) et l'assistante commerciale (création).
+      const lignesModifiees = (await prisma.devisLigne.findMany({ where: { devisId: cree.body.id }, orderBy: { ordre: 'asc' } }));
+      const avant = await empreinte();
+      const refusCommercial = await envoyer('patch', `/api/devis/${cree.body.id}`, jeton('commercial'), { clientId: client.id, objet, lignes: [
+        { ...LIGNES_COUT_PREVU[0], ligneId: lignesModifiees[0].id, prixAchatUnitaireHt: '1' }, { ...LIGNES_COUT_PREVU[3], ligneId: lignesModifiees[1].id },
+      ] });
+      assert.deepEqual([refusCommercial.status, refusCommercial.body.error], [403, REFUS_PRIX_ACHAT]);
+      const refusAssistanteCommerciale = await envoyer('post', '/api/devis', jeton('assistanteCommerciale'), { clientId: client.id, objet: `${objet} refusé`, lignes: [LIGNES_COUT_PREVU[0]] });
+      assert.deepEqual([refusAssistanteCommerciale.status, refusAssistanteCommerciale.body.error], [403, REFUS_PRIX_ACHAT]);
+      assert.equal(await empreinte(), avant, 'aucun refus n’écrit');
+      assert.deepEqual(await lignesEnBase(), [['87.4', '53.2'], ['64', null]]);
+      // Envoi et signature par elle : la signature est enregistrée à son nom.
+      assert.equal((await envoyer('put', `/api/devis/${cree.body.id}/statut`, assistante, { statut: 'ENVOYE' })).status, 200);
+      const signature = await envoyer('post', `/api/devis/${cree.body.id}/signature`, assistante, { signataire: 'TEST Signataire AT-2a', confirme: true });
+      assert.equal(signature.status, 201, JSON.stringify(signature.body));
+      const signee = await prisma.devisSignature.findUniqueOrThrow({ where: { devisId: cree.body.id } });
+      assert.equal(signee.enregistreParId, comptes.assistante.id);
+      assert.equal((await prisma.devis.findUniqueOrThrow({ where: { id: cree.body.id } })).statut, 'ACCEPTE');
+    });
+
+    // Cadrage, « Devis », conversions : en contrat par la gestion des contrats (gereLesContrats), en intervention par
+    // l'encadrement SAV (ouvert par AT-1, sans le droit devis jusqu'ici) ; journaux à son nom. Refus des autres porteurs du droit
+    // devis au message reformulé ; une clé ne crée ni l'un ni l'autre.
+    test('conversion en contrat (gestion des contrats) et en intervention par elle, journaux à son nom ; refusée au commercial et à l’assistante commerciale (message exact) et à une clé, sans écriture', async () => {
+      const assistante = jeton('assistante');
+      const devis = await devisSigne('contrat et intervention');
+      const contrat = await envoyer('post', `/api/devis/${devis.id}/convertir`, assistante, { cible: 'CONTRAT', titre: `TEST AT-2a contrat converti ${suffixe}`, periodiciteMois: 6, dureePrevisionnelleMinutes: 90, dateDebut: await aujourdhui(), siteId: site.id, politiqueMateriel: 'INCLUS' });
+      assert.equal(contrat.status, 201, JSON.stringify(contrat.body));
+      const contratEnBase = await prisma.contratMaintenance.findUniqueOrThrow({ where: { id: contrat.body.id } });
+      assert.deepEqual([contratEnBase.createdById, contratEnBase.periodiciteMois, contratEnBase.dureePrevisionnelleMinutes, contratEnBase.politiqueMateriel, contratEnBase.siteId, contratEnBase.statut, contratEnBase.prochaineEcheance.toISOString().slice(0, 10)],
+        [comptes.assistante.id, 6, 90, 'INCLUS', site.id, 'ACTIF', await jourIso()]);
+      const [creationContrat] = await prisma.journalSaisieChantier.findMany({ where: { contratMaintenanceId: contrat.body.id, action: 'CREATION' } });
+      assert.deepEqual([creationContrat.cible, creationContrat.auteurId, creationContrat.auteurNom, creationContrat.motif], ['CONTRAT', comptes.assistante.id, comptes.assistante.name, `Conversion du devis ${devis.numero} (version ${devis.version}).`]);
+      const intervention = await envoyer('post', `/api/devis/${devis.id}/convertir`, assistante, { cible: 'INTERVENTION' });
+      assert.equal(intervention.status, 201, JSON.stringify(intervention.body));
+      const [creationIntervention] = await prisma.journalSaisieChantier.findMany({ where: { interventionId: intervention.body.id, action: 'CREATION' } });
+      assert.deepEqual([creationIntervention.auteurId, creationIntervention.auteurNom], [comptes.assistante.id, comptes.assistante.name]);
+      assert.deepEqual((await prisma.devisConversion.findMany({ where: { devisId: devis.id }, orderBy: { rang: 'asc' } })).map((c) => c.cibleType), ['CONTRAT', 'INTERVENTION']);
+
+      // Refus : le commercial et l'assistante commerciale (porteurs du droit devis), et une clé portant devis:write.
+      const autre = await devisSigne('contrat refusé', LIGNE_SIMPLE, 'sa');
+      const corpsContrat = { cible: 'CONTRAT', periodiciteMois: 12, dureePrevisionnelleMinutes: 60, dateDebut: await aujourdhui() };
+      const parCle = await cle('TEST AT-2a clé conversion', ['devis:write']);
+      const avant = await empreinte();
+      for (const refuse of ['commercial', 'assistanteCommerciale']) {
+        const res = await envoyer('post', `/api/devis/${autre.id}/convertir`, jeton(refuse), corpsContrat);
+        assert.deepEqual([res.status, res.body.error], [403, REFUS_CONTRAT], refuse);
+      }
+      const res = await envoyer('post', `/api/v1/devis/${autre.id}/convertir`, parCle, corpsContrat);
+      assert.deepEqual([res.status, res.body.error], [403, REFUS_CLE_CONVERSION]);
+      assert.equal(await empreinte(), avant, 'aucun refus n’écrit');
+    });
+
+    // T3 du contrôle (cadrage v2) : la conversion avec attributions faite par elle (réponse 5), et le coût prévu masqué pour
+    // elle sur la réponse de conversion, la fiche et la liste (piège P1), à valeurs distinctes, alors que l'administration le
+    // lit ; le vendu de la réponse de conversion reste lisible (N4, choix par défaut, à confirmer) ; le directeur inchangé
+    // (rentabiliteDirecteurs).
+    test('conversion en chantier avec titulaire, commercial, types et date de début par elle ; coût prévu (160,48 €) masqué pour elle sur la réponse, la fiche et la liste, même titulaire, lu par l’administration et le conducteur titulaire ; vendu de la réponse lisible ; directeur selon son réglage ; attributions refusées au commercial et à une clé', async () => {
+      const assistante = jeton('assistante');
+      const devis = await devisSigne('coût prévu', LIGNES_COUT_PREVU);
+      assert.equal(Number((await prisma.devis.findUniqueOrThrow({ where: { id: devis.id } })).totalHt), 427.85, 'total HT du devis');
+      // Refus d'abord : le commercial et une clé ne fixent pas les attributions ; rien n'est écrit.
+      const attributions = { responsableId: comptes.conducteur.id, commercialId: comptes.commercial.id, types: ['Interphonie', 'Vidéo', 'Inventé'], dateDebut: '12-10-2026' };
+      const parCle = await cle('TEST AT-2a clé ouverture', ['devis:write', 'finances:read']);
+      const avant = await empreinte();
+      const refusCommercial = await envoyer('post', `/api/devis/${devis.id}/convertir`, jeton('commercial'), { cible: 'CHANTIER', ...attributions });
+      assert.deepEqual([refusCommercial.status, refusCommercial.body.error], [403, REFUS_ATTRIBUTIONS]);
+      const refusCle = await envoyer('post', `/api/v1/devis/${devis.id}/convertir`, parCle, { cible: 'CHANTIER', ...attributions });
+      assert.deepEqual([refusCle.status, refusCle.body.error], [403, REFUS_ATTRIBUTIONS]);
+      assert.equal(await empreinte(), avant, 'aucun refus n’écrit');
+
+      const ouvert = await envoyer('post', `/api/devis/${devis.id}/convertir`, assistante, { cible: 'CHANTIER', ...attributions });
+      assert.equal(ouvert.status, 201, JSON.stringify(ouvert.body));
+      // Réponse de conversion : coût prévu masqué (null), vendu lisible (total HT du devis).
+      assert.equal(ouvert.body.coutMaterielPrevu, null, 'réponse de conversion : coût prévu masqué');
+      assert.equal(ouvert.body.budgetGlobalVendu, 427.85, 'réponse de conversion : vendu lisible');
+      const chantier = await prisma.chantier.findUniqueOrThrow({ where: { id: ouvert.body.id } });
+      assert.deepEqual([chantier.responsableId, chantier.commercialId, chantier.types, chantier.dateDebut.toISOString(), chantier.numeroDevis],
+        [comptes.conducteur.id, comptes.commercial.id, ['Vidéo', 'Interphonie'], '2026-10-12T00:00:00.000Z', devis.numero]);
+      assert.deepEqual([enBase(chantier.coutMaterielPrevu), enBase(chantier.budgetGlobalVendu), enBase(chantier.budgetMaterielVendu), enBase(chantier.budgetMainOeuvreVendu)], ['160.48', '427.85', '267.85', '160'], 'montants écrits en base');
+      // Coût prévu lu : fiche puis liste.
+      const coutPrevu = async (auth, id) => {
+        const fiche = await lire(`/api/chantiers/${id}`, auth);
+        assert.equal(fiche.status, 200, JSON.stringify(fiche.body));
+        const liste = await lire('/api/chantiers', auth);
+        assert.equal(liste.status, 200, JSON.stringify(liste.body));
+        const ligne = liste.body.find((c) => c.id === id);
+        assert.ok(ligne, 'chantier listé');
+        return [fiche.body.coutMaterielPrevu, ligne.coutMaterielPrevu];
+      };
+      assert.deepEqual(await coutPrevu(sa, chantier.id), [160.48, 160.48], 'super administrateur');
+      assert.deepEqual(await coutPrevu(jeton('admin'), chantier.id), [160.48, 160.48], 'administrateur');
+      assert.deepEqual(await coutPrevu(jeton('conducteur'), chantier.id), [160.48, 160.48], 'conducteur titulaire (rentabilité ouverte)');
+      assert.deepEqual(await coutPrevu(assistante, chantier.id), [null, null], 'assistante technique : masqué');
+      // Ce qu'elle lit de la fiche : les montants du conducteur, sans la rentabilité (AT-1).
+      const fiche = (await lire(`/api/chantiers/${chantier.id}`, assistante)).body;
+      assert.deepEqual([fiche.budgetGlobalVendu, fiche.budgetMaterielVendu, fiche.budgetMainOeuvreVendu], [null, 267.85, 160]);
+
+      // Titulaire elle-même : toujours masqué (la rentabilité du titulaire ne vaut que pour le conducteur et le responsable).
+      const sienne = await envoyer('post', `/api/devis/${(await devisSigne('coût prévu, titulaire', LIGNES_COUT_PREVU)).id}/convertir`, assistante, { cible: 'CHANTIER', responsableId: comptes.assistante.id, commercialId: comptes.commercial.id });
+      assert.equal(sienne.status, 201, JSON.stringify(sienne.body));
+      assert.equal(sienne.body.coutMaterielPrevu, null);
+      assert.equal(enBase((await prisma.chantier.findUniqueOrThrow({ where: { id: sienne.body.id } })).coutMaterielPrevu), '160.48');
+      assert.deepEqual(await coutPrevu(assistante, sienne.body.id), [null, null], 'assistante technique titulaire : masqué');
+
+      // Directeur, inchangé : il suit rentabiliteDirecteurs, en lecture comme dans la réponse de sa conversion.
+      const directeur = jeton('directeur');
+      assert.deepEqual(await coutPrevu(directeur, chantier.id), [160.48, 160.48], 'directeur, rentabilité ouverte');
+      try {
+        assert.equal((await envoyer('put', '/api/parametres', sa, { rentabiliteDirecteurs: false })).status, 200);
+        assert.deepEqual(await coutPrevu(directeur, chantier.id), [null, null], 'directeur, rentabilité coupée');
+        const parDirecteur = await envoyer('post', `/api/devis/${(await devisSigne('coût prévu, directeur', LIGNES_COUT_PREVU, 'sa')).id}/convertir`, directeur, { cible: 'CHANTIER' });
+        assert.equal(parDirecteur.status, 201, JSON.stringify(parDirecteur.body));
+        assert.deepEqual([parDirecteur.body.coutMaterielPrevu, parDirecteur.body.budgetGlobalVendu], [null, 427.85], 'réponse de conversion du directeur sans la rentabilité');
+        assert.deepEqual(await coutPrevu(assistante, chantier.id), [null, null], 'assistante technique, réglage du directeur sans effet');
+      } finally {
+        assert.equal((await envoyer('put', '/api/parametres', sa, { rentabiliteDirecteurs: true })).status, 200);
+      }
+      const parDirecteurOuvert = await envoyer('post', `/api/devis/${(await devisSigne('coût prévu, directeur ouvert', LIGNES_COUT_PREVU, 'sa')).id}/convertir`, directeur, { cible: 'CHANTIER' });
+      assert.equal(parDirecteurOuvert.status, 201, JSON.stringify(parDirecteurOuvert.body));
+      assert.equal(parDirecteurOuvert.body.coutMaterielPrevu, 160.48, 'réponse de conversion du directeur avec la rentabilité');
+    });
+
+    // T1 du contrôle (cadrage v2, C2 ; réponse 8) : prix d'achat des fiches par /api/devis/catalogue et du parc par
+    // GET /api/clients/:clientId/equipements, lus par elle, à valeurs distinctes des prix de vente ; jamais par le commercial ni
+    // l'assistante commerciale ; les routes du catalogue lui restent refusées (choix par défaut, à confirmer).
+    test('prix d’achat des fiches (/api/devis/catalogue) et du parc lus par elle, distincts des prix de vente ; jamais par le commercial ni l’assistante commerciale ; routes du catalogue refusées à elle, rien n’est écrit', async () => {
+      const assistante = jeton('assistante');
+      const recherche = `/api/devis/catalogue?q=${encodeURIComponent(reference)}`;
+      const fiches = await lire(recherche, assistante);
+      assert.equal(fiches.status, 200, JSON.stringify(fiches.body));
+      const parReference = (liste) => Object.fromEntries(liste.map((f) => [f.reference, f]));
+      const vues = parReference(fiches.body);
+      assert.deepEqual([vues[`${reference}-ART`].prixVenteHt, vues[`${reference}-ART`].prixAchatHt], [129.9, 74.35], 'article');
+      assert.deepEqual([vues[`${reference}-EQ`].prixVenteHt, vues[`${reference}-EQ`].prixAchatHt], [449.9, 318.6], 'modèle d’équipement');
+      for (const autre of ['commercial', 'assistanteCommerciale']) {
+        const lu = await lire(recherche, jeton(autre));
+        assert.equal(lu.status, 200, `${autre} : ${JSON.stringify(lu.body)}`);
+        assert.deepEqual(lu.body.map((f) => f.reference).sort(), [`${reference}-ART`, `${reference}-EQ`], autre);
+        assert.ok(lu.body.every((f) => !('prixAchatHt' in f)), `${autre} : prix d’achat des fiches absent`);
+      }
+      // Parc : le prix d'achat du modèle, lu par elle ; le parc entier refusé au commercial et à l'assistante commerciale.
+      const parc = await lire(`/api/clients/${client.id}/equipements`, assistante);
+      assert.equal(parc.status, 200, JSON.stringify(parc.body));
+      const installe = parc.body.find((e) => e.id === equipement.id);
+      assert.deepEqual([Number(installe.catalogueEquipement.prixAchatHt), Number(installe.catalogueEquipement.prixVenteHt)], [318.6, 449.9]);
+      for (const autre of ['commercial', 'assistanteCommerciale']) {
+        const refus = await lire(`/api/clients/${client.id}/equipements`, jeton(autre));
+        assert.deepEqual([refus.status, refus.body.error], [403, REFUS_GESTION], autre);
+      }
+      // Routes du catalogue : refusées à elle, en lecture comme en écriture ; rien n'est écrit.
+      const avant = await empreinte();
+      for (const [cas, appel] of [
+        ['lecture des articles', () => lire('/api/catalogue/articles', assistante)],
+        ['lecture des équipements', () => lire('/api/catalogue/equipements', assistante)],
+        ['création', () => envoyer('post', '/api/catalogue/articles', assistante, { reference: `${reference}-REFUS`, nom: 'TEST AT-2a article refusé', prixVenteHt: '10', prixAchatHt: '5', tauxTva: '20' })],
+        ['modification', () => envoyer('put', `/api/catalogue/articles/${article.id}`, assistante, { reference: `${reference}-ART`, nom: 'TEST AT-2a article renommé', prixVenteHt: '1', prixAchatHt: '1', tauxTva: '20' })],
+        ['désactivation', () => envoyer('delete', `/api/catalogue/articles/${article.id}`, assistante)],
+      ]) {
+        const res = await appel();
+        assert.deepEqual([res.status, res.body?.error], [403, REFUS_ADMINISTRATION], cas);
+      }
+      assert.equal(await empreinte(), avant, 'aucun refus n’écrit');
+      const ficheEnBase = await prisma.catalogueArticle.findUniqueOrThrow({ where: { id: article.id } });
+      assert.deepEqual([enBase(ficheEnBase.prixVenteHt), enBase(ficheEnBase.prixAchatHt), ficheEnBase.actif], ['129.9', '74.35', true]);
+    });
+
+    // Cadrage, « Devis » : l'acompte et l'annulation restent à l'administration (requireAdmin). Le même corps, joué ensuite
+    // par le super administrateur, écrit : c'est bien la garde qui refuse, et non le corps.
+    test('acompte et annulation d’un devis refusés à elle (403 « Accès réservé aux administrateurs »), rien n’est écrit ; le même corps passe pour l’administration', async () => {
+      const assistante = jeton('assistante');
+      const avecAcompte = await devisSigne('acompte', LIGNE_SIMPLE, 'assistante', { acompteExige: true });
+      const signe = await prisma.devis.findUniqueOrThrow({ where: { id: avecAcompte.id } });
+      assert.deepEqual([signe.statut, signe.acompteExige, signe.acompteRecuLe], ['ACCEPTE', true, null]);
+      const aAnnuler = await devisSigne('annulation');
+      const corpsAcompte = { recuLe: await aujourdhui(), montant: '45,15', reference: `${reference}-ACOMPTE` };
+      const corpsAnnulation = { motif: 'TEST AT-2a annulation demandée par l’assistante technique' };
+      const avant = await empreinte();
+      const acompte = await envoyer('post', `/api/devis/${avecAcompte.id}/acompte`, assistante, corpsAcompte);
+      assert.deepEqual([acompte.status, acompte.body.error], [403, REFUS_ADMINISTRATION], 'acompte');
+      const annulation = await envoyer('post', `/api/devis/${aAnnuler.id}/annulation`, assistante, corpsAnnulation);
+      assert.deepEqual([annulation.status, annulation.body.error], [403, REFUS_ADMINISTRATION], 'annulation');
+      assert.equal(await empreinte(), avant, 'aucun refus n’écrit');
+      // Témoins : l'administration constate l'acompte et annule avec les mêmes corps.
+      const parAdmin = await envoyer('post', `/api/devis/${avecAcompte.id}/acompte`, sa, corpsAcompte);
+      assert.equal(parAdmin.status, 200, JSON.stringify(parAdmin.body));
+      assert.deepEqual([parAdmin.body.acompteMontant, parAdmin.body.acompteReference, parAdmin.body.acompteConstateParId], [45.15, `${reference}-ACOMPTE`, (await prisma.user.findUniqueOrThrow({ where: { email: 'secours@iris.test' } })).id]);
+      const annuleParAdmin = await envoyer('post', `/api/devis/${aAnnuler.id}/annulation`, sa, corpsAnnulation);
+      assert.equal(annuleParAdmin.status, 200, JSON.stringify(annuleParAdmin.body));
+    });
+
+    // Cadrage, « Clients » (réponse 3 : « gère les clients ») : requireGestionClients sur les sept écritures et la lecture du
+    // parc ; écriture du parc à l'administration (choix par défaut, à confirmer) ; message exact du refus des autres types
+    // (choix par défaut N10) ; une clé reste gouvernée par son scope (routeMixte).
+    test('clients : les sept écritures faites par elle et relues en base ; parc lu ; écriture du parc refusée ; les sept autres types refusés au message exact sur chaque route, rien n’est écrit ; administration et directeur inchangés ; une clé clients:write écrit toujours', async () => {
+      const assistante = jeton('assistante');
+      const cree = await envoyer('post', '/api/clients', assistante, { raisonSociale: `TEST Client créé par AT-2a ${suffixe}`, siren: await sirenLibre() });
+      assert.equal(cree.status, 201, JSON.stringify(cree.body));
+      const id = cree.body.id;
+      const modifie = await envoyer('put', `/api/clients/${id}`, assistante, { raisonSociale: `TEST Client renommé par AT-2a ${suffixe}`, email: `client.${suffixe}@at2a.test` });
+      assert.equal(modifie.status, 200, JSON.stringify(modifie.body));
+      const contact = await envoyer('post', `/api/clients/${id}/contacts`, assistante, { nom: 'Martin', prenom: 'Camille', fonction: 'Gestionnaire', email: `camille.${suffixe}@at2a.test`, principal: true });
+      assert.equal(contact.status, 201, JSON.stringify(contact.body));
+      const contactModifie = await envoyer('put', `/api/clients/${id}/contacts/${contact.body.id}`, assistante, { nom: 'Martin', fonction: 'Directrice technique' });
+      assert.equal(contactModifie.status, 200, JSON.stringify(contactModifie.body));
+      const siteCree = await envoyer('post', `/api/clients/${id}/sites`, assistante, { nom: 'TEST Entrepôt AT-2a', adresse: '9 quai du SAV', codePostal: '14000', ville: 'Caen', estSiteIntervention: true });
+      assert.equal(siteCree.status, 201, JSON.stringify(siteCree.body));
+      const siteModifie = await envoyer('put', `/api/clients/${id}/sites/${siteCree.body.id}`, assistante, { nom: 'TEST Entrepôt AT-2a', adresse: '9 quai du SAV', codePostal: '14400', ville: 'Bayeux' });
+      assert.equal(siteModifie.status, 200, JSON.stringify(siteModifie.body));
+      const desactive = await envoyer('delete', `/api/clients/${id}`, assistante);
+      assert.equal(desactive.status, 200, JSON.stringify(desactive.body));
+      const relu = await prisma.client.findUniqueOrThrow({ where: { id }, include: { contacts: true, sites: true } });
+      assert.deepEqual([relu.raisonSociale, relu.email, relu.actif], [`TEST Client renommé par AT-2a ${suffixe}`, `client.${suffixe}@at2a.test`, false]);
+      assert.deepEqual(relu.contacts.map((c) => [c.prenom, c.nom, c.fonction, c.principal]), [['Camille', 'Martin', 'Directrice technique', true]]);
+      assert.deepEqual(relu.sites.map((s) => [s.nom, s.codePostal, s.ville, s.estSiteIntervention]), [['TEST Entrepôt AT-2a', '14400', 'Bayeux', true]]);
+
+      // Parc : lu par elle ; son écriture (ajout, archivage) reste à l'administration.
+      const parc = await lire(`/api/clients/${client.id}/equipements`, assistante);
+      assert.equal(parc.status, 200, JSON.stringify(parc.body));
+      assert.deepEqual(parc.body.map((e) => e.numeroSerie), [`${reference}-SN1`]);
+      const avantParc = await empreinte();
+      const ajout = await envoyer('post', `/api/clients/${client.id}/equipements`, assistante, { catalogueEquipementId: modele.id, clientSiteId: site.id, numeroSerie: `${reference}-SN2` });
+      assert.deepEqual([ajout.status, ajout.body.error], [403, REFUS_ADMINISTRATION], 'ajout au parc');
+      const archivage = await envoyer('post', `/api/clients/${client.id}/equipements/${equipement.id}/archiver`, assistante, {});
+      assert.deepEqual([archivage.status, archivage.body.error], [403, REFUS_ADMINISTRATION], 'archivage du parc');
+      assert.equal(await empreinte(), avantParc, 'aucune écriture du parc');
+      assert.equal((await prisma.equipementInstalle.findUniqueOrThrow({ where: { id: equipement.id } })).statut, 'INSTALLE');
+
+      // Les sept autres types : refusés au message exact sur les sept écritures et la lecture du parc ; rien n'est écrit.
+      const contactId = contact.body.id;
+      const siteId = siteCree.body.id;
+      const routes = [
+        ['création', (auth) => envoyer('post', '/api/clients', auth, { raisonSociale: `TEST Client refusé AT-2a ${suffixe}` })],
+        ['modification', (auth) => envoyer('put', `/api/clients/${client.id}`, auth, { raisonSociale: `TEST Client détourné AT-2a ${suffixe}` })],
+        ['désactivation', (auth) => envoyer('delete', `/api/clients/${client.id}`, auth)],
+        ['contact (création)', (auth) => envoyer('post', `/api/clients/${client.id}/contacts`, auth, { nom: 'Refusé' })],
+        ['contact (modification)', (auth) => envoyer('put', `/api/clients/${id}/contacts/${contactId}`, auth, { nom: 'Refusé' })],
+        ['site (création)', (auth) => envoyer('post', `/api/clients/${client.id}/sites`, auth, { nom: 'TEST Site refusé', adresse: '1 rue', codePostal: '14000', ville: 'Caen' })],
+        ['site (modification)', (auth) => envoyer('put', `/api/clients/${id}/sites/${siteId}`, auth, { ville: 'Refusée' })],
+        ['parc (lecture)', (auth) => lire(`/api/clients/${client.id}/equipements`, auth)],
+      ];
+      const avant = await empreinte();
+      for (const [cleCompte] of AUTRES_TYPES) {
+        for (const [cas, appel] of routes) {
+          const res = await appel(jeton(cleCompte));
+          assert.deepEqual([res.status, res.body?.error], [403, REFUS_GESTION], `${cleCompte}, ${cas}`);
+        }
+      }
+      assert.equal(await empreinte(), avant, 'aucun refus n’écrit');
+      // L'administration et le directeur écrivent toujours ; une clé clients:write aussi (la garde ne vaut qu'en session).
+      for (const auteur of ['admin', 'directeur']) {
+        const ecrit = await envoyer('put', `/api/clients/${client.id}`, jeton(auteur), { telephone: `02 31 00 00 0${auteur === 'admin' ? 1 : 2}` });
+        assert.equal(ecrit.status, 200, `${auteur} : ${JSON.stringify(ecrit.body)}`);
+      }
+      assert.equal((await prisma.client.findUniqueOrThrow({ where: { id: client.id } })).telephone, '02 31 00 00 02');
+      const parCle = await envoyer('post', '/api/v1/clients', await cle('TEST AT-2a clé clients', ['clients:write']), { raisonSociale: `TEST Client par clé AT-2a ${suffixe}` });
+      assert.equal(parCle.status, 201, JSON.stringify(parCle.body));
+    });
+
+    // Cadrage v2, C1 (réponses 3 et 9) : requireGestionContrats sur la liste, le PDF, les envois, le journal, l'avance
+    // d'échéance, la génération d'une visite et le statut ; la création hors devis, la couverture et l'anticipation restent à
+    // l'administration (choix par défaut, à confirmer). Journaux à son nom (cadrage, « Contrats »).
+    test('contrats : liste, PDF, envois, visite générée, échéance avancée, suspension, réactivation et clôture par elle, journaux et envoi à son nom ; création hors devis, couverture et anticipation refusées sans écriture ; les sept autres types refusés au message exact sur chaque route', async () => {
+      const assistante = jeton('assistante');
+      const contrat = await nouveauContrat('contrat géré');
+      const liste = await lire('/api/contrats-maintenance', assistante);
+      assert.equal(liste.status, 200, JSON.stringify(liste.body));
+      assert.ok(liste.body.some((c) => c.id === contrat.id), 'contrat listé');
+      const pdf = await lire(`/api/contrats-maintenance/${contrat.id}/document.pdf`, assistante);
+      assert.equal(pdf.status, 200);
+      assert.match(pdf.headers['content-type'], /^application\/pdf/);
+      const envois = await lire(`/api/contrats-maintenance/${contrat.id}/envois`, assistante);
+      assert.equal(envois.status, 200, JSON.stringify(envois.body));
+      assert.ok(envois.body.proposition, 'proposition d’envoi');
+      const envoi = await envoyer('post', `/api/contrats-maintenance/${contrat.id}/envois`, assistante, { destinataire: `client.${suffixe}@at2a.test` });
+      assert.equal(envoi.status, 201, JSON.stringify(envoi.body));
+      const [envoiEnBase] = await prisma.envoiDocument.findMany({ where: { contratMaintenanceId: contrat.id } });
+      assert.deepEqual([envoiEnBase.auteurId, envoiEnBase.auteurNom, envoiEnBase.destinataire, envoiEnBase.canal], [comptes.assistante.id, comptes.assistante.name, `client.${suffixe}@at2a.test`, 'MESSAGERIE']);
+      // Visite de l'échéance, générée par elle, puis terminée : l'échéance avance d'une période (trois mois), à son nom.
+      const visite = await envoyer('post', `/api/contrats-maintenance/${contrat.id}/generer-intervention`, assistante, {});
+      assert.equal(visite.status, 201, JSON.stringify(visite.body));
+      const [creationVisite] = await prisma.journalSaisieChantier.findMany({ where: { interventionId: visite.body.id, action: 'CREATION_CONTRAT' } });
+      assert.deepEqual([creationVisite.auteurId, creationVisite.auteurNom], [comptes.assistante.id, comptes.assistante.name]);
+      for (const statut of ['PLANIFIEE', 'EN_COURS']) assert.equal((await envoyer('patch', `/api/interventions/${visite.body.id}/statut`, sa, { statut })).status, 200);
+      const fin = await terminerIntervention(visite.body.id, saJeton);
+      assert.equal(fin.status, 200, JSON.stringify(fin.body));
+      const avance = await envoyer('post', `/api/contrats-maintenance/${contrat.id}/avancer-echeance`, assistante, {});
+      assert.equal(avance.status, 200, JSON.stringify(avance.body));
+      const [a, m, j] = (await jourIso()).split('-').map(Number);
+      const attendue = new Date(Date.UTC(a, m - 1 + 3, 1));
+      attendue.setUTCDate(Math.min(j, new Date(Date.UTC(attendue.getUTCFullYear(), attendue.getUTCMonth() + 1, 0)).getUTCDate()));
+      assert.equal((await prisma.contratMaintenance.findUniqueOrThrow({ where: { id: contrat.id } })).prochaineEcheance.toISOString().slice(0, 10), attendue.toISOString().slice(0, 10));
+      // Statut : suspension, réactivation, clôture.
+      for (const [statut, motif] of [['SUSPENDU', 'TEST AT-2a suspension'], ['ACTIF', 'TEST AT-2a réactivation'], ['TERMINE', 'TEST AT-2a clôture']]) {
+        const res = await envoyer('patch', `/api/contrats-maintenance/${contrat.id}/statut`, assistante, { statut, motif });
+        assert.equal(res.status, 200, `${statut} : ${JSON.stringify(res.body)}`);
+        assert.equal((await prisma.contratMaintenance.findUniqueOrThrow({ where: { id: contrat.id } })).statut, statut);
+      }
+      const journal = await prisma.journalSaisieChantier.findMany({ where: { contratMaintenanceId: contrat.id, auteurId: comptes.assistante.id }, orderBy: { createdAt: 'asc' } });
+      assert.deepEqual(journal.map((e) => [e.action, e.auteurNom]), [['AVANCEMENT_ECHEANCE', comptes.assistante.name], ['SUSPENSION', comptes.assistante.name], ['REACTIVATION', comptes.assistante.name], ['CLOTURE', comptes.assistante.name]]);
+      // Journal du contrat, lu par elle : la création (par le super administrateur) et ses quatre entrées.
+      const lu = await lire(`/api/contrats-maintenance/${contrat.id}/journal-saisies`, assistante);
+      assert.equal(lu.status, 200, JSON.stringify(lu.body));
+      const entrees = lu.body;
+      assert.ok(Array.isArray(entrees), JSON.stringify(lu.body).slice(0, 300));
+      for (const action of ['CREATION', 'AVANCEMENT_ECHEANCE', 'SUSPENSION', 'REACTIVATION', 'CLOTURE']) assert.ok(entrees.some((e) => e.action === action), `journal lu : ${action}`);
+
+      // Refus restés à l'administration, corps valides, sans écriture ; témoin : l'administration écrit la couverture.
+      const autre = await nouveauContrat('contrat couvert');
+      const corpsCreation = { clientId: client.id, titre: `TEST AT-2a contrat hors devis ${suffixe}`, periodiciteMois: 12, dureePrevisionnelleMinutes: 60, dateDebut: await aujourdhui() };
+      const corpsCouverture = { noteCouverture: 'TEST AT-2a couverture modifiée', motif: 'TEST AT-2a couverture' };
+      const avant = await empreinte();
+      for (const [cas, appel] of [
+        ['création hors devis', () => envoyer('post', '/api/contrats-maintenance', assistante, corpsCreation)],
+        ['couverture', () => envoyer('patch', `/api/contrats-maintenance/${autre.id}`, assistante, corpsCouverture)],
+        ['anticipation de la génération', () => envoyer('put', '/api/parametres', assistante, { anticipationVisitesJours: 45 })],
+      ]) {
+        const res = await appel();
+        assert.deepEqual([res.status, res.body?.error], [403, REFUS_ADMINISTRATION], cas);
+      }
+      assert.equal(await empreinte(), avant, 'aucun refus n’écrit');
+      const couvert = await envoyer('patch', `/api/contrats-maintenance/${autre.id}`, sa, corpsCouverture);
+      assert.equal(couvert.status, 200, JSON.stringify(couvert.body));
+
+      // Les sept autres types, sur les dix routes de la gestion des contrats : refus au message exact, sans écriture.
+      const routes = [
+        ['liste', (auth) => lire('/api/contrats-maintenance', auth)],
+        ['état de la génération', (auth) => lire('/api/contrats-maintenance/generation-visites', auth)],
+        ['passage manuel', (auth) => envoyer('post', '/api/contrats-maintenance/generation-visites', auth, {})],
+        ['journal', (auth) => lire(`/api/contrats-maintenance/${autre.id}/journal-saisies`, auth)],
+        ['PDF', (auth) => lire(`/api/contrats-maintenance/${autre.id}/document.pdf`, auth)],
+        ['envois (lecture)', (auth) => lire(`/api/contrats-maintenance/${autre.id}/envois`, auth)],
+        ['envoi', (auth) => envoyer('post', `/api/contrats-maintenance/${autre.id}/envois`, auth, { destinataire: 'refus@at2a.test' })],
+        ['statut', (auth) => envoyer('patch', `/api/contrats-maintenance/${autre.id}/statut`, auth, { statut: 'SUSPENDU', motif: 'TEST AT-2a refusé' })],
+        ['avance d’échéance', (auth) => envoyer('post', `/api/contrats-maintenance/${autre.id}/avancer-echeance`, auth, {})],
+        ['visite', (auth) => envoyer('post', `/api/contrats-maintenance/${autre.id}/generer-intervention`, auth, {})],
+      ];
+      const avantAutres = await empreinte();
+      for (const [cleCompte] of AUTRES_TYPES) {
+        for (const [cas, appel] of routes) {
+          const res = await appel(jeton(cleCompte));
+          assert.deepEqual([res.status, res.body?.error], [403, REFUS_GESTION], `${cleCompte}, ${cas}`);
+        }
+      }
+      assert.equal(await empreinte(), avantAutres, 'aucun refus n’écrit');
+    });
+
+    // Cadrage v2, C1 et ajout T3 (« le passage manuel de la génération par elle, avec le journal à son nom ») : le passage
+    // lancé à la main, au nom de son auteur, et le préfixe du journal devenu « Génération des visites lancée à la main : ».
+    test('génération des visites lancée à la main par elle : passage à son nom, visite et entrée au préfixe « Génération des visites lancée à la main : » ; état lu ; réglage vide : 409 ; anticipation réglée par l’administration seule', async () => {
+      const assistante = jeton('assistante');
+      try {
+        assert.equal((await envoyer('put', '/api/parametres', sa, { anticipationVisitesJours: '' })).status, 200);
+        const sansReglage = await envoyer('post', '/api/contrats-maintenance/generation-visites', assistante, {});
+        assert.deepEqual([sansReglage.status, sansReglage.body.error], [409, 'La génération automatique des visites est désactivée : réglez d’abord son anticipation.']);
+        assert.equal((await envoyer('put', '/api/parametres', sa, { anticipationVisitesJours: 30 })).status, 200);
+        const contrat = await nouveauContrat('génération manuelle');
+        const passage = await envoyer('post', '/api/contrats-maintenance/generation-visites', assistante, {});
+        assert.equal(passage.status, 201, JSON.stringify(passage.body));
+        const execution = passage.body.execution;
+        assert.deepEqual([execution.declenchement, execution.cleJourAutomatique, execution.auteurId, execution.auteurNom, execution.anticipationJours], ['MANUEL', null, comptes.assistante.id, comptes.assistante.name, 30]);
+        assert.ok(!(execution.erreurs ?? []).some((e) => e.contratId === contrat.id), JSON.stringify(execution.erreurs));
+        const [visite] = await prisma.intervention.findMany({ where: { contratMaintenanceId: contrat.id } });
+        assert.ok(visite, 'visite créée');
+        assert.equal(visite.createdById, comptes.assistante.id);
+        const creation = await prisma.journalSaisieChantier.findFirstOrThrow({ where: { interventionId: visite.id } });
+        // Lecture écartée : l'ancien préfixe « Génération des visites lancée par un administrateur : ».
+        assert.deepEqual([creation.action, creation.auteurId, creation.auteurNom, creation.motif],
+          ['CREATION_CONTRAT', comptes.assistante.id, comptes.assistante.name, `Génération des visites lancée à la main : échéance du ${await aujourdhui()}.`]);
+        const etat = await lire('/api/contrats-maintenance/generation-visites', assistante);
+        assert.equal(etat.status, 200, JSON.stringify(etat.body));
+        assert.deepEqual([etat.body.anticipationVisitesJours, etat.body.derniereExecution?.id], [30, execution.id]);
+      } finally {
+        assert.equal((await envoyer('put', '/api/parametres', sa, { anticipationVisitesJours: reglagesInitiaux.anticipationVisitesJours ?? '' })).status, 200);
+      }
     });
   });
 }

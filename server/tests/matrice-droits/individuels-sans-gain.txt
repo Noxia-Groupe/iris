@@ -114,36 +114,6 @@ AT | chantiers:write | POST /api/achats | — | défaut | entrée | 403 « Permi
 AT | chantiers:write | POST /api/heures | — | défaut | entrée | 403 « Permission requise : chantiers:write » → 400 validation-avant-droit
 AT | clients:write | GET /api/me | — | défaut | valeurs . | permissions : + clients:write
 AT | company:read | GET /api/me | — | défaut | valeurs . | permissions : + company:read
-AT | devis:read | GET /api/devis/:id/document.pdf | inexistant | défaut | entrée | 403 « Permission requise : devis:read » → 404 « Devis introuvable. »
-AT | devis:read | GET /api/devis/:id/envois | inexistant | défaut | entrée | 403 « Permission requise : devis:read » → 404 « Devis introuvable. »
-AT | devis:read | GET /api/devis/a-convertir | — | défaut | entrée | 403 « Permission requise : devis:read » → 403 « Permission requise : devis:write »
-AT | devis:read | GET /api/me | — | défaut | valeurs . | permissions : + devis:read
-AT | devis:write | GET /api/me | — | défaut | valeurs . | permissions : + devis:write
-AT | devis:write | PATCH /api/devis/:id | devis-brouillon | défaut | entrée | 403 « Permission requise : devis:write » → 400 validation-avant-droit
-AT | devis:write | PATCH /api/devis/:id | devis-converti | défaut | entrée | 403 « Permission requise : devis:write » → 400 validation-avant-droit
-AT | devis:write | PATCH /api/devis/:id | devis-signe | défaut | entrée | 403 « Permission requise : devis:write » → 400 validation-avant-droit
-AT | devis:write | PATCH /api/devis/:id | inexistant | défaut | entrée | 403 « Permission requise : devis:write » → 400 validation-avant-droit
-AT | devis:write | POST /api/devis | — | défaut | entrée | 403 « Permission requise : devis:write » → 400 validation-avant-droit
-AT | devis:write | POST /api/devis/:id/convertir | devis-brouillon | défaut | entrée | 403 « Permission requise : devis:write » → 400 validation-avant-droit
-AT | devis:write | POST /api/devis/:id/convertir | devis-converti | défaut | entrée | 403 « Permission requise : devis:write » → 400 validation-avant-droit
-AT | devis:write | POST /api/devis/:id/convertir | devis-signe | défaut | entrée | 403 « Permission requise : devis:write » → 400 validation-avant-droit
-AT | devis:write | POST /api/devis/:id/convertir | inexistant | défaut | entrée | 403 « Permission requise : devis:write » → 400 validation-avant-droit
-AT | devis:write | POST /api/devis/:id/duplication | inexistant | défaut | entrée | 403 « Permission requise : devis:write » → 404 « Devis introuvable. »
-AT | devis:write | PUT /api/devis/:id/statut | inexistant | défaut | entrée | 403 « Permission requise : devis:write » → 404 « Devis introuvable. »
-AT | droit devis | GET /api/devis/:id/document.pdf | inexistant | défaut | entrée | 403 « Permission requise : devis:read » → 404 « Devis introuvable. »
-AT | droit devis | GET /api/devis/:id/envois | inexistant | défaut | entrée | 403 « Permission requise : devis:read » → 404 « Devis introuvable. »
-AT | droit devis | GET /api/me | — | défaut | valeurs . | permissions : + devis:read, + devis:write
-AT | droit devis | PATCH /api/devis/:id | devis-brouillon | défaut | entrée | 403 « Permission requise : devis:write » → 400 validation-avant-droit
-AT | droit devis | PATCH /api/devis/:id | devis-converti | défaut | entrée | 403 « Permission requise : devis:write » → 400 validation-avant-droit
-AT | droit devis | PATCH /api/devis/:id | devis-signe | défaut | entrée | 403 « Permission requise : devis:write » → 400 validation-avant-droit
-AT | droit devis | PATCH /api/devis/:id | inexistant | défaut | entrée | 403 « Permission requise : devis:write » → 400 validation-avant-droit
-AT | droit devis | POST /api/devis | — | défaut | entrée | 403 « Permission requise : devis:write » → 400 validation-avant-droit
-AT | droit devis | POST /api/devis/:id/convertir | devis-brouillon | défaut | entrée | 403 « Permission requise : devis:write » → 400 validation-avant-droit
-AT | droit devis | POST /api/devis/:id/convertir | devis-converti | défaut | entrée | 403 « Permission requise : devis:write » → 400 validation-avant-droit
-AT | droit devis | POST /api/devis/:id/convertir | devis-signe | défaut | entrée | 403 « Permission requise : devis:write » → 400 validation-avant-droit
-AT | droit devis | POST /api/devis/:id/convertir | inexistant | défaut | entrée | 403 « Permission requise : devis:write » → 400 validation-avant-droit
-AT | droit devis | POST /api/devis/:id/duplication | inexistant | défaut | entrée | 403 « Permission requise : devis:write » → 404 « Devis introuvable. »
-AT | droit devis | PUT /api/devis/:id/statut | inexistant | défaut | entrée | 403 « Permission requise : devis:write » → 404 « Devis introuvable. »
 AT | equipements:read | GET /api/me | — | défaut | valeurs . | permissions : + equipements:read
 AT | equipements:write | GET /api/me | — | défaut | valeurs . | permissions : + equipements:write
 AT | finances:read | GET /api/me | — | défaut | valeurs . | permissions : + finances:read
