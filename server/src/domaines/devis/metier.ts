@@ -201,7 +201,7 @@ export async function resoudreLignesDevis(
   ecritPrixAchat: boolean,
 ) {
   if (!ecritPrixAchat && payload.references.some((r) => r.prixAchatUnitaireHt !== undefined)) {
-    throw new DevisDroitError('Le prix d’achat prévu est réservé aux administrateurs.');
+    throw new DevisDroitError('Le prix d’achat prévu est réservé à l’administration et à l’assistante technique.');
   }
   const parId = new Map(existantes.map((ligne) => [ligne.id, ligne]));
   const vues = new Set<string>();

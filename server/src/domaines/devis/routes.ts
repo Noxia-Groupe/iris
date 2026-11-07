@@ -2,7 +2,7 @@ import express from 'express';
 import type { Express } from 'express';
 import crypto from 'crypto';
 import { prisma, transactionVerifiee } from '../../db';
-import { ROLE_DIRECTEUR, isAdminRole } from '../../droits/roles';
+import { coutPrevuSuitRentabilite, gereLesChantiersEnCours, gereLesContrats } from '../../droits/roles';
 import { requirePermission } from '../../droits/permissions';
 import { voitPrixAchatDevis, ecritPrixAchatDevis } from '../../droits/visibilite';
 import { type AuthRequest, requireAuth } from '../../http/auth';
@@ -21,6 +21,7 @@ import { IdentiteEmetteurIncompleteError, figerIdentiteEmetteur } from '../docum
 import { IdentiteClientIncompleteError, exigerIdentiteClient } from '../documents/identiteClient';
 import { type CatalogueFamily, catalogueFamily, catalogueModels } from '../catalogue/metier';
 import { sanitizeTypes, refusTitulaire, refusCommercial } from '../chantiers/metier';
+import { voitRentabilite } from '../chantiers/droits';
 import { SaisieInterventionInvalide, creerInterventionNumerotee, estEncadrementCoutIntervention, exposerIntervention, lireDetailsIntervention } from '../interventions/metier';
 import { SaisieContratInvalide, creerContratMaintenance, lireSaisieContrat } from '../contrats/metier';
 import {
@@ -254,15 +255,14 @@ const changerStatutDevis: express.RequestHandler = async (req, res) => { try {
 // les abonnements (prévu). Chantier + intervention : l'intervention et ses suites sont rattachées au
 // chantier, dans les deux ordres (décision de Nelson du 27-10-2026 à 21:41 UTC, rattachement.ts).
 //
-// L'intervention et le contrat ne se créent que depuis une session, avec les droits de leur
-// création directe : l'encadrement SAV pour l'intervention, l'administration pour le contrat.
-// Aucune clé d'intégration ne crée l'un ou l'autre, ni par cette route ni ailleurs.
+// L'intervention et le contrat ne se créent que depuis une session : l'encadrement SAV pour
+// l'intervention, la gestion des contrats (administration et assistante technique, cf. gereLesContrats)
+// pour le contrat. Aucune clé d'intégration ne crée l'un ou l'autre, ni par cette route ni ailleurs.
 //
 // Depuis l'Administration, la même conversion ouvre le chantier avec son titulaire, son
-// commercial, ses types et sa date de début. Ces choix relèvent de la fiche, que seuls
-// l'administration et le titulaire modifient : ils ne sont acceptés que d'une session
-// administrateur. Sans eux, c'est la conversion de l'écran Devis, et le chantier s'attribue
-// ensuite depuis sa fiche.
+// commercial, ses types et sa date de début. Ces choix ne sont acceptés que d'une session de
+// l'administration ou d'une assistante technique (cf. gereLesChantiersEnCours). Sans eux, c'est la
+// conversion de l'écran Devis, et le chantier s'attribue ensuite depuis sa fiche.
 const CHAMPS_OUVERTURE_CHANTIER = ['responsableId', 'commercialId', 'types', 'dateDebut'];
 // Limite décidée par Nelson, gardée dans le code et bornée en base (rang 1 ou 2), dans la ligne de
 // la règle C-16 (un chantier par affaire) de la proposition de paramétrage.
@@ -315,13 +315,16 @@ const convertirDevis: express.RequestHandler = async (req, res) => { try {
   if (!(CIBLES_CONVERSION as string[]).includes(valeurCible)) throw new DevisSaisieError('Cible de conversion non disponible.');
   const cible = valeurCible as CibleConversion;
   const auteur = (req as AuthRequest).user;
-  if (cible === 'CHANTIER' && CHAMPS_OUVERTURE_CHANTIER.some(cle => cle in body) && ((req as ApiRequest).apiKey || !isAdminRole(auteur?.role))) {
-    return void res.status(403).json({ error: 'Seule l’administration choisit le titulaire, le commercial, les types et la date de début à l’ouverture du chantier ; ils se modifient ensuite depuis sa fiche.' });
+  // Titulaire, commercial, types et date de début à l'ouverture : l'administration et l'assistante technique
+  // (réponse de Nelson du 06-11-2026, 5 : « Oui, comme l'admin » ; cf. gereLesChantiersEnCours).
+  if (cible === 'CHANTIER' && CHAMPS_OUVERTURE_CHANTIER.some(cle => cle in body) && ((req as ApiRequest).apiKey || !gereLesChantiersEnCours(auteur?.role))) {
+    return void res.status(403).json({ error: 'Seules l’administration et l’assistante technique choisissent le titulaire, le commercial, les types et la date de début à l’ouverture du chantier ; ils se modifient ensuite depuis sa fiche.' });
   }
   if (cible !== 'CHANTIER') {
     if ((req as ApiRequest).apiKey || !auteur) return void res.status(403).json({ error: 'Une intervention ou un contrat ne se crée depuis un devis que dans une session de l’application.' });
     if (cible === 'INTERVENTION' && !estEncadrementCoutIntervention(auteur.role)) return void res.status(403).json({ error: 'Création réservée à l’encadrement SAV.' });
-    if (cible === 'CONTRAT' && !isAdminRole(auteur.role)) return void res.status(403).json({ error: 'La création d’un contrat de maintenance est réservée à l’administration.' });
+    // Conversion en contrat : la gestion des contrats (réponses de Nelson du 06-11-2026, 3 et 9 ; cf. gereLesContrats).
+    if (cible === 'CONTRAT' && !gereLesContrats(auteur.role)) return void res.status(403).json({ error: 'La création d’un contrat de maintenance est réservée à l’administration et à l’assistante technique.' });
     if (CHAMPS_CHANTIER_SEUL.some(cle => cle in body)) throw new DevisSaisieError('Le titulaire, le commercial et les types ne s’attribuent qu’à l’ouverture d’un chantier.');
   }
   const libelles = LIBELLES_CIBLE[cible];
@@ -419,11 +422,13 @@ const convertirDevis: express.RequestHandler = async (req, res) => { try {
     return chantier;
   });
   // Le coût matériel prévu d'un chantier ouvert se lit comme le prix d'achat prévu des devis dont il vient ;
-  // pour le directeur, il suit la rentabilité du chantier (réponse de Nelson du 06-11-2026, « Chantiers
-  // seulement », cf. voitCoutPrevuParPrixAchat).
+  // pour le directeur et l'assistante technique, il suit la rentabilité du chantier (réponse de Nelson du
+  // 06-11-2026, « Chantiers seulement », cf. voitCoutPrevuParPrixAchat et coutPrevuSuitRentabilite).
   const lu = decimalToNumber(resultat) as Record<string, unknown>;
-  const directeur = !(req as ApiRequest).apiKey && (req as AuthRequest).user?.role === ROLE_DIRECTEUR;
-  const coutPrevuVisible = directeur ? (await getParametres()).rentabiliteDirecteurs : voitPrixAchatDevis(req);
+  const suitRentabilite = !(req as ApiRequest).apiKey && coutPrevuSuitRentabilite((req as AuthRequest).user?.role);
+  const coutPrevuVisible = suitRentabilite
+    ? voitRentabilite(req, { responsableId: (lu.responsableId as string | null | undefined) ?? null }, await getParametres())
+    : voitPrixAchatDevis(req);
   res.status(201).json('coutMaterielPrevu' in lu && !coutPrevuVisible ? { ...lu, coutMaterielPrevu: null } : lu);
 } catch (error) {
   // Défense en profondeur : les contraintes uniques de DevisConversion (un type par dossier et par

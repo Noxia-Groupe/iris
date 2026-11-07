@@ -55,6 +55,36 @@ export function litToutesLesAffaires(role: string | undefined | null): boolean {
   return isAdminRole(role) || role === ROLE_ASSISTANTE_TECHNIQUE;
 }
 
+// Capacités de la gestion « comme l'administration » ouvertes à l'assistante technique par la deuxième PR
+// de son lot (AT-2a ; réponses de Nelson du 06-11-2026, 3, 4, 5, 8 et 9). Chacune nomme ce qu'elle ouvre ;
+// ce qui reste à l'administration garde isAdminRole.
+// - gereLesClients : écritures des clients (fiche, contacts, sites, désactivation) et lecture du parc ;
+//   l'écriture du parc et le catalogue restent à l'administration.
+export function gereLesClients(role: string | undefined | null): boolean {
+  return isAdminRole(role) || role === ROLE_ASSISTANTE_TECHNIQUE;
+}
+// - gereLesContrats : contrats de maintenance (liste, fiche, statut, visites, génération, PDF, envois, journal)
+//   et conversion d'un devis en contrat ; création hors devis, couverture et réglages restent à l'administration.
+export function gereLesContrats(role: string | undefined | null): boolean {
+  return isAdminRole(role) || role === ROLE_ASSISTANTE_TECHNIQUE;
+}
+// - litEtEcritPrixAchatDevis : prix d'achat prévu des lignes de devis (lecture et écriture), et, en lecture,
+//   celui des fiches du catalogue et du parc ; jamais le taux horaire ni le coût de main-d'œuvre.
+export function litEtEcritPrixAchatDevis(role: string | undefined | null): boolean {
+  return isAdminRole(role) || role === ROLE_ASSISTANTE_TECHNIQUE;
+}
+// - gereLesChantiersEnCours : ouverture d'un chantier avec ses attributions (titulaire, commercial, types, date
+//   de début), réponse 5 ; clôture, réouverture et encaissement restent à l'administration.
+export function gereLesChantiersEnCours(role: string | undefined | null): boolean {
+  return isAdminRole(role) || role === ROLE_ASSISTANTE_TECHNIQUE;
+}
+// Coût matériel prévu d'un chantier qui suit sa rentabilité, et non la lecture des prix d'achat prévus des
+// devis : le directeur (réponse de Nelson du 06-11-2026, « Chantiers seulement ») et l'assistante technique,
+// qui lisent ces prix mais dont un réglage décide de la rentabilité des chantiers (choix par défaut, à confirmer).
+export function coutPrevuSuitRentabilite(role: string | undefined | null): boolean {
+  return role === ROLE_DIRECTEUR || role === ROLE_ASSISTANTE_TECHNIQUE;
+}
+
 // « Aussi commercial » : réservé aux types ADMIN et SUPERADMIN (décision 7 de la proposition de
 // droits, #182), seuls connus de COMMERCIAL_OR_FILTER ; le directeur, qui a pourtant les droits de
 // l'administration, n'est pas marqué commercial.

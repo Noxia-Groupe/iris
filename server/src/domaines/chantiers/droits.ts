@@ -1,5 +1,5 @@
 import express from 'express';
-import { ROLE_ASSISTANTE_TECHNIQUE, ROLE_TECHNICIEN, ROLE_RESPONSABLE, ROLE_DIRECTEUR, isAdminRole, isSuperAdminRole } from '../../droits/roles';
+import { ROLE_ASSISTANTE_TECHNIQUE, ROLE_TECHNICIEN, ROLE_RESPONSABLE, ROLE_DIRECTEUR, coutPrevuSuitRentabilite, isAdminRole, isSuperAdminRole } from '../../droits/roles';
 import { requirePermission } from '../../droits/permissions';
 import { voitMontantsChantier, voitPrixAchatDevis, sansMontantsSaisie, sansTauxHoraire } from '../../droits/visibilite';
 import type { AuthRequest } from '../../http/auth';
@@ -133,11 +133,11 @@ export function peutCloturerChantier(user: AuthRequest['user'], chantier: { resp
 }
 
 // Coût matériel prévu du chantier : à qui lit les prix d'achat prévus des devis ou reçoit la rentabilité
-// du chantier. Pour le directeur, qui lit ces prix avec les droits de l'administration, il suit la
-// rentabilité du chantier, comme le montant vendu (décisions de Nelson du 30-10-2026 et du 06-11-2026,
-// « Chantiers seulement »).
+// du chantier. Pour le directeur et l'assistante technique, qui lisent ces prix, il suit la rentabilité du
+// chantier, comme le montant vendu (décisions de Nelson du 30-10-2026 et du 06-11-2026, « Chantiers
+// seulement » ; cf. coutPrevuSuitRentabilite).
 export function voitCoutPrevuParPrixAchat(req: express.Request): boolean {
-  if (!(req as ApiRequest).apiKey && (req as AuthRequest).user?.role === ROLE_DIRECTEUR) return false;
+  if (!(req as ApiRequest).apiKey && coutPrevuSuitRentabilite((req as AuthRequest).user?.role)) return false;
   return voitPrixAchatDevis(req);
 }
 export function voitCoutPrevu(req: express.Request, rentabilite: boolean): boolean {

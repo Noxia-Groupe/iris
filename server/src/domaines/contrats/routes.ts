@@ -1,7 +1,7 @@
 import type { Express, RequestHandler } from 'express';
 import { prisma, transactionVerifiee } from '../../db';
 import { type AuthRequest, requireAuth } from '../../http/auth';
-import { requireAdmin } from '../../http/gardes';
+import { requireAdmin, requireGestionContrats } from '../../http/gardes';
 import { paramId } from '../../http/requete';
 import { decimalToNumber } from '../../commun/montants';
 import { exposerIntervention } from '../interventions/metier';
@@ -34,8 +34,8 @@ const imprimerContrat: RequestHandler = async (req, res) => {
 };
 
 // Envoi du contrat de maintenance par la messagerie de l'utilisateur, et journal de ses envois
-// (lot 6a-4d), sur le modèle du lot 6a-3 (cf. documents/envois.ts) : réservés à l'administration, en
-// session, comme le PDF du contrat. Lecture : destinataire, objet et texte proposés, et envois déjà
+// (lot 6a-4d), sur le modèle du lot 6a-3 (cf. documents/envois.ts) : réservés à la gestion des contrats
+// (administration et assistante technique, cf. requireGestionContrats), en session, comme le PDF du contrat. Lecture : destinataire, objet et texte proposés, et envois déjà
 // préparés, du plus récent au plus ancien, dans une même photo de la base ; microsoft365 : l'envoi par
 // Microsoft 365 est proposé (lot 6b-1b). Un contrat annulé garde son journal et sa proposition
 // lisibles ; l'écran ne lui affiche pas de bouton « Envoyer ».
@@ -72,11 +72,14 @@ const envoyerContrat: RequestHandler = async (req, res) => {
 };
 
 export function enregistrerRoutesContrats(app: Express): void {
+  // Gestion des contrats : l'administration et l'assistante technique (réponses de Nelson du 06-11-2026, 3
+  // et 9 ; cf. requireGestionContrats). Restent à l'administration, choix par défaut, le plus restrictif, à
+  // confirmer : la création hors devis et la couverture (requireAdmin ci-dessous).
   // Le planning est une projection ; cette route crée le dossier métier traçable qui lui est
   // antérieur. Une affectation planning ou un pointage ne peut pas exister à sa place.
   // Contrats de maintenance : le contrat est le document source du cycle. Le planning ne sera
   // qu'une projection des interventions qu'il génère ; aucune échéance n'est inférée d'un écran.
-  app.get('/api/contrats-maintenance', requireAuth, requireAdmin, async (_req, res) => {
+  app.get('/api/contrats-maintenance', requireAuth, requireGestionContrats, async (_req, res) => {
     const contrats = await prisma.contratMaintenance.findMany({
       include: { client: { select: { id: true, raisonSociale: true } }, site: { select: { id: true, nom: true, ville: true } } },
       orderBy: [{ prochaineEcheance: 'asc' }, { createdAt: 'desc' }],
@@ -85,9 +88,10 @@ export function enregistrerRoutesContrats(app: Express): void {
   });
 
   // Génération automatique des visites (lot pilote 5) : état du dernier passage, alerte éventuelle,
-  // et passage lancé à la main (même traitement, au nom de l'administrateur), réservés à
-  // l'administration comme les contrats.
-  app.get('/api/contrats-maintenance/generation-visites', requireAuth, requireAdmin, async (_req, res) => {
+  // et passage lancé à la main (même traitement, au nom de son auteur), réservés à la gestion des
+  // contrats (réponse de Nelson du 06-11-2026, 9 : « génération des visites »). Le réglage de
+  // l'anticipation reste à l'administration (PUT /api/parametres).
+  app.get('/api/contrats-maintenance/generation-visites', requireAuth, requireGestionContrats, async (_req, res) => {
     try {
       res.json(await etatGenerationVisites());
     } catch (error) {
@@ -95,7 +99,7 @@ export function enregistrerRoutesContrats(app: Express): void {
     }
   });
 
-  app.post('/api/contrats-maintenance/generation-visites', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
+  app.post('/api/contrats-maintenance/generation-visites', requireAuth, requireGestionContrats, async (req: AuthRequest, res) => {
     try {
       const execution = await executerGenerationVisites({ type: 'MANUEL', req });
       res.status(201).json({ execution, etat: await etatGenerationVisites() });
@@ -106,7 +110,7 @@ export function enregistrerRoutesContrats(app: Express): void {
     }
   });
 
-  app.get('/api/contrats-maintenance/:id/journal-saisies', requireAuth, requireAdmin, async (req, res) => {
+  app.get('/api/contrats-maintenance/:id/journal-saisies', requireAuth, requireGestionContrats, async (req, res) => {
     try {
       const contrat = await prisma.contratMaintenance.findUnique({ where: { id: paramId(req) }, select: { id: true } });
       if (!contrat) return res.status(404).json({ error: 'Contrat de maintenance introuvable.' });
@@ -118,10 +122,10 @@ export function enregistrerRoutesContrats(app: Express): void {
   });
 
   // En session seulement, sans route /api/v1, comme toutes les routes des contrats.
-  app.get('/api/contrats-maintenance/:id/document.pdf', requireAuth, requireAdmin, imprimerContrat);
+  app.get('/api/contrats-maintenance/:id/document.pdf', requireAuth, requireGestionContrats, imprimerContrat);
   // Envoi par la messagerie et journal des envois (lot 6a-4d) : en session seulement, comme le PDF.
-  app.get('/api/contrats-maintenance/:id/envois', requireAuth, requireAdmin, lireEnvoisContrat);
-  app.post('/api/contrats-maintenance/:id/envois', requireAuth, requireAdmin, envoyerContrat);
+  app.get('/api/contrats-maintenance/:id/envois', requireAuth, requireGestionContrats, lireEnvoisContrat);
+  app.post('/api/contrats-maintenance/:id/envois', requireAuth, requireGestionContrats, envoyerContrat);
 
   app.post('/api/contrats-maintenance', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
     try {
@@ -179,7 +183,7 @@ export function enregistrerRoutesContrats(app: Express): void {
     }
   });
 
-  app.patch('/api/contrats-maintenance/:id/statut', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
+  app.patch('/api/contrats-maintenance/:id/statut', requireAuth, requireGestionContrats, async (req: AuthRequest, res) => {
     try {
       const statut = String(req.body?.statut || '');
       if (!['ACTIF', 'SUSPENDU', 'TERMINE'].includes(statut)) return res.status(400).json({ error: 'Statut de contrat invalide.' });
@@ -210,7 +214,7 @@ export function enregistrerRoutesContrats(app: Express): void {
     }
   });
 
-  app.post('/api/contrats-maintenance/:id/avancer-echeance', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
+  app.post('/api/contrats-maintenance/:id/avancer-echeance', requireAuth, requireGestionContrats, async (req: AuthRequest, res) => {
     try {
       const resultat = await transactionVerifiee(async (tx) => {
         await verrouillerContratMaintenance(tx, paramId(req));
@@ -230,7 +234,7 @@ export function enregistrerRoutesContrats(app: Express): void {
     }
   });
 
-  app.post('/api/contrats-maintenance/:id/generer-intervention', requireAuth, requireAdmin, async (req: AuthRequest, res) => {
+  app.post('/api/contrats-maintenance/:id/generer-intervention', requireAuth, requireGestionContrats, async (req: AuthRequest, res) => {
     try {
       const resultat = await transactionVerifiee(async (tx) => {
         await verrouillerContratMaintenance(tx, paramId(req));

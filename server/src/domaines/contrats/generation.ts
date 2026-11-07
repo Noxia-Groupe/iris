@@ -29,7 +29,7 @@ export const DUREE_MAX_PASSAGE_MS = 60 * 60_000;
 // du jour civil de la société, puis les suivantes constatent qu'il a déjà eu lieu.
 export const INTERVALLE_VERIFICATION_MS = 15 * 60_000;
 const PREFIXE_AUTOMATIQUE = 'Génération automatique : ';
-const PREFIXE_MANUEL = 'Génération des visites lancée par un administrateur : ';
+const PREFIXE_MANUEL = 'Génération des visites lancée à la main : ';
 
 const jourEnDate = (jour: string) => new Date(`${jour}T00:00:00.000Z`);
 
@@ -66,7 +66,8 @@ async function traiterContrat(contratId: string, horizon: Date, req: AuthRequest
 
 // Passage de la génération. Automatique : au plus un par jour civil de la société (la clé du jour
 // est unique) ; renvoie null si l'anticipation est vide ou si le passage du jour a déjà eu lieu.
-// Manuel : lancé par un administrateur, à tout moment ; refusé si l'anticipation est vide.
+// Manuel : lancé par la gestion des contrats (administration, assistante technique), à tout moment ; refusé
+// si l'anticipation est vide.
 export async function executerGenerationVisites(
   declenchement: { type: 'AUTOMATIQUE' } | { type: 'MANUEL'; req: AuthRequest },
   instant = new Date(),
