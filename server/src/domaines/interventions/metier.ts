@@ -1,6 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../db';
-import { COMPTE_SYSTEME_ID, NOM_COMPTE_SYSTEME, ROLE_RESPONSABLE, isAdminRole } from '../../droits/roles';
+import { COMPTE_SYSTEME_ID, NOM_COMPTE_SYSTEME, ROLE_ASSISTANTE_TECHNIQUE, ROLE_RESPONSABLE, isAdminRole } from '../../droits/roles';
 import type { AuthRequest } from '../../http/auth';
 import { paramId } from '../../http/requete';
 import { aujourdHuiEntreprise, dateIsoStricte, dateSeuleEnJourCivil } from '../../commun/dates';
@@ -49,7 +49,10 @@ export function exposerIntervention(intervention: any) {
 }
 
 const STATUTS_COUT_INTERVENTION = ['A_PLANIFIER', 'PLANIFIEE', 'EN_COURS', 'TERMINEE'];
-export const estEncadrementCoutIntervention = (role: string | undefined) => isAdminRole(role) || role === 'CONDUCTEUR_TRAVAUX';
+// Encadrement du SAV : création d'une intervention, saisie, correction et archivage de son matériel. L'administration,
+// le conducteur et l'assistante technique (réponse de Nelson du 06-11-2026, « Oui, comme le conducteur ») ; hors
+// administration, ni taux ni coût de main-d'œuvre (cf. voitCoutMainOeuvre).
+export const estEncadrementCoutIntervention = (role: string | undefined) => isAdminRole(role) || role === 'CONDUCTEUR_TRAVAUX' || role === ROLE_ASSISTANTE_TECHNIQUE;
 
 export async function chargerInterventionCout(req: AuthRequest) {
   return prisma.intervention.findFirst({
@@ -113,9 +116,9 @@ export function totalHeuresInterventionAuCentime(heures: Array<{ nbrHeures: Pris
 }
 
 // Capacité « voit tout le SAV » : l'administration, directeur compris (décision de Nelson du
-// 24-10-2026, points 14 et 17). Aide nommée selon la capacité, que le lot de l'assistante technique
-// étendra sans nouvelle liste de types.
-export const voitToutLeSav = (role: string | undefined | null): boolean => isAdminRole(role);
+// 24-10-2026, points 14 et 17), et l'assistante technique, qui travaille sur toute la société
+// (section « lots prévus » du 24-10-2026, point 2).
+export const voitToutLeSav = (role: string | undefined | null): boolean => isAdminRole(role) || role === ROLE_ASSISTANTE_TECHNIQUE;
 
 // Hors administration, l'accès SAV reste ancré dans une relation persistante : affectation
 // explicite pour le technicien, responsable d'affaire pour le conducteur et équipe déclarée

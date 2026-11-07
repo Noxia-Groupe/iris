@@ -1,7 +1,7 @@
 import type { Express } from 'express';
 import { Prisma } from '@prisma/client';
 import { prisma, transactionVerifiee } from '../../db';
-import { ROLE_RESPONSABLE, ROLE_TECHNICIEN, isAdminRole } from '../../droits/roles';
+import { ROLE_ASSISTANTE_TECHNIQUE, ROLE_RESPONSABLE, ROLE_TECHNICIEN, isAdminRole } from '../../droits/roles';
 import { type AuthRequest, requireAuth } from '../../http/auth';
 import { blockCommercialEtAssimiles } from '../../http/gardes';
 import { paramId } from '../../http/requete';
@@ -32,18 +32,17 @@ import { interventionDansPerimetre, verrouillerIntervention } from './comptesRen
 //    disparaît une fois la suite créée (point 29) : POST /api/interventions/:id/suites.
 // La facturation et la marge de la suite viendront avec la seconde PR (« Deux PR »).
 //
-// Comptes (choix par défaut, à confirmer, docs/ROADMAP-PASSATION.md, section 4) : en attendant les lots
-// de droits, l'encadrement du suivi est celui qui organise aujourd'hui le SAV et le planning :
-// l'administration, le conducteur de travaux et le responsable (son équipe), chacun dans son périmètre
-// SAV relu sous le verrou de l'intervention. Le directeur n'a aujourd'hui aucun accès au SAV : il créera
-// la suite avec le lot « Directeur aligné sur l'administration », et l'assistante technique avec le sien.
+// Comptes (choix par défaut, à confirmer, docs/ROADMAP-PASSATION.md, section 4) : l'encadrement du suivi
+// est celui qui organise le SAV et le planning : l'administration (directeur compris), le conducteur de
+// travaux, le responsable (son équipe) et l'assistante technique (toute la société, points 16 et 28),
+// chacun dans son périmètre SAV relu sous le verrou de l'intervention.
 // Les autres types de compte sont refusés (403), comme aucune clé d'intégration.
 //
 // Verrous : l'intervention initiale (FOR UPDATE), puis, pour une visite, son contrat (FOR UPDATE), puis
 // l'affaire (FOR SHARE) : le même ordre que le placement au planning (intervention puis contrat) et que la
 // création d'une intervention rattachée à un chantier (affaire en partage).
 
-export const estEncadrementSuivi = (role: string | undefined) => isAdminRole(role) || role === 'CONDUCTEUR_TRAVAUX' || role === ROLE_RESPONSABLE;
+export const estEncadrementSuivi = (role: string | undefined) => isAdminRole(role) || role === 'CONDUCTEUR_TRAVAUX' || role === ROLE_RESPONSABLE || role === ROLE_ASSISTANTE_TECHNIQUE;
 
 class RefusSuivi extends Error {}
 class InterventionHorsPerimetre extends Error {}

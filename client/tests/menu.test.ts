@@ -2,8 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { sectionsMenu } from '../src/lib/menu.ts';
 import {
-  estExcluDesOperations, isAdminRole, isSuperAdminRole, peutConsulterAnnuaire, peutConsulterPlanning, peutEtreAussiCommercial, peutOuvrirAdministration,
-  peutVoirFinance, peutVoirStatistiques, roleLabel, ROLES_ANNUAIRE, TYPES_ADMINISTRATION, TYPES_COMPTE,
+  estEncadrementSav, estEncadrementSuivi, estExcluDesOperations, isAdminRole, isSuperAdminRole, peutAccederAuxDevis, peutConsulterAnnuaire, peutConsulterPlanning,
+  peutEtreAussiCommercial, peutOuvrirAdministration, peutVoirFinance, peutVoirInterventions, peutVoirStatistiques, roleLabel, ROLES_ANNUAIRE, ROLES_INTERVENTIONS,
+  TYPES_ADMINISTRATION, TYPES_COMPTE,
 } from '../src/lib/droits.ts';
 
 const liens = (role: string, planningActif = true, permissions: string[] = []) =>
@@ -16,7 +17,10 @@ const liens = (role: string, planningActif = true, permissions: string[] = []) =
 // l'administration (décision A3 du 16-10-2026), le planning et l'administration fermés au
 // directeur commercial, à l'assistante commerciale et au comptable (#179, décision 11), et le directeur, qui a les
 // droits de l'administration depuis le lot « Directeur aligné sur l'administration » (décision de Nelson du 24-10-2026,
-// point 14, « Tout, réglages compris »), hors réglages du super administrateur.
+// point 14, « Tout, réglages compris »), hors réglages du super administrateur. Enfin l'assistante technique (lot
+// « Assistante technique », PR AT-1, cadrage v2.1, « Écran ») : interventions SAV, planning, liste des chantiers, clients
+// et administration réduite, sans devis (sauf permission), journaux Travaux, contrats, facturation, statistiques,
+// performances ni catalogue.
 function attendu(role: string, planningActif: boolean, permissions: string[]) {
   const admin = role === 'ADMIN' || role === 'SUPERADMIN' || role === 'DIRECTEUR';
   const commercial = role === 'COMMERCIAL';
@@ -27,9 +31,9 @@ function attendu(role: string, planningActif: boolean, permissions: string[]) {
   const regles: [string, boolean][] = [
     ['/', true], ['/chantiers', true],
     ['/devis', role === 'SUPERADMIN' || permissions.includes('devis:read')],
-    ['/interventions', travaux || role === 'TECHNICIEN'],
+    ['/interventions', travaux || role === 'TECHNICIEN' || role === 'ASSISTANTE_TECHNIQUE'],
     ['/contrats-maintenance', admin], ['/prete-a-facturer', admin], ['/factures', admin], ['/reglements', admin], ['/mentions-legales', admin],
-    ['/comptabilite', admin], ['/clients', admin || role === 'TECHNICIEN' || role === 'CONDUCTEUR_TRAVAUX'], ['/catalogue', admin],
+    ['/comptabilite', admin], ['/clients', admin || role === 'TECHNICIEN' || role === 'CONDUCTEUR_TRAVAUX' || role === 'ASSISTANTE_TECHNIQUE'], ['/catalogue', admin],
     ['/achats', travaux], ['/heures', travaux], ['/statistiques', travaux],
     ['/planning', !exclu && !sansPlanning && planningActif], ['/resultat-commercial', commercial],
     // Administration : plus pour le technicien, qui ne modifie plus les référentiels (lot pilote 3),
@@ -41,7 +45,11 @@ function attendu(role: string, planningActif: boolean, permissions: string[]) {
 }
 
 test('chaque rôle voit exactement les mêmes pages qu’avant le regroupement', () => {
-  for (const role of ['SUPERADMIN', 'ADMIN', 'CONDUCTEUR_TRAVAUX', 'RESPONSABLE', 'TECHNICIEN', 'COMMERCIAL', 'COMPTABLE', 'ASSISTANTE_COMMERCIALE', 'DIRECTEUR_COMMERCIAL', 'DIRECTEUR']) {
+  // Les onze types, relus de la table (une liste écrite ici oublierait un type ajouté), chacun nommé.
+  const roles = TYPES_COMPTE.map((type) => type.valeur);
+  assert.equal(roles.length, 11);
+  for (const role of ['SUPERADMIN', 'ADMIN', 'CONDUCTEUR_TRAVAUX', 'RESPONSABLE', 'TECHNICIEN', 'COMMERCIAL', 'COMPTABLE', 'ASSISTANTE_COMMERCIALE', 'DIRECTEUR_COMMERCIAL', 'DIRECTEUR', 'ASSISTANTE_TECHNIQUE']) assert.ok(roles.includes(role), role);
+  for (const role of roles) {
     for (const planningActif of [true, false]) {
       for (const permissions of [[], ['devis:read']]) {
         assert.deepEqual(liens(role, planningActif, permissions), attendu(role, planningActif, permissions), `${role} planning=${planningActif} ${permissions.join(',')}`);
@@ -119,7 +127,7 @@ test('un directeur a le menu de l’administrateur, sans les entrées du super a
     sectionsMenu({ role: 'ADMIN', permissions: ['devis:read'] }, true).map((s) => [s.titre ?? 'Accueil', s.entrees.map((e) => e.to)]));
   assert.equal(roleLabel('DIRECTEUR'), 'Directeur');
   // Même exclusion que blockCommercial côté serveur : le commercial seulement (le directeur en sort avec ce lot).
-  assert.deepEqual(['SUPERADMIN', 'ADMIN', 'CONDUCTEUR_TRAVAUX', 'RESPONSABLE', 'TECHNICIEN', 'COMMERCIAL', 'COMPTABLE', 'ASSISTANTE_COMMERCIALE', 'DIRECTEUR_COMMERCIAL', 'DIRECTEUR']
+  assert.deepEqual(['SUPERADMIN', 'ADMIN', 'CONDUCTEUR_TRAVAUX', 'RESPONSABLE', 'TECHNICIEN', 'COMMERCIAL', 'COMPTABLE', 'ASSISTANTE_COMMERCIALE', 'DIRECTEUR_COMMERCIAL', 'DIRECTEUR', 'ASSISTANTE_TECHNIQUE']
     .filter((role) => estExcluDesOperations(role)), ['COMMERCIAL']);
   assert.equal(estExcluDesOperations('DIRECTEUR'), false);
 });
@@ -143,7 +151,8 @@ test('une seule liste des types de l’administration : le directeur y est, avec
 test('l’annuaire, les statistiques, le planning et l’administration s’ouvrent au directeur, comme à l’administrateur', () => {
   // Annuaire : la liste des routes privées (/clients) et du menu part des types de l'administration (R2 du contrôle).
   for (const role of TYPES_ADMINISTRATION) assert.ok(ROLES_ANNUAIRE.includes(role), role);
-  assert.deepEqual([...ROLES_ANNUAIRE].sort(), ['ADMIN', 'CONDUCTEUR_TRAVAUX', 'DIRECTEUR', 'SUPERADMIN', 'TECHNICIEN']);
+  // L'assistante technique y entre avec le lot AT-1 (elle choisit le client d'une intervention SAV ; clients:read).
+  assert.deepEqual([...ROLES_ANNUAIRE].sort(), ['ADMIN', 'ASSISTANTE_TECHNIQUE', 'CONDUCTEUR_TRAVAUX', 'DIRECTEUR', 'SUPERADMIN', 'TECHNICIEN']);
   const directeur = { role: 'DIRECTEUR', permissions: [] };
   assert.equal(peutConsulterAnnuaire(directeur), true);
   assert.equal(peutVoirStatistiques(directeur), true);
@@ -215,4 +224,74 @@ test('le directeur commercial, l’assistante commerciale et le comptable n’on
   assert.equal(peutConsulterPlanning(), false, 'sans argument : pas de planning');
   assert.equal(peutOuvrirAdministration(), false, 'sans argument : pas d’administration');
   assert.equal(liens('').includes('/planning') || liens('').includes('/admin'), false, 'rôle vide : ni planning ni administration au menu');
+});
+
+// Lot « Assistante technique », PR AT-1 (cadrage v2.1, « Écran » et « Fermé à AT-1 » ; décisions de Nelson du 24-10-2026,
+// points 15, 16, 18 et 28, réponse 7 du 06-11-2026). Menu : Interventions SAV, Planning, Liste des chantiers, Clients et
+// Administration (réduite à ses deux onglets) ; ni Devis (AT-2, permission devis:read absente par défaut), ni journaux
+// des achats et des heures (AT-2), ni contrats (AT-2), ni facturation (AT-3), ni Statistiques, Performances, Mes
+// commerciaux (fermés, choix par défaut, à confirmer), ni catalogue (administration).
+test('assistante technique : menu exact (Interventions SAV, Planning, Liste des chantiers, Clients, Administration), sans devis, journaux Travaux, contrats, facturation, statistiques ni catalogue', () => {
+  // Permissions par défaut du type (DEFAULT_USER_PERMISSIONS côté serveur) : clients:read et chantiers:read.
+  const permissions = ['clients:read', 'chantiers:read'];
+  const sections = sectionsMenu({ role: 'ASSISTANTE_TECHNIQUE', permissions }, true);
+  assert.deepEqual(sections.map((s) => [s.titre ?? 'Accueil', s.entrees.map((e) => e.libelle)]), [
+    ['Accueil', ['Tableau de bord']],
+    ['Chantiers', ['Liste des chantiers', 'Planning']],
+    ['Interventions', ['Interventions SAV']],
+    ['Référentiels', ['Clients']],
+    ['Réglages', ['Administration']],
+  ]);
+  const visibles = liens('ASSISTANTE_TECHNIQUE', true, permissions);
+  for (const to of ['/devis', '/achats', '/heures', '/contrats-maintenance', '/prete-a-facturer', '/factures', '/reglements', '/mentions-legales', '/comptabilite',
+    '/statistiques', '/resultat-commercial', '/performances', '/commerciaux', '/catalogue', '/societe', '/administration/api']) {
+    assert.equal(visibles.includes(to), false, to);
+  }
+  // Module Planning coupé : l'entrée disparaît, comme pour les autres comptes ; le reste ne bouge pas.
+  assert.deepEqual(liens('ASSISTANTE_TECHNIQUE', false, permissions), visibles.filter((to) => to !== '/planning'));
+  // Lectures écartées, nommées : le menu de l'assistante commerciale (sans planning ni SAV), celui du conducteur (journaux
+  // Travaux et statistiques) et celui de l'administration.
+  for (const autre of ['ASSISTANTE_COMMERCIALE', 'CONDUCTEUR_TRAVAUX', 'ADMIN']) assert.notDeepEqual(visibles, liens(autre, true, permissions), autre);
+  assert.equal(peutVoirStatistiques({ role: 'ASSISTANTE_TECHNIQUE', permissions }), false);
+  assert.equal(peutAccederAuxDevis({ role: 'ASSISTANTE_TECHNIQUE', permissions }), false);
+  assert.equal(peutConsulterAnnuaire({ role: 'ASSISTANTE_TECHNIQUE', permissions }), true);
+  assert.equal(peutConsulterPlanning('ASSISTANTE_TECHNIQUE'), true);
+  assert.equal(peutOuvrirAdministration('ASSISTANTE_TECHNIQUE'), true);
+  assert.equal(estExcluDesOperations('ASSISTANTE_TECHNIQUE'), false);
+  // L'accès financier n'est pas porté par le type.
+  assert.equal(peutVoirFinance({ role: 'ASSISTANTE_TECHNIQUE', permissions }), false);
+});
+
+// Même cadrage (« Écran », « SAV sur toute la société ») : écran des interventions, encadrement du SAV (nouvelle
+// intervention, matériel, coûts sans taux) et encadrement du suivi (« à suivre », suite), type par type, écrits ici à
+// part et non relus du code ; mêmes règles que le serveur (estEncadrementCoutIntervention, estEncadrementSuivi).
+test('écran des interventions, encadrement du SAV et du suivi : l’assistante technique y entre comme le conducteur, type par type', () => {
+  const ATTENDU: Record<string, [boolean, boolean, boolean]> = {
+    //                       interventions, encadrement SAV, encadrement suivi
+    SUPERADMIN: [true, true, true],
+    ADMIN: [true, true, true],
+    DIRECTEUR: [true, true, true],
+    CONDUCTEUR_TRAVAUX: [true, true, true],
+    ASSISTANTE_TECHNIQUE: [true, true, true],
+    RESPONSABLE: [true, false, true],
+    TECHNICIEN: [true, false, false],
+    COMMERCIAL: [false, false, false],
+    DIRECTEUR_COMMERCIAL: [false, false, false],
+    ASSISTANTE_COMMERCIALE: [false, false, false],
+    COMPTABLE: [false, false, false],
+  };
+  assert.deepEqual(Object.keys(ATTENDU).sort(), TYPES_COMPTE.map((type) => type.valeur).sort(), 'les onze types, ni plus ni moins');
+  for (const [role, [interventions, sav, suivi]] of Object.entries(ATTENDU)) {
+    assert.equal(peutVoirInterventions(role), interventions, `interventions, ${role}`);
+    assert.equal(ROLES_INTERVENTIONS.includes(role), interventions, `ROLES_INTERVENTIONS, ${role}`);
+    assert.equal(liens(role, true, []).includes('/interventions'), interventions, `menu, ${role}`);
+    assert.equal(estEncadrementSav(role), sav, `encadrement SAV, ${role}`);
+    assert.equal(estEncadrementSuivi(role), suivi, `encadrement du suivi, ${role}`);
+  }
+  // Un rôle absent ou inconnu n'ouvre rien (#206).
+  for (const role of ['', null, undefined, 'INCONNU', 'assistante_technique']) {
+    assert.equal(peutVoirInterventions(role), false, String(role));
+    assert.equal(estEncadrementSav(role), false, String(role));
+    assert.equal(estEncadrementSuivi(role), false, String(role));
+  }
 });

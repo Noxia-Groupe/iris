@@ -18,6 +18,8 @@ const TYPES: ReadonlyArray<readonly [string, string]> = [
   ['CONDUCTEUR_TRAVAUX', 'Conducteur de travaux'],
   ['COMMERCIAL', 'Commercial'],
   ['ASSISTANTE_COMMERCIALE', 'Assistante commerciale'],
+  // Lot « Assistante technique », PR AT-1 (cadrage v2.1, « Type ») : onzième type, après « Assistante commerciale ».
+  ['ASSISTANTE_TECHNIQUE', 'Assistante technique'],
   ['TECHNICIEN', 'Technicien'],
   ['COMPTABLE', 'Comptable'],
   ['DIRECTEUR_COMMERCIAL', 'Directeur commercial'],
@@ -51,7 +53,7 @@ async function verifierTypeAffiche(page: Page, libelle: string) {
 }
 
 test.describe('Types de compte : une seule liste et un seul libellé (#203)', () => {
-  test('un super administrateur voit les dix types, en casse de phrase et dans l’ordre, dans les deux listes, et les retrouve au journal', async ({ connexion, request, session }) => {
+  test('un super administrateur voit les onze types, en casse de phrase et dans l’ordre, dans les deux listes, et les retrouve au journal', async ({ connexion, request, session }) => {
     test.slow();
     const headers = { Authorization: `Bearer ${session.token}` };
     const suffixe = `${Date.now()}`;
@@ -67,7 +69,7 @@ test.describe('Types de compte : une seule liste et un seul libellé (#203)', ()
     await verifierTypeAffiche(page, 'Super administrateur');
     await page.getByRole('button', { name: 'Utilisateurs', exact: true }).click();
 
-    // Formulaire « Autoriser un compte » : les dix types, « Conducteur de travaux » par défaut.
+    // Formulaire « Autoriser un compte » : les onze types, « Conducteur de travaux » par défaut.
     const formulaire = page.locator('form').filter({ has: page.getByRole('button', { name: 'Autoriser', exact: true }) });
     const typeNouveau = formulaire.locator('select[name="role"]');
     await verifierTypesProposes(typeNouveau, TYPES);
@@ -113,7 +115,7 @@ test.describe('Types de compte : une seule liste et un seul libellé (#203)', ()
     await expect(cellules.nth(6).locator('li')).toHaveText(['Type de compte : Administrateur']);
   });
 
-  test('un administrateur voit les neuf types, sans « Super administrateur », dans les deux listes, et son type affiché en clair', async ({ connexion, request, session }) => {
+  test('un administrateur voit les dix types, sans « Super administrateur », dans les deux listes, et son type affiché en clair', async ({ connexion, request, session }) => {
     const headers = { Authorization: `Bearer ${session.token}` };
     const suffixe = `${Date.now()}`;
     const creer = async (cle: string, role: string) => {
@@ -159,12 +161,12 @@ test.describe('Types de compte : une seule liste et un seul libellé (#203)', ()
   // #182). Il ouvre les quatre pages qui affichent son type (statistiques et administration comprises, qui le
   // redirigeaient jusqu'ici). Il n'attribue pas le type Administrateur, qui lèverait sa restriction de rentabilité
   // (choix par défaut, à confirmer, règle 5, option la plus restrictive ; miroir de refuseTypeAdminParDirecteur côté
-  // serveur) : huit types à la création et sur la ligne d'un compte d'un autre type ; la ligne d'un compte déjà
+  // serveur) : neuf types (huit avant le lot AT-1, qui ajoute l'assistante technique) à la création et sur la ligne d'un compte d'un autre type ; la ligne d'un compte déjà
   // administrateur garde l'option « Administrateur », pour l'afficher. La case « aussi commercial » ne lui est jamais
   // proposée pour un compte directeur, ni à la création, ni dans le tableau.
   // Lectures écartées : « Administrateur » retiré de toutes les lignes (la ligne administrateur l'afficherait mal) ; laissé
   // dans la création ou sur la ligne d'un autre type.
-  test('un directeur voit huit types, sans « Super administrateur » ni « Administrateur », sauf sur la ligne d’un administrateur, qui l’affiche ; son type affiché « Directeur » ; la case « aussi commercial » n’existe pas pour un compte directeur', async ({ connexion, request, session }) => {
+  test('un directeur voit neuf types, sans « Super administrateur » ni « Administrateur », sauf sur la ligne d’un administrateur, qui l’affiche ; son type affiché « Directeur » ; la case « aussi commercial » n’existe pas pour un compte directeur', async ({ connexion, request, session }) => {
     test.slow();
     const headers = { Authorization: `Bearer ${session.token}` };
     const suffixe = `${Date.now()}`;
@@ -174,7 +176,7 @@ test.describe('Types de compte : une seule liste et un seul libellé (#203)', ()
       return reponse.json() as Promise<Compte>;
     };
     const SANS_ADMINISTRATION = SANS_SUPERADMIN.filter(([valeur]) => valeur !== 'ADMIN');
-    expect(SANS_ADMINISTRATION).toHaveLength(8);
+    expect(SANS_ADMINISTRATION).toHaveLength(9);
     const directeur = await creer('directeur', 'DIRECTEUR');
     const autreDirecteur = await creer('autre-directeur', 'DIRECTEUR');
     const administrateur = await creer('administrateur', 'ADMIN');
@@ -185,10 +187,10 @@ test.describe('Types de compte : une seule liste et un seul libellé (#203)', ()
     await page.getByRole('button', { name: 'Utilisateurs', exact: true }).click();
     const formulaire = page.locator('form').filter({ has: page.getByRole('button', { name: 'Autoriser', exact: true }) });
     const typeNouveau = formulaire.locator('select[name="role"]');
-    // Création : huit types, sans « Administrateur ».
+    // Création : neuf types, sans « Administrateur ».
     await verifierTypesProposes(typeNouveau, SANS_ADMINISTRATION);
     await expect(typeNouveau.locator('option[value="ADMIN"]')).toHaveCount(0);
-    // Ligne d'un conducteur et d'un autre directeur : les mêmes huit types, son type lu.
+    // Ligne d'un conducteur et d'un autre directeur : les mêmes neuf types, son type lu.
     const ligne = (compte: Compte) => page.locator('tr').filter({ hasText: compte.email }).getByRole('combobox', { name: 'Modifier le rôle' });
     for (const [compte, libelle] of [[cible, 'Conducteur de travaux'], [autreDirecteur, 'Directeur']] as const) {
       await verifierTypesProposes(ligne(compte), SANS_ADMINISTRATION);
@@ -203,7 +205,7 @@ test.describe('Types de compte : une seule liste et un seul libellé (#203)', ()
     await expect(typePropre).toBeDisabled();
     await expect(typePropre.locator('option:checked')).toHaveText('Directeur');
 
-    // « Aussi commercial » à la création : aucun des huit types proposés au directeur ne l'ouvre, le type Directeur compris.
+    // « Aussi commercial » à la création : aucun des neuf types proposés au directeur ne l'ouvre, le type Directeur compris.
     const caseCreation = formulaire.getByRole('checkbox', { name: /^Commercial \(affectation aux chantiers/ });
     for (const [, libelle] of SANS_ADMINISTRATION) {
       await typeNouveau.selectOption({ label: libelle });

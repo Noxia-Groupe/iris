@@ -1,5 +1,5 @@
 import express from 'express';
-import { ROLE_ASSISTANTE_COMMERCIALE, ROLE_TECHNICIEN, ROLE_COMPTABLE, ROLE_DIRECTEUR_COMMERCIAL, ROLE_RESPONSABLE, ROLE_DIRECTEUR, isSuperAdminRole } from './roles';
+import { ROLE_ASSISTANTE_COMMERCIALE, ROLE_ASSISTANTE_TECHNIQUE, ROLE_TECHNICIEN, ROLE_COMPTABLE, ROLE_DIRECTEUR_COMMERCIAL, ROLE_RESPONSABLE, ROLE_DIRECTEUR, isSuperAdminRole } from './roles';
 import type { AuthRequest } from '../http/auth';
 import { API_SCOPES } from '../http/cles-api';
 
@@ -29,6 +29,10 @@ const DEFAULT_USER_PERMISSIONS: Record<string, string[]> = {
   [ROLE_TECHNICIEN]: ['chantiers:read', 'clients:read'],
   // Droits de l'administration (décision de Nelson du 24-10-2026, point 14), comme l'ADMIN.
   [ROLE_DIRECTEUR]: DROITS_ADMINISTRATION,
+  // Lecture des clients (choix du client d'une intervention SAV) et des affaires de toute la société
+  // (sélecteur de chantier, planning, historique client), sans les modifier ni voir de devis (lot
+  // « Assistante technique », première PR ; cf. ROLE_ASSISTANTE_TECHNIQUE).
+  [ROLE_ASSISTANTE_TECHNIQUE]: ['clients:read', 'chantiers:read'],
 };
 
 // Droits jamais accordés à un technicien, ni par son type de compte ni individuellement : il ne

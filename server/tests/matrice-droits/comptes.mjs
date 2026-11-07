@@ -1,7 +1,7 @@
 // Comptes des matrices de droits (lot D1a, cadrage version 3, §2.2).
 //
-// Les dix types de compte sont dans une TABLE : ajouter un onzième type (l'assistante technique, décision de Nelson
-// du 24-10-2026) se fait par une seule ligne de TYPES_DE_COMPTE (N13). Les variantes qui changent un droit (CIBLE
+// Les onze types de compte sont dans une TABLE : le onzième, l'assistante technique (décisions de Nelson du 24-10-2026,
+// lot « Assistante technique », PR AT-1), s'y est ajouté par une seule ligne de TYPES_DE_COMPTE (N13). Les variantes qui changent un droit (CIBLE
 // §7.1 et §4.2) sont dans VARIANTES. Création comme dans production-pdf.test.mjs : en base, puis jeton signé ; le
 // super administrateur est ouvert par l'accès de secours (route POST /api/auth/secours).
 //
@@ -23,6 +23,9 @@ export const TYPES_DE_COMPTE = [
   { cle: 'COM', role: 'COMMERCIAL', libelle: 'commercial' },
   { cle: 'DC', role: 'DIRECTEUR_COMMERCIAL', libelle: 'directeur commercial' },
   { cle: 'AC', role: 'ASSISTANTE_COMMERCIALE', libelle: 'assistante commerciale' },
+  // Lot « Assistante technique », PR AT-1 (cadrage v2.1, « Tests » : « clé AT ajoutée à la matrice des droits (comptes.mjs,
+  // 11 types, 16 comptes) ») : SAV de toute la société, planning, chantiers en lecture, sans variante.
+  { cle: 'AT', role: 'ASSISTANTE_TECHNIQUE', libelle: 'assistante technique' },
   { cle: 'CPT', role: 'COMPTABLE', libelle: 'comptable' },
   { cle: 'TECH', role: 'TECHNICIEN', libelle: 'technicien, fiche intervenant reliée, dans la branche de RESP' },
 ];

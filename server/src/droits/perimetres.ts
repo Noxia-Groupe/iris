@@ -1,6 +1,6 @@
 import express from 'express';
 import { Prisma } from '@prisma/client';
-import { ROLE_RESPONSABLE, isAdminRole } from './roles';
+import { ROLE_RESPONSABLE, litToutesLesAffaires } from './roles';
 import type { AuthRequest } from '../http/auth';
 import type { ApiRequest } from '../http/cles-api';
 
@@ -8,7 +8,8 @@ import type { ApiRequest } from '../http/cles-api';
 // Une même liste (achats, heures, chantiers) ne montre pas la même chose selon qui la
 // demande. Deux natures de porteur, deux façons de le décider :
 //
-//   - session humaine : le RÔLE décide. Un administrateur ou un directeur voit tout ; un
+//   - session humaine : le RÔLE décide. Un administrateur, un directeur ou une assistante
+//     technique voit tout (cf. litToutesLesAffaires) ; un
 //     conducteur de travaux, les chantiers dont il est responsable ; un responsable, les
 //     siens et ceux de toute sa branche hiérarchique ; un commercial, ceux qu'il a vendus.
 //     C'est exactement la règle qu'applique déjà GET /api/chantiers.
@@ -31,7 +32,7 @@ export function perimetreChantiers(req: express.Request): Prisma.ChantierWhereIn
 function perimetreDemandeur(req: express.Request): Prisma.ChantierWhereInput {
   if ((req as ApiRequest).apiKey) return {};
   const user = (req as AuthRequest).user;
-  if (!user || isAdminRole(user.role)) return {};
+  if (!user || litToutesLesAffaires(user.role)) return {};
   if (user.role === 'COMMERCIAL') return { commercialId: user.id };
   if (user.role === ROLE_RESPONSABLE) return { responsableId: { in: [user.id, ...user.equipeIds] } };
   return { responsableId: user.id };

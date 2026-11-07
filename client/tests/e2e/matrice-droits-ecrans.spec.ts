@@ -6,7 +6,7 @@
 // figurent tels quels : E1, « Créer une affaire (devis) » proposé à RESP, CT et TECH et caché à COM ; E2, « Corriger »
 // et « Archiver » proposés sur un chantier clôturé ; les écrans plus restrictifs que le serveur, déjà connus.
 //
-// Pour chacun des dix types de compte, dans Chromium, en grand écran (1280 × 900), réglages par défaut :
+// Pour chacun des onze types de compte (l'assistante technique depuis le lot AT-1), dans Chromium, en grand écran (1280 × 900), réglages par défaut :
 //  - les sections du menu et le type affiché ;
 //  - pour chaque route privée du client (App.tsx), son entrée au menu, et si elle est accessible ou redirigée ;
 //  - les boutons proposés sur les écrans principaux (cadrage §6.2), dans leur portée, sur les cibles du test (§6.1).
@@ -29,8 +29,9 @@ import {
   routesPrivees, suivreReseau, titreDeLEcran, trier, type Portee,
 } from './matrice-droits/outils';
 
-// Les dix types, dans l'ordre de server/tests/matrice-droits/comptes.mjs:17-28 (cadrage §4.1). Un onzième type
-// (l'assistante technique, décision du 24-10-2026) s'ajoute par une ligne, avec sa référence (N13 du cadrage v3 de D1a).
+// Les onze types, dans l'ordre de server/tests/matrice-droits/comptes.mjs (cadrage §4.1). Le onzième, l'assistante technique
+// (décisions du 24-10-2026, lot « Assistante technique », PR AT-1), s'est ajouté par une ligne, avec sa référence
+// ecrans-AT.txt (N13 du cadrage v3 de D1a).
 // Variantes et droits individuels : non joués à l'écran (cadrage §4.1 et §8).
 const TYPES = [
   { cle: 'SA', role: 'SUPERADMIN', libelle: 'super administrateur (accès de secours)' },
@@ -41,6 +42,7 @@ const TYPES = [
   { cle: 'COM', role: 'COMMERCIAL', libelle: 'commercial' },
   { cle: 'DC', role: 'DIRECTEUR_COMMERCIAL', libelle: 'directeur commercial' },
   { cle: 'AC', role: 'ASSISTANTE_COMMERCIALE', libelle: 'assistante commerciale' },
+  { cle: 'AT', role: 'ASSISTANTE_TECHNIQUE', libelle: 'assistante technique' },
   { cle: 'CPT', role: 'COMPTABLE', libelle: 'comptable' },
   { cle: 'TECH', role: 'TECHNICIEN', libelle: 'technicien, fiche intervenant reliée, dans la branche de RESP' },
 ];
@@ -71,7 +73,7 @@ async function verifierReglagesParDefaut(appel: Appel) {
 }
 
 // --- Jeu de données (cadrage §4.1 et §6.1), construit par l'API en session SA, propre à chaque test ---
-// Comptes : les neuf types hors SA ; TECH et CT rattachés à RESP ; une fiche intervenant reliée à TECH. Cibles :
+// Comptes : les dix types hors SA ; TECH et CT rattachés à RESP ; une fiche intervenant reliée à TECH. Cibles :
 //  - chantier-en-cours : titulaire CT, commercial COM, un achat, un pointage, une facture émise liée (« Factures liées »
 //    et leur PDF, M17) ;
 //  - chantier-termine : idem sans facture, puis clôturé (E2) ;
@@ -391,6 +393,73 @@ test.describe('Matrice des droits à l’écran (lot D1a-6)', () => {
       expect(dir.get([`route ${route}`, '—', 'défaut'].join(SEPARATEUR)), route).toMatch(/; accessible$/);
     }
     expect(dir.get(['route /administration/api', '—', 'défaut'].join(SEPARATEUR)), 'réglage du super administrateur').toBe('hors menu ; redirigée vers /');
+  });
+
+  // Lot « Assistante technique », PR AT-1 (cadrage version 2.1, « Écran » et « Tests » : « matrice des écrans
+  // (ecrans-AT.txt) » ; T3 du contrôle : « Administration réduite à ses deux onglets dans ecrans-AT.txt »). À l'écran,
+  // l'assistante technique a les menus, routes et boutons du conducteur, réglages par défaut, sauf une liste FERMÉE de lignes
+  // exactes, chacune avec sa transformation : journaux Travaux et statistiques fermés (AT-2, choix par défaut à confirmer),
+  // affaires de toute la société lues sans écriture (fiche, statut, saisies), sans les filtres de rentabilité (réponse 2 de
+  // Nelson du 06-11-2026, « Décochée »). Une redirection ou un bouton nouveau ne peut donc pas être adopté par « cp » sans être
+  // vu ici.
+  test('assistante technique : ecrans-AT.txt est ecrans-CT.txt, sauf la liste fermée des écarts (menu sans Pilotage, journaux Travaux et statistiques fermés, affaires de toute la société en lecture seule, sans filtres de rentabilité)', () => {
+    const parCle = (cle: string) => new Map(lireReference(`ecrans-${cle}.txt`).map((ligne) => {
+      const champs = ligne.split(SEPARATEUR);
+      expect(champs[0], ligne).toBe(cle);
+      return [champs.slice(1, 4).join(SEPARATEUR), champs.slice(4).join(SEPARATEUR)] as const;
+    }));
+    const ct = parCle('CT');
+    const at = parCle('AT');
+    const cle = (...champs: string[]) => champs.join(SEPARATEUR);
+    // Boutons retirés de la ligne du conducteur (toutes leurs occurrences), l'ordre des autres gardé.
+    const sansBoutons = (noms: string[]) => (ligne: string) => {
+      const [avant, boutons] = ligne.split(' ; boutons : ');
+      const restants = boutons.split(', ').filter((nom) => !noms.includes(nom));
+      return `${avant} ; boutons : ${restants.join(', ') || 'aucun'}`;
+    };
+    const ECRITURES_AFFAIRE = ['Corriger ce pointage', 'Corriger cet achat', 'Modifier'];
+    const LECTURE_SEULE = 'boutons : Rapport interne (PDF), Retour au tableau de bord';
+    const ECARTS: Record<string, (ligne: string) => string> = {
+      [cle('menu', '—', 'défaut')]: (ligne) => ligne.replace('Interventions, Pilotage, Référentiels', 'Interventions, Référentiels').replace('type affiché : Conducteur de travaux', 'type affiché : Assistante technique'),
+      [cle('route /achats', '—', 'défaut')]: () => 'hors menu ; redirigée vers /',
+      [cle('route /heures', '—', 'défaut')]: () => 'hors menu ; redirigée vers /',
+      [cle('route /statistiques', '—', 'défaut')]: () => 'hors menu ; redirigée vers /',
+      [cle('fiche chantier', 'chantier-en-cours', 'défaut')]: sansBoutons(ECRITURES_AFFAIRE),
+      [cle('fiche chantier', 'chantier-termine', 'défaut')]: sansBoutons(ECRITURES_AFFAIRE),
+      // Toute la société : les affaires d'un autre titulaire lui sont lisibles (404 « Chantier introuvable » pour CT).
+      [cle('fiche chantier', 'chantier-titulaire-dc', 'défaut')]: () => `titre « Écrans titulaire DC <s> » ; ${LECTURE_SEULE}`,
+      [cle('fiche chantier', 'chantier-titulaire-tech', 'défaut')]: () => `titre « Écrans titulaire TECH <s> » ; ${LECTURE_SEULE}`,
+      [cle('liste des chantiers', 'chantier-en-cours', 'défaut')]: () => 'boutons : aucun',
+      [cle('liste des chantiers', 'chantier-titulaire-dc', 'défaut')]: () => 'boutons : aucun',
+      [cle('liste des chantiers', 'chantier-titulaire-tech', 'défaut')]: () => 'boutons : aucun',
+      [cle('liste des chantiers', 'hors lignes', 'défaut')]: sansBoutons(['En perte', 'En perte#', 'Marge faible']),
+    };
+    expect([...at.keys()].sort(), 'mêmes écrans, cibles et contextes que CT').toEqual([...ct.keys()].sort());
+    const ecarts: string[] = [];
+    for (const [cleLigne, ligneCt] of ct) {
+      const attendu = ECARTS[cleLigne] ? ECARTS[cleLigne](ligneCt) : ligneCt;
+      if (ECARTS[cleLigne] && attendu === ligneCt) ecarts.push(`${cleLigne} : écart déclaré sans effet sur la ligne de CT`);
+      if (at.get(cleLigne) !== attendu) ecarts.push(`${cleLigne}\n  attendu ${attendu}\n  AT      ${at.get(cleLigne)}`);
+    }
+    expect(ecarts, 'référence de l’assistante technique différente de celle du conducteur hors de la liste fermée').toEqual([]);
+    // Ouvertures du cadrage, lues dans la référence : SAV, planning, liste des chantiers, clients ; Administration réduite à
+    // ses deux onglets (Fournisseurs et Catégories, T3 du contrôle), leurs lignes modifiables et supprimables.
+    for (const route of ['/interventions', '/planning', '/chantiers', '/clients', '/admin']) {
+      expect(at.get(cle(`route ${route}`, '—', 'défaut')), route).toMatch(/^menu « .* » ; accessible$/);
+    }
+    expect(at.get(cle('administration', 'onglet par défaut', 'défaut'))).toBe('titre « Administration & Paramétrage » ; boutons : Catégories, Enregistrer, Fournisseurs');
+    expect(at.get(cle('administration', 'fournisseur', 'défaut'))).toBe('boutons : Modifier, Supprimer');
+    expect(at.get(cle('administration', 'catégorie', 'défaut'))).toBe('boutons : Modifier, Supprimer');
+    expect(at.has(cle('administration › utilisateurs', 'compte CT', 'défaut')), 'pas d’onglet Utilisateurs').toBe(false);
+    expect(at.get(cle('liste des interventions', 'hors lignes', 'défaut'))).toBe('titre « Interventions SAV » ; boutons : Nouvelle intervention');
+    for (const bouton of ['Créer la suite', 'Enregistrer l’achat matériel', 'Remettre à planifier', 'Annuler', 'Démarrer']) {
+      expect(at.get(cle('fiche intervention', 'intervention-planifiee', 'défaut')), bouton).toContain(bouton);
+    }
+    expect(at.get(cle('fiche intervention', 'intervention-terminee', 'défaut'))).toContain('Marquer « à suivre »');
+    // Fermés : devis, factures, contrats, catalogue, performances, mes commerciaux, Société, API (redirigés vers l'accueil).
+    for (const route of ['/devis', '/factures', '/contrats-maintenance', '/catalogue', '/performances', '/commerciaux', '/societe', '/administration/api', '/prete-a-facturer', '/reglements']) {
+      expect(at.get(cle(`route ${route}`, '—', 'défaut')), route).toBe('hors menu ; redirigée vers /');
+    }
   });
 
   // Témoins de la garde « aucun montant » (cadrage §5, T3 du contrôle) : un par branche, que lui seul déclenche ; les

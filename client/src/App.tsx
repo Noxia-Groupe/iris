@@ -32,7 +32,7 @@ import Comptabilite from './pages/Comptabilite';
 import MentionsLegales from './pages/MentionsLegales';
 import PreteAFacturer from './pages/PreteAFacturer';
 import { ErrorBoundary } from './ErrorBoundary';
-import { useCurrentUser, peutAccederAuxDevis, peutConsulterPlanning, peutOuvrirAdministration, ROLES_ANNUAIRE, ROLE_COMMERCIAL, ROLE_CONDUCTEUR, ROLE_RESPONSABLE, ROLE_SUPERADMIN, ROLE_TECHNICIEN, TYPES_ADMINISTRATION } from './roles';
+import { useCurrentUser, peutAccederAuxDevis, peutConsulterPlanning, peutOuvrirAdministration, ROLES_ANNUAIRE, ROLES_INTERVENTIONS, ROLE_COMMERCIAL, ROLE_CONDUCTEUR, ROLE_RESPONSABLE, ROLE_SUPERADMIN, ROLE_TECHNICIEN, TYPES_ADMINISTRATION } from './roles';
 import { useModules } from './modules';
 import { CompanyTimezoneProvider } from './companyTimezone';
 
@@ -40,7 +40,6 @@ import { CompanyTimezoneProvider } from './companyTimezone';
 // l'administration (TYPES_ADMINISTRATION : ADMIN, SUPERADMIN et DIRECTEUR), même liste que
 // isAdminRole et que le serveur. Les autres listes partent d'elle, sans citer ces types un à un.
 const ROLES_ADMIN = [...TYPES_ADMINISTRATION];
-const ROLES_INTERVENTIONS = [...TYPES_ADMINISTRATION, ROLE_CONDUCTEUR, ROLE_RESPONSABLE, ROLE_TECHNICIEN];
 const ROLES_TRAVAUX = [...TYPES_ADMINISTRATION, ROLE_CONDUCTEUR, ROLE_RESPONSABLE];
 // Même règle que peutVoirStatistiques (menu) : l'administration, le responsable et le conducteur.
 const ROLES_STATISTIQUES = [...TYPES_ADMINISTRATION, ROLE_RESPONSABLE, ROLE_CONDUCTEUR];

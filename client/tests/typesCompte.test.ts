@@ -19,6 +19,9 @@ const ATTENDUS: ReadonlyArray<readonly [string, string]> = [
   ['CONDUCTEUR_TRAVAUX', 'Conducteur de travaux'],
   ['COMMERCIAL', 'Commercial'],
   ['ASSISTANTE_COMMERCIALE', 'Assistante commerciale'],
+  // Lot « Assistante technique », PR AT-1 (cadrage v2.1, « Type ») : onzième type, placé après « Assistante commerciale »,
+  // libellé « Assistante technique ».
+  ['ASSISTANTE_TECHNIQUE', 'Assistante technique'],
   ['TECHNICIEN', 'Technicien'],
   ['COMPTABLE', 'Comptable'],
   ['DIRECTEUR_COMMERCIAL', 'Directeur commercial'],
@@ -29,21 +32,21 @@ const ATTENDUS: ReadonlyArray<readonly [string, string]> = [
 ];
 const enObjets = (paires: ReadonlyArray<readonly [string, string]>) => paires.map(([valeur, libelle]) => ({ valeur, libelle }));
 
-test('les dix types de compte, dans l’ordre des listes de l’administration, chacun avec son libellé unique (#203)', () => {
+test('les onze types de compte, dans l’ordre des listes de l’administration, chacun avec son libellé unique (#203, lot AT-1)', () => {
   // Égalité stricte : ni type ajouté, retiré ou déplacé, ni autre champ que la valeur et le libellé.
   assert.deepEqual(TYPES_COMPTE, enObjets(ATTENDUS));
-  assert.equal(new Set(TYPES_COMPTE.map((type) => type.valeur)).size, 10, 'chaque valeur une seule fois');
-  assert.equal(new Set(TYPES_COMPTE.map((type) => type.libelle)).size, 10, 'chaque libellé une seule fois');
+  assert.equal(new Set(TYPES_COMPTE.map((type) => type.valeur)).size, 11, 'chaque valeur une seule fois');
+  assert.equal(new Set(TYPES_COMPTE.map((type) => type.libelle)).size, 11, 'chaque libellé une seule fois');
 });
 
-test('un super administrateur se voit proposer les dix types ; un autre compte, les neuf sans « Super administrateur », dans le même ordre', () => {
+test('un super administrateur se voit proposer les onze types ; un autre compte, les dix sans « Super administrateur », dans le même ordre', () => {
   assert.deepEqual(typesCompteProposes(true), enObjets(ATTENDUS));
   assert.deepEqual(typesCompteProposes(false), enObjets(ATTENDUS.filter(([valeur]) => valeur !== 'SUPERADMIN')));
   assert.equal(typesCompteProposes(false).some((type) => type.valeur === 'SUPERADMIN' || type.libelle === 'Super administrateur'), false);
   // « Administrateur » reste proposé à un administrateur : seule l'option super administrateur lui est retirée.
   assert.equal(typesCompteProposes(false).at(-1)?.valeur, 'ADMIN');
   // Proposer ne modifie pas la table : le menu et le journal continuent d'y lire le libellé du super administrateur.
-  assert.equal(TYPES_COMPTE.length, 10);
+  assert.equal(TYPES_COMPTE.length, 11);
   assert.equal(roleLabel('SUPERADMIN'), 'Super administrateur');
 });
 
@@ -94,9 +97,9 @@ test('le directeur garde son libellé « Directeur » et se voit proposer les ty
   assert.equal(isAdminRole('DIRECTEUR'), true);
   assert.equal(isSuperAdminRole('DIRECTEUR'), false);
   const directeur = typesCompteProposes(isSuperAdminRole('DIRECTEUR'), true);
-  // Huit types, dans l'ordre des listes, « Directeur » compris : il ouvre un autre directeur.
+  // Neuf types, dans l'ordre des listes, « Directeur » et « Assistante technique » compris : il ouvre un autre directeur.
   assert.deepEqual(directeur, enObjets(ATTENDUS.filter(([valeur]) => valeur !== 'SUPERADMIN' && valeur !== 'ADMIN')));
-  assert.equal(directeur.length, 8);
+  assert.equal(directeur.length, 9);
   assert.equal(directeur.some((type) => type.valeur === 'ADMIN' || type.libelle === 'Administrateur'), false);
   assert.equal(directeur.at(-1)?.valeur, 'DIRECTEUR');
   // Lecture écartée : la liste de l'administrateur, « Administrateur » compris.
@@ -110,13 +113,35 @@ test('typesCompteProposes : « sans administrateur » retire « Administrateur �
   assert.deepEqual(typesCompteProposes(false, true), enObjets(ATTENDUS.filter(([valeur]) => valeur !== 'SUPERADMIN' && valeur !== 'ADMIN')));
   assert.deepEqual(typesCompteProposes(true, true), enObjets(ATTENDUS.filter(([valeur]) => valeur !== 'ADMIN')));
   assert.equal(typesCompteProposes(true, true).some((type) => type.valeur === 'SUPERADMIN'), true, 'le super administrateur reste proposé');
-  assert.equal(typesCompteProposes(true, true).length, 9);
+  assert.equal(typesCompteProposes(true, true).length, 10);
   // Valeur par défaut, et false explicite : inchangées.
   assert.deepEqual(typesCompteProposes(false), neuf);
   assert.deepEqual(typesCompteProposes(false, false), neuf);
   assert.deepEqual(typesCompteProposes(true), enObjets(ATTENDUS));
   assert.deepEqual(typesCompteProposes(true, false), enObjets(ATTENDUS));
   // Proposer ne modifie pas la table : « Administrateur » garde son libellé (une ligne déjà administrateur l'affiche).
-  assert.equal(TYPES_COMPTE.length, 10);
+  assert.equal(TYPES_COMPTE.length, 11);
   assert.equal(roleLabel('ADMIN'), 'Administrateur');
+});
+
+// Lot « Assistante technique », PR AT-1 (cadrage v2.1, « Type » ; décisions de Nelson du 24-10-2026, points 15 et 18) :
+// un type distinct de l'assistante commerciale, hors des types de l'administration, jamais « aussi commercial »
+// (peutEtreAussiCommercial inchangé, décision 7 de #182), proposé à l'administrateur, au directeur et au super
+// administrateur, juste après « Assistante commerciale ».
+test('l’assistante technique : libellé « Assistante technique », distinct de l’assistante commerciale, hors administration, proposée par chaque administrateur après « Assistante commerciale »', () => {
+  assert.equal(roleLabel('ASSISTANTE_TECHNIQUE'), 'Assistante technique');
+  assert.equal(lisible('ASSISTANTE_TECHNIQUE', 'role'), 'Assistante technique');
+  // Lecture écartée : le libellé de l'assistante commerciale (type voisin, sans planning).
+  assert.notEqual(roleLabel('ASSISTANTE_TECHNIQUE'), roleLabel('ASSISTANTE_COMMERCIALE'));
+  assert.equal(isAdminRole('ASSISTANTE_TECHNIQUE'), false);
+  assert.equal(isSuperAdminRole('ASSISTANTE_TECHNIQUE'), false);
+  const valeurs = TYPES_COMPTE.map((type) => type.valeur);
+  assert.equal(valeurs.indexOf('ASSISTANTE_TECHNIQUE'), valeurs.indexOf('ASSISTANTE_COMMERCIALE') + 1, 'juste après « Assistante commerciale »');
+  for (const [cas, proposes] of [
+    ['super administrateur', typesCompteProposes(true)],
+    ['administrateur', typesCompteProposes(false)],
+    ['directeur', typesCompteProposes(false, true)],
+  ] as const) {
+    assert.deepEqual(proposes.filter((type) => type.valeur === 'ASSISTANTE_TECHNIQUE'), [{ valeur: 'ASSISTANTE_TECHNIQUE', libelle: 'Assistante technique' }], cas);
+  }
 });

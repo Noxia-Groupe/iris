@@ -550,8 +550,9 @@ const Admin = () => {
         </div>
       </div>
 
-      {/* Un conducteur de travaux n'accède qu'aux référentiels Fournisseurs et Catégories
-          (cf. ONGLETS_CONDUCTEUR) ; les onglets réservés ne lui sont même pas proposés. */}
+      {/* Hors administration (conducteur de travaux, responsable, assistante technique), seuls les
+          référentiels Fournisseurs et Catégories (cf. ONGLETS_CONDUCTEUR) ; les onglets réservés ne
+          sont même pas proposés. */}
       <div className="flex gap-2 mb-4 overflow-x-auto pb-2">
         {isAdmin && (
           <>
@@ -585,8 +586,8 @@ const Admin = () => {
       {!isAdmin && (
         <div className="mb-4 p-4 bg-blue-50 text-blue-800 rounded text-sm">
           Vous pouvez créer, modifier et supprimer les <strong>fournisseurs</strong> et les{' '}
-          <strong>catégories d'achats</strong> utilisés dans le Journal des Achats. Les autres réglages de
-          l'application sont réservés à la Direction.
+          <strong>catégories d'achats</strong> utilisés dans le Journal des Achats ; les fournisseurs servent
+          aussi au matériel des interventions SAV. Les autres réglages de l'application sont réservés à la Direction.
         </div>
       )}
 
