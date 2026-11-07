@@ -89,7 +89,8 @@ export function enregistrerRoutesContrats(app: Express): void {
 
   // Génération automatique des visites (lot pilote 5) : état du dernier passage, alerte éventuelle,
   // et passage lancé à la main (même traitement, au nom de son auteur), réservés à la gestion des
-  // contrats (réponse de Nelson du 06-11-2026, 9 : « génération des visites »). Le réglage de
+  // contrats (réponse de Nelson du 06-11-2026, 9, « Les gérer », dont la description, texte de Claude
+  // Code choisi par Nelson, nomme la « génération des visites »). Le réglage de
   // l'anticipation reste à l'administration (PUT /api/parametres).
   app.get('/api/contrats-maintenance/generation-visites', requireAuth, requireGestionContrats, async (_req, res) => {
     try {

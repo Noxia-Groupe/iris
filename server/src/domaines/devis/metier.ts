@@ -182,8 +182,9 @@ type LigneDevisExistante = {
 //    à son ajout : modifier ou désactiver la fiche ensuite n'y change rien ;
 //  - une nouvelle ligne reprise du catalogue exige une fiche existante et active, dont la
 //    référence est recopiée par le serveur ;
-//  - le prix d'achat prévu n'est écrit que par un administrateur. Sinon, une ligne existante
-//    garde le sien, et une nouvelle ligne du catalogue reprend celui de la fiche ;
+//  - le prix d'achat prévu n'est écrit que par l'administration et l'assistante technique, en session
+//    (ecritPrixAchatDevis). Sinon, une ligne existante garde le sien, et une nouvelle ligne du
+//    catalogue reprend celui de la fiche ;
 //  - la ligne au temps passé prend le prix, la TVA et la référence de sa main d'œuvre à son ajout,
 //    puis les garde (./tempsPasse.ts) ; la ligne au jour ou à la demi-journée aussi, avec son unité et
 //    ses minutes prévues (./forfaitMainOeuvre.ts) ; une ligne existante ne change pas de nature ;

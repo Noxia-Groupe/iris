@@ -3117,7 +3117,9 @@ if (!TEST_DATABASE_URL) {
       assert.equal((await request(app).delete(`/api/catalogue/articles/${fiches.retiree.id}`).set(admin)).status, 200);
     });
 
-    test('recherche : fiches actives seulement, prix d’achat aux seuls administrateurs, refusée sans droit devis', async () => {
+    // AT-2a (réponses 4 et 8 du 06-11-2026) : l'assistante technique lit aussi ces prix d'achat (bloc « Assistante technique
+    // (AT-2a) », T1) ; ce test garde le commercial et l'administration.
+    test('recherche : fiches actives seulement, prix d’achat à l’administration et à l’assistante technique seulement (jamais au commercial), refusée sans droit devis', async () => {
       const recherche = (enTete, query) => request(app).get('/api/devis/catalogue').query(query).set(enTete);
       const pourCommercial = await recherche(commercial, { q: suffixe });
       assert.equal(pourCommercial.status, 200, JSON.stringify(pourCommercial.body));
@@ -27447,7 +27449,8 @@ if (!TEST_DATABASE_URL) {
 
     // T1 du contrôle (cadrage, « Fermé à AT-1 ») : chaque refus avec son message exact, rien n'est écrit (empreinte). La
     // fiche de l'affaire lui est lisible (200) : le refus d'écriture n'est pas de périmètre. AT-2a ouvre depuis la liste des
-    // contrats, les devis et les écritures des clients (réponses 3 et 9 du 06-11-2026), retirés d'ici et prouvés par le bloc
+    // contrats et les devis (réponses 3 et 9 du 06-11-2026), et les écritures des clients (décision du 24-10-2026, point 24,
+    // « gerer les client »), retirés d'ici et prouvés par le bloc
     // « Assistante technique (AT-2a) » ; la création d'un contrat hors devis reste refusée (choix par défaut, à confirmer).
     test('refus : fiche, statut et commercial d’une affaire (403 « Un compte assistante technique… »), saisies Travaux, rapport de chantier, partage du planning, statistiques et performances, factures, contrat hors devis, comptes et catalogue ; rien n’est écrit', async () => {
       const assistante = jeton('assistante');
@@ -27890,9 +27893,10 @@ if (!TEST_DATABASE_URL) {
   // Lot « Assistante technique », PR AT-2a « Devis, clients et contrats » (cadrage AT-2, version 1, section « AT-2a », et
   // version 2 : C1 contrats, C2 catalogue et parc, T1 à T3, choix par défaut N10, à confirmer). Réponses de Nelson du
   // 06-11-2026 (docs/HISTORIQUE-DECISIONS.md#décisions-du-06-11-2026-sur-lassistante-technique) : 3 (« Tous, contrats
-  // compris » ; elle « gère les clients »), 4 (« Prix d'achat oui, coûts non »), 5 (« Oui, comme l'admin » : titulaire,
+  // compris »), 4 (« Prix d'achat oui, coûts non »), 5 (« Oui, comme l'admin » : titulaire,
   // commercial, types et date de début à l'ouverture du chantier), 8 (catalogue et parc en lecture seule) et 9 (génération
-  // des visites). Piège P1 du cadrage : le prix d'achat qu'elle lit ne lui ouvre pas le coût prévu des chantiers, qui suit sa
+  // des visites) ; décision du 24-10-2026, point 24 (« gerer les client »), pour les clients. Piège P1 du cadrage : le
+  // prix d'achat qu'elle lit ne lui ouvre pas le coût prévu des chantiers, qui suit sa
   // rentabilité (coutPrevuSuitRentabilite), fermée jusqu'à AT-2b (réponse 2, « Décochée »).
   //
   // Montants (règle des montants du rédacteur des tests : chaque autre lecture plausible donne un résultat différent) :
@@ -28241,7 +28245,8 @@ if (!TEST_DATABASE_URL) {
       assert.equal(annuleParAdmin.status, 200, JSON.stringify(annuleParAdmin.body));
     });
 
-    // Cadrage, « Clients » (réponse 3 : « gère les clients ») : requireGestionClients sur les sept écritures et la lecture du
+    // Cadrage, « Clients » (décision de Nelson du 24-10-2026, point 24 : « gerer les client ») : requireGestionClients sur
+    // les sept écritures et la lecture du
     // parc ; écriture du parc à l'administration (choix par défaut, à confirmer) ; message exact du refus des autres types
     // (choix par défaut N10) ; une clé reste gouvernée par son scope (routeMixte).
     test('clients : les sept écritures faites par elle et relues en base ; parc lu ; écriture du parc refusée ; les sept autres types refusés au message exact sur chaque route, rien n’est écrit ; administration et directeur inchangés ; une clé clients:write écrit toujours', async () => {

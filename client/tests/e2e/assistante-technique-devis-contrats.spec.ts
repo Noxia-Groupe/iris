@@ -5,15 +5,17 @@ const api = `http://127.0.0.1:${process.env.E2E_API_PORT || '3001'}/api`;
 
 // Lot « Assistante technique », PR AT-2a « Devis, clients et contrats » (cadrage AT-2, version 1, « AT-2a », « Tests » :
 // « E2E : devis jusqu'à la conversion en contrat, client, contrat » ; version 2, C1 et C2). Réponses de Nelson du 06-11-2026
-// (docs/HISTORIQUE-DECISIONS.md#décisions-du-06-11-2026-sur-lassistante-technique) : 3 (« Tous, contrats compris » ; elle
-// « gère les clients »), 4 et 8 (prix d'achat lus, catalogue et parc en lecture seule) et 9 (génération des visites).
+// (docs/HISTORIQUE-DECISIONS.md#décisions-du-06-11-2026-sur-lassistante-technique) : 3 (« Tous, contrats compris »), 4 et 8
+// (prix d'achat lus, catalogue et parc en lecture seule) et 9 (génération des visites) ; pour les clients, décision du
+// 24-10-2026, point 24 (« gerer les client »).
 //
 // Parcours critique, dans Chromium, connectée en assistante technique :
 //  1. son menu porte Devis et Contrats de maintenance ;
 //  2. elle compose un devis depuis le catalogue, dont la recherche lui montre le prix d'achat de la fiche au format des
 //     documents (« 74,35 € HT »), saisit le prix d'achat prévu au format français, crée le brouillon, le fait signer, puis
 //     crée le contrat du devis ; ni « Constater l'acompte » ni « Annuler », qui restent à l'administration ;
-//  3. sur la fiche du client, elle ajoute un contact ; le parc lui est montré en consultation seule ;
+//  3. sur la fiche du client, elle ajoute un contact ; le parc lui est montré en consultation seule, avec le prix d'achat HT
+//     du modèle de chaque équipement au format des documents (« 318,60 € »), et rien pour un modèle sans prix d'achat ;
 //  4. sur l'écran des contrats, sans « Nouveau contrat » ni « Modifier la couverture », elle suspend le contrat.
 // Chaque écriture est relue par l'API, à son nom.
 test('assistante technique : devis composé du catalogue avec le prix d’achat de la fiche, signé puis converti en contrat ; contact ajouté sur la fiche client ; contrat suspendu depuis l’écran des contrats', async ({ connexion, request, session, creerClient }) => {
@@ -87,7 +89,16 @@ test('assistante technique : devis composé du catalogue avec le prix d’achat 
   const devis = (await (await request.get(`${api}/devis`, { headers })).json() as { id: string; lignes: { prixAchatUnitaireHt: number; prixUnitaireHt: number; quantite: number }[] }[]).find((d) => d.id === devisId)!;
   expect(devis.lignes.map((l) => [l.quantite, l.prixUnitaireHt, l.prixAchatUnitaireHt])).toEqual([[2, 129.9, 70.1]]);
 
-  // 3. Fiche du client : un contact ajouté par elle ; le parc en consultation seule.
+  // 3. Fiche du client : un contact ajouté par elle ; le parc en consultation seule, avec le prix d'achat HT du modèle
+  // (réponse 8 du 06-11-2026). Parc installé par l'administration : un modèle à 318,60 € d'achat et 449,90 € de vente,
+  // un modèle sans prix d'achat. Lectures écartées : le prix de vente sous ce libellé (449,90 €), « 0,00 € » pour un modèle
+  // sans prix d'achat, le décimal texte de l'API rendu tel quel (« 318.6 ») ou sans ses deux décimales (« 318,6 »).
+  const { sites } = await (await request.get(`${api}/clients/${client.id}`, { headers })).json() as { sites: { id: string }[] };
+  const modeleAvecPrix = await envoyer('post', '/catalogue/equipements', { reference: `E2E-AT2A-EQ-${suffixe}`, nom: `Centrale AT-2a ${suffixe}`, fabricant: 'Iris', prixVenteHt: '449.90', prixAchatHt: '318.60', tauxTva: '20' }) as { id: string; nom: string };
+  const modeleSansPrix = await envoyer('post', '/catalogue/equipements', { reference: `E2E-AT2A-EQ0-${suffixe}`, nom: `Sirène AT-2a ${suffixe}`, fabricant: 'Iris', prixVenteHt: '88.80', tauxTva: '20' }) as { id: string; nom: string };
+  for (const modele of [modeleAvecPrix, modeleSansPrix]) {
+    await envoyer('post', `/clients/${client.id}/equipements`, { catalogueEquipementId: modele.id, clientSiteId: sites[0].id, numeroSerie: `SN-${modele.id}` });
+  }
   await page.goto(`/clients/${client.id}`, { waitUntil: 'networkidle' });
   await page.getByPlaceholder('Nom *').fill(`Martin ${suffixe}`);
   await page.getByPlaceholder('Prénom').fill('Camille');
@@ -97,6 +108,13 @@ test('assistante technique : devis composé du catalogue avec le prix d’achat 
   await expect(page.getByText(`Camille Martin ${suffixe}`)).toBeVisible();
   await expect(page.getByText('Consultation seule : le parc est tenu à jour par l’administration.')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Ajouter au parc' })).toHaveCount(0);
+  const equipementAvecPrix = page.locator('article').filter({ hasText: modeleAvecPrix.nom });
+  await expect(equipementAvecPrix.getByText(/^Prix d’achat HT du modèle/)).toHaveText('Prix d’achat HT du modèle : 318,60 €');
+  await expect(equipementAvecPrix).not.toContainText('449,90');
+  await expect(equipementAvecPrix.getByRole('button', { name: 'Archiver' })).toHaveCount(0);
+  const equipementSansPrix = page.locator('article').filter({ hasText: modeleSansPrix.nom });
+  await expect(equipementSansPrix).toBeVisible();
+  await expect(equipementSansPrix).not.toContainText('Prix d’achat');
   const relu = await (await request.get(`${api}/clients/${client.id}`, { headers })).json() as { contacts: { nom: string; prenom: string }[] };
   expect(relu.contacts.some((c) => c.nom === `Martin ${suffixe}` && c.prenom === 'Camille')).toBeTruthy();
 

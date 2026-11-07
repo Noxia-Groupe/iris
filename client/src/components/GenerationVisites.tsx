@@ -8,8 +8,9 @@ import { bilanGeneration, pluriel } from '../lib/generationVisites';
 
 // Génération automatique des visites de maintenance (lot pilote 5) : réglage de l'anticipation,
 // dernier passage, contrats laissés de côté, erreurs, alerte et passage lancé à la main. Ouverte à la
-// gestion des contrats (administration et assistante technique, réponse de Nelson du 06-11-2026, 9 :
-// « génération des visites » ; cf. gereLesContrats), comme les contrats ; le réglage de l'anticipation
+// gestion des contrats (administration et assistante technique, réponse de Nelson du 06-11-2026, 9,
+// « Les gérer », dont la description, texte de Claude Code choisi par Nelson, nomme la « génération des
+// visites » ; cf. gereLesContrats), comme les contrats ; le réglage de l'anticipation
 // reste à l'administration (PUT /api/parametres), comme le serveur.
 type ExecutionGeneration = {
   id: string; jour: string; declenchement: 'AUTOMATIQUE' | 'MANUEL'; auteurNom: string | null; anticipationJours: number;

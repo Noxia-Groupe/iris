@@ -11,7 +11,9 @@ import { ficheCataloguePourLecteur } from '../catalogue/metier';
 // devinant un identifiant. L'archivage préserve la série, la garantie et l'historique.
 const equipementInclude = { catalogueEquipement: true, clientSite: true };
 // Le modèle du catalogue joint à chaque équipement suit la règle des fiches : son prix d'achat
-// ne sort que pour l'administration ou une clé portant `finances:read` (cf. ficheCataloguePourLecteur).
+// ne sort, en session, que pour l'administration et pour l'assistante technique, qui le lit sans
+// écrire le parc ni le catalogue (réponses de Nelson du 06-11-2026, 4 et 8), et, par /api/v1, que
+// pour une clé portant `finances:read` (cf. voitPrixAchatDevis, ficheCataloguePourLecteur).
 function equipementPourLecteur<T>(req: express.Request, valeur: T): T {
   if (voitPrixAchatDevis(req)) return valeur;
   const masquer = (equipement: unknown) => {

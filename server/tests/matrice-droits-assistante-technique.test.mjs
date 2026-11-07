@@ -73,8 +73,9 @@ const ROUTES_COMME_AD = new Set([
   'PUT /api/interventions/:id/planning', 'POST /api/interventions/:id/couts/achats', 'POST /api/interventions/:id/couts/heures', 'PATCH /api/interventions/:id/couts/:type/:coutId',
   'POST /api/interventions/:id/couts/:type/:coutId/:action',
 ]);
-// AT-2a : devis (réponse 3 : « Tous, contrats compris » ; aucun périmètre sur les devis), clients et parc en lecture
-// (réponses 3 et 8 ; requireGestionClients), contrats et génération des visites (réponses 3 et 9 ; requireGestionContrats).
+// AT-2a : devis (réponse 3 : « Tous, contrats compris » ; aucun périmètre sur les devis), écritures des clients (décision du
+// 24-10-2026, point 24 : « gerer les client ») et parc en lecture (réponse 8 ; requireGestionClients), contrats et
+// génération des visites (réponses 3 et 9 ; requireGestionContrats).
 const ROUTES_COMME_AD_AT2A = [
   'GET /api/devis', 'POST /api/devis', 'PATCH /api/devis/:id', 'POST /api/devis/:id/revisions', 'POST /api/devis/:id/signature', 'GET /api/devis/:id/document.pdf',
   'GET /api/devis/:id/envois', 'POST /api/devis/:id/envois', 'PUT /api/devis/:id/statut', 'POST /api/devis/:id/convertir', 'GET /api/devis/a-convertir',

@@ -64,7 +64,8 @@ const SA = 'SA';
 // Le directeur en fait partie depuis le lot « Directeur aligné sur l'administration » (décision de Nelson du 24-10-2026, point 14).
 const ADMINISTRATION = ['SA', 'AD', 'AD-COM', 'DIR'];
 // Gestion des contrats, passage manuel de la génération des visites compris : l'administration et l'assistante technique
-// depuis AT-2a (cadrage v2, C1 ; réponse 9 du 06-11-2026, « génération des visites » ; requireGestionContrats), dont le
+// depuis AT-2a (cadrage v2, C1 ; réponse 9 du 06-11-2026, « Les gérer », dont la description nomme la génération des
+// visites ; requireGestionContrats), dont le
 // refus nomme l'une et l'autre. Le réglage de l'anticipation reste à l'administration (PUT /api/parametres).
 const GESTION_CONTRATS = [...ADMINISTRATION, 'AT'];
 const REFUS_GESTION_CONTRATS = '403 « Accès réservé à l’administration et à l’assistante technique. » inchangé ; aucune entrée';

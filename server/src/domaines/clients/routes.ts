@@ -14,7 +14,8 @@ import { listerEquipementsClient, creerEquipementClient, archiverEquipementClien
 
 // --- Référentiel Clients natif Iris ---
 // Les handlers sont écrits UNE fois puis montés sur deux portes d'entrée (cf. routeMixte
-// plus bas) : l'interface, pour un administrateur connecté, et /api/v1, pour une clé
+// plus bas) : l'interface, pour une session (lectures avec clients:read ; écritures et parc pour
+// l'administration et l'assistante technique, cf. requireGestionClients), et /api/v1, pour une clé
 // d'intégration porteuse du bon scope. Un agent et un humain appliquent ainsi exactement
 // les mêmes règles de validation — il n'existe pas de « chemin agent » plus permissif.
 const clientDetailInclude = {
