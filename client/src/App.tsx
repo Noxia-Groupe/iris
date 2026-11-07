@@ -32,7 +32,7 @@ import Comptabilite from './pages/Comptabilite';
 import MentionsLegales from './pages/MentionsLegales';
 import PreteAFacturer from './pages/PreteAFacturer';
 import { ErrorBoundary } from './ErrorBoundary';
-import { useCurrentUser, peutAccederAuxDevis, peutConsulterPlanning, peutOuvrirAdministration, ROLES_ANNUAIRE, ROLES_INTERVENTIONS, ROLE_COMMERCIAL, ROLE_CONDUCTEUR, ROLE_RESPONSABLE, ROLE_SUPERADMIN, ROLE_TECHNICIEN, TYPES_ADMINISTRATION } from './roles';
+import { useCurrentUser, peutAccederAuxDevis, peutConsulterPlanning, peutOuvrirAdministration, ROLES_ANNUAIRE, ROLES_CONTRATS, ROLES_INTERVENTIONS, ROLE_COMMERCIAL, ROLE_CONDUCTEUR, ROLE_RESPONSABLE, ROLE_SUPERADMIN, ROLE_TECHNICIEN, TYPES_ADMINISTRATION } from './roles';
 import { useModules } from './modules';
 import { CompanyTimezoneProvider } from './companyTimezone';
 
@@ -158,8 +158,10 @@ function App() {
             <RouteFicheIntervention />
           </PrivateRoute>
         } />
+        {/* Contrats de maintenance : l'administration et l'assistante technique (ROLES_CONTRATS, même liste
+            que le menu ; cf. gereLesContrats). */}
         <Route path="/contrats-maintenance" element={
-          <PrivateRoute requiredRoles={ROLES_ADMIN}>
+          <PrivateRoute requiredRoles={ROLES_CONTRATS}>
             <ContratsMaintenance />
           </PrivateRoute>
         } />

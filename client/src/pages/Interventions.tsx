@@ -15,7 +15,7 @@ import EnvoiDocument, { type DocumentAEnvoyer } from '../components/EnvoiDocumen
 import type { TraceSignature as Trace } from '../lib/traceSignature';
 import { resumeCoutsIntervention, libelleDevisMarge, detailMargeSav, alerteMargeSav, type MargeDevisIntervention, type MargeSavHorsContrat } from '../lib/coutsIntervention';
 import { INFORMATION_SUITE_HORS_CONTRAT } from '../lib/suiteIntervention';
-import { estEncadrementSav, estEncadrementSuivi as estEncadrementSuiviRole, isAdminRole, peutConsulterPlanning, useCurrentUser } from '../roles';
+import { estEncadrementSav, estEncadrementSuivi as estEncadrementSuiviRole, gereLesContrats, peutConsulterPlanning, useCurrentUser } from '../roles';
 import { useModules } from '../modules';
 import { interventionRemettable } from '../lib/remiseAPlanifier';
 import { useCompanyTimezone } from '../companyTimezoneContext';
@@ -288,7 +288,9 @@ export default function Interventions({ interventionId }: { interventionId?: str
         : <div><h1 className="text-2xl font-bold text-gray-900">{estTechnicien ? 'Mes interventions' : 'Interventions SAV'}</h1><p className="text-gray-500">{estTechnicien ? 'Uniquement les dossiers qui vous sont explicitement affectés.' : 'Demandes clients et interventions en cours. Le planning reste une projection prévisionnelle.'}</p></div>}
       {estEncadrement && !interventionId && <button className="btn btn-primary flex items-center gap-2" onClick={() => setFormOpen(true)}><Plus size={18} /> Nouvelle intervention</button>}
     </div>
-    {isAdminRole(user?.role) && !interventionId && <AlerteGenerationVisites />}
+    {/* Alerte de la génération des visites : la gestion des contrats (administration et assistante technique),
+        comme leur écran (choix par défaut, à confirmer). */}
+    {gereLesContrats(user?.role) && !interventionId && <AlerteGenerationVisites />}
     {error && <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-red-700">{error}</div>}
     {info && <div role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-800">{info}</div>}
     {envoi && interventionId && <EnvoiDocument key={envoi.chemin} document={envoi} onFermer={() => setEnvoi(null)} />}

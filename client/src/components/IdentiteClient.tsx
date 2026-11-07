@@ -33,8 +33,8 @@ export function ChampsIdentiteClient({ valeurs, onChange, autoFocus = false }: {
   </>;
 }
 
-// Formulaire de la fiche client, pour l'administration : l'identité enregistrée est relue par la
-// page après succès (`onEnregistre`).
+// Formulaire de la fiche client, pour qui gère les clients (administration et assistante technique, cf.
+// gereLesClients) : l'identité enregistrée est relue par la page après succès (`onEnregistre`).
 export function FormulaireIdentiteClient({ client, onEnregistre }: {
   client: { id: string; raisonSociale: string; siren?: string | null; sansSiret?: boolean };
   onEnregistre: () => Promise<void> | void;

@@ -58,6 +58,9 @@ const M365 = {
 const SANS_SESSION = { error: 'Authentification requise' };
 const SESSION_INVALIDE = { error: 'Session expirée ou invalide' };
 const REFUS_ADMINISTRATION = { error: 'Accès réservé aux administrateurs' };
+// Envoi du contrat : la gestion des contrats depuis AT-2a (réponses 3 et 9 du 06-11-2026, requireGestionContrats), dont le
+// refus nomme l'administration et l'assistante technique ; les types joués ici sont refusés comme avant, sous ce message.
+const REFUS_GESTION_CONTRATS = { error: 'Accès réservé à l’administration et à l’assistante technique.' };
 const REFUS_SUPER_ADMINISTRATION = { error: 'Accès réservé au super administrateur' };
 const REFUS_DEVIS_WRITE = { error: 'Permission requise : devis:write' };
 const REFUS_CLIENTS_READ = { error: 'Permission requise : clients:read' };
@@ -1121,7 +1124,7 @@ if (!TEST_DATABASE_URL) {
           identite: identiteIncomplete('SIRET, ville', 'un compte rendu'),
         },
         contrat: {
-          gardes: [[parCompte(c.conducteur), REFUS_ADMINISTRATION, 'CONDUCTEUR_TRAVAUX'], [parCompte(c.commercial), REFUS_ADMINISTRATION, 'COMMERCIAL']],
+          gardes: [[parCompte(c.conducteur), REFUS_GESTION_CONTRATS, 'CONDUCTEUR_TRAVAUX'], [parCompte(c.commercial), REFUS_GESTION_CONTRATS, 'COMMERCIAL']],
           introuvables: [[randomUUID(), CONTRAT_INTROUVABLE, admin()], [f.intervention.id, CONTRAT_INTROUVABLE, admin()]],
           annules: [[contratAnnule.id, CONTRAT_ANNULE]],
           propres: [],
@@ -1575,7 +1578,7 @@ if (!TEST_DATABASE_URL) {
       const attendus = {
         devis: (cle) => ([...ADMIS_ADMINISTRATION, 'commercial', 'assistante', 'comptable', 'directeurCommercial'].includes(cle) ? 201 : [403, REFUS_DEVIS_WRITE]),
         facture: (cle) => (ADMIS_ADMINISTRATION.includes(cle) ? 201 : [403, REFUS_ADMINISTRATION]),
-        contrat: (cle) => (ADMIS_ADMINISTRATION.includes(cle) ? 201 : [403, REFUS_ADMINISTRATION]),
+        contrat: (cle) => (ADMIS_ADMINISTRATION.includes(cle) ? 201 : [403, REFUS_GESTION_CONTRATS]),
         chantier: (cle) => (ADMIS_ADMINISTRATION.includes(cle) ? 201 : [403, REFUS_ADMINISTRATION]),
         compteRendu: (cle) => ({
           SUPERADMIN: 201, admin: 201, adminCommercial: 201, conducteur: 201, directeur: 201, directeurLecteurDevis: 201, directeurTousDroits: 201,

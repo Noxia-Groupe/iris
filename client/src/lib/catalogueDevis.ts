@@ -16,7 +16,8 @@ export type FicheCatalogueDevis = {
   nature: NatureLigneDevis;
   prixVenteHt: number;
   tauxTva: number;
-  // Présent seulement pour qui voit le prix d'achat prévu (administration).
+  // Présent seulement pour qui voit le prix d'achat prévu (administration et assistante technique, cf.
+  // voitPrixAchatDevis).
   prixAchatHt?: number | null;
   // Main d'œuvre : son drapeau et son prix à l'heure sous contrat (devis au temps passé), ses forfaits jour
   // et ses prix de la demi-journée, vides si non réglés (ligne au jour ou à la demi-journée) ; jamais ses
@@ -40,7 +41,7 @@ export type LigneDevisSaisie = {
   reference?: string | null;
   catalogueFamille?: FamilleCatalogue | null;
   catalogueId?: string | null;
-  // Saisie libre de l'administrateur (« 12,50 ») ; vide = pas de prix d'achat prévu.
+  // Saisie libre de qui écrit le prix d'achat prévu (« 12,50 ») ; vide = pas de prix d'achat prévu.
   prixAchatUnitaireHt?: string;
   // Ligne « main d'œuvre au temps passé » d'un devis au temps passé : son tarif (cf. ./tempsPasse.ts).
   tempsPasse?: boolean;
@@ -147,7 +148,7 @@ export function ligneEnEdition(ligne: {
       unite: ligne.unite ?? null, reference: ligne.reference ?? null, catalogueFamille: ligne.catalogueFamille ?? null, catalogueId: ligne.catalogueId ?? null,
     };
   }
-  // Ligne au jour ou à la demi-journée : jamais de prix d'achat prévu, même pour l'administration.
+  // Ligne au jour ou à la demi-journée : jamais de prix d'achat prévu, même pour qui le lit ailleurs.
   if (ligne.forfaitMainOeuvre) {
     return {
       ligneId: ligne.id, forfaitMainOeuvre: ligne.forfaitMainOeuvre, tarifForfait: ligne.tarifForfait ?? null,

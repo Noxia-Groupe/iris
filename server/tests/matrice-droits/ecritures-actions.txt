@@ -1,7 +1,7 @@
 AC | DELETE /api/catalogue/:family/:id | prestation-catalogue | défaut | 403 « Accès réservé aux administrateurs » inchangé
 AC | DELETE /api/categories/:id | categorie | défaut | 403 « Accès non autorisé pour un compte assistante commerciale. » inchangé
-AC | DELETE /api/clients/:id | client-actif | défaut | 403 « Accès réservé aux administrateurs » inchangé
-AC | DELETE /api/clients/:id | client-desactive | défaut | 403 « Accès réservé aux administrateurs » inchangé
+AC | DELETE /api/clients/:id | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. » inchangé
+AC | DELETE /api/clients/:id | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. » inchangé
 AC | DELETE /api/fournisseurs/:id | fournisseur | défaut | 403 « Accès non autorisé pour un compte assistante commerciale. » inchangé
 AC | DELETE /api/intervenants/:id | fiche-libre | défaut | 403 « Accès réservé aux administrateurs » inchangé
 AC | DELETE /api/intervenants/:id | fiche-tech | défaut | 403 « Accès réservé aux administrateurs » inchangé
@@ -105,17 +105,17 @@ AC | POST /api/achats | chantierId=chantier-termine | défaut, corps achat | 403
 AC | POST /api/admin/api-keys/:id/revoke | cle-active | défaut | 403 « Accès réservé au super administrateur » inchangé
 AC | POST /api/clients/:clientId/equipements/:id/archiver | equipement-autre-client | défaut | 403 « Accès réservé aux administrateurs » inchangé
 AC | POST /api/clients/:clientId/equipements/:id/archiver | equipement-client-actif | défaut | 403 « Accès réservé aux administrateurs » inchangé
-AC | POST /api/contrats-maintenance/:id/generer-intervention | contrat-actif | défaut | 403 « Accès réservé aux administrateurs » inchangé
+AC | POST /api/contrats-maintenance/:id/generer-intervention | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. » inchangé
 AC | POST /api/devis | clientId=client-actif | défaut, corps client, objet et ligne | 201 écrit (Devis,DevisLigne,SequenceAffaire)
 AC | POST /api/devis | clientId=client-desactive | défaut, corps client, objet et ligne | 201 écrit (Devis,DevisLigne,SequenceAffaire)
 AC | POST /api/devis/:id/convertir | devis-brouillon | défaut, corps cible=CHANTIER | 400 « Seul un devis accepté peut être converti. » inchangé
-AC | POST /api/devis/:id/convertir | devis-brouillon | défaut, corps cible=CONTRAT | 403 « La création d’un contrat de maintenance est réservée à l’administration. » inchangé
+AC | POST /api/devis/:id/convertir | devis-brouillon | défaut, corps cible=CONTRAT | 403 « La création d’un contrat de maintenance est réservée à l’administration et à l’assistante technique. » inchangé
 AC | POST /api/devis/:id/convertir | devis-brouillon | défaut, corps cible=INTERVENTION | 403 « Création réservée à l’encadrement SAV. » inchangé
 AC | POST /api/devis/:id/convertir | devis-converti | défaut, corps cible=CHANTIER | 409 « Ce devis a déjà été converti : chaque affaire n’ouvre qu’un seul chantier. » inchangé
-AC | POST /api/devis/:id/convertir | devis-converti | défaut, corps cible=CONTRAT | 403 « La création d’un contrat de maintenance est réservée à l’administration. » inchangé
+AC | POST /api/devis/:id/convertir | devis-converti | défaut, corps cible=CONTRAT | 403 « La création d’un contrat de maintenance est réservée à l’administration et à l’assistante technique. » inchangé
 AC | POST /api/devis/:id/convertir | devis-converti | défaut, corps cible=INTERVENTION | 403 « Création réservée à l’encadrement SAV. » inchangé
 AC | POST /api/devis/:id/convertir | devis-signe | défaut, corps cible=CHANTIER | 201 écrit (Chantier,DevisConversion)
-AC | POST /api/devis/:id/convertir | devis-signe | défaut, corps cible=CONTRAT | 403 « La création d’un contrat de maintenance est réservée à l’administration. » inchangé
+AC | POST /api/devis/:id/convertir | devis-signe | défaut, corps cible=CONTRAT | 403 « La création d’un contrat de maintenance est réservée à l’administration et à l’assistante technique. » inchangé
 AC | POST /api/devis/:id/convertir | devis-signe | défaut, corps cible=INTERVENTION | 403 « Création réservée à l’encadrement SAV. » inchangé
 AC | POST /api/devis/:id/duplication | devis-brouillon | défaut | 201 écrit (Devis,DevisLigne,SequenceAffaire)
 AC | POST /api/devis/:id/duplication | devis-converti | défaut | 201 écrit (Devis,DevisLigne,SequenceAffaire)
@@ -609,8 +609,8 @@ AD-COM | PUT /api/interventions/:id/a-suivre | visite-contrat | défaut, corps a
 AD-COM | PUT /api/interventions/:id/a-suivre | visite-contrat | défaut, corps aSuivre=oui | 409 « Seule une intervention terminée porte la marque « à suivre ». » inchangé
 AT | DELETE /api/catalogue/:family/:id | prestation-catalogue | défaut | 403 « Accès réservé aux administrateurs » inchangé
 AT | DELETE /api/categories/:id | categorie | défaut | 409 « Suppression impossible : 5 achat(s) et 0 ligne(s) de budget utilisent cette catégorie. » inchangé
-AT | DELETE /api/clients/:id | client-actif | défaut | 403 « Accès réservé aux administrateurs » inchangé
-AT | DELETE /api/clients/:id | client-desactive | défaut | 403 « Accès réservé aux administrateurs » inchangé
+AT | DELETE /api/clients/:id | client-actif | défaut | 200 écrit (Client)
+AT | DELETE /api/clients/:id | client-desactive | défaut | 200 écrit (Client)
 AT | DELETE /api/fournisseurs/:id | fournisseur | défaut | 409 « Suppression impossible : 7 écriture(s) sont rattachées à ce fournisseur. » inchangé
 AT | DELETE /api/intervenants/:id | fiche-libre | défaut | 403 « Accès réservé aux administrateurs » inchangé
 AT | DELETE /api/intervenants/:id | fiche-tech | défaut | 403 « Accès réservé aux administrateurs » inchangé
@@ -637,9 +637,9 @@ AT | PATCH /api/chantiers/:id/statut | chantier-dir | défaut, corps statut=TERM
 AT | PATCH /api/chantiers/:id/statut | chantier-resp | défaut, corps statut=TERMINE | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. » inchangé
 AT | PATCH /api/chantiers/:id/statut | chantier-tech-branche-resp | défaut, corps statut=TERMINE | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. » inchangé
 AT | PATCH /api/chantiers/:id/statut | chantier-termine | défaut, corps statut=EN_COURS | 403 « Un compte assistante technique n’est pas autorisé à modifier une affaire. » inchangé
-AT | PATCH /api/devis/:id | devis-brouillon | défaut, corps client, objet et ligne | 403 « Permission requise : devis:write » inchangé
-AT | PATCH /api/devis/:id | devis-converti | défaut, corps client, objet et ligne | 403 « Permission requise : devis:write » inchangé
-AT | PATCH /api/devis/:id | devis-signe | défaut, corps client, objet et ligne | 403 « Permission requise : devis:write » inchangé
+AT | PATCH /api/devis/:id | devis-brouillon | défaut, corps client, objet et ligne | 200 écrit (Devis,DevisLigne)
+AT | PATCH /api/devis/:id | devis-converti | défaut, corps client, objet et ligne | 409 « Ce devis est signé : créez une nouvelle révision brouillon pour le modifier. » inchangé
+AT | PATCH /api/devis/:id | devis-signe | défaut, corps client, objet et ligne | 409 « Ce devis est signé : créez une nouvelle révision brouillon pour le modifier. » inchangé
 AT | PATCH /api/interventions/:id/couts/:type/:coutId | heures-tech-intervention-affectee | défaut, corps nbrHeures et motif | 403 « Accès non autorisé. » inchangé
 AT | PATCH /api/interventions/:id/couts/:type/:coutId | heures-tech-sous-intervention-autre | défaut, corps nbrHeures et motif | 403 « Accès non autorisé. » inchangé
 AT | PATCH /api/interventions/:id/couts/:type/:coutId | materiel-intervention-affectee | défaut, corps montantHT et motif | 200 écrit (CoutInterventionAchat,JournalSaisieChantier)
@@ -714,24 +714,24 @@ AT | POST /api/achats | chantierId=chantier-termine | défaut, corps achat | 403
 AT | POST /api/admin/api-keys/:id/revoke | cle-active | défaut | 403 « Accès réservé au super administrateur » inchangé
 AT | POST /api/clients/:clientId/equipements/:id/archiver | equipement-autre-client | défaut | 403 « Accès réservé aux administrateurs » inchangé
 AT | POST /api/clients/:clientId/equipements/:id/archiver | equipement-client-actif | défaut | 403 « Accès réservé aux administrateurs » inchangé
-AT | POST /api/contrats-maintenance/:id/generer-intervention | contrat-actif | défaut | 403 « Accès réservé aux administrateurs » inchangé
-AT | POST /api/devis | clientId=client-actif | défaut, corps client, objet et ligne | 403 « Permission requise : devis:write » inchangé
-AT | POST /api/devis | clientId=client-desactive | défaut, corps client, objet et ligne | 403 « Permission requise : devis:write » inchangé
-AT | POST /api/devis/:id/convertir | devis-brouillon | défaut, corps cible=CHANTIER | 403 « Permission requise : devis:write » inchangé
-AT | POST /api/devis/:id/convertir | devis-brouillon | défaut, corps cible=CONTRAT | 403 « Permission requise : devis:write » inchangé
-AT | POST /api/devis/:id/convertir | devis-brouillon | défaut, corps cible=INTERVENTION | 403 « Permission requise : devis:write » inchangé
-AT | POST /api/devis/:id/convertir | devis-converti | défaut, corps cible=CHANTIER | 403 « Permission requise : devis:write » inchangé
-AT | POST /api/devis/:id/convertir | devis-converti | défaut, corps cible=CONTRAT | 403 « Permission requise : devis:write » inchangé
-AT | POST /api/devis/:id/convertir | devis-converti | défaut, corps cible=INTERVENTION | 403 « Permission requise : devis:write » inchangé
-AT | POST /api/devis/:id/convertir | devis-signe | défaut, corps cible=CHANTIER | 403 « Permission requise : devis:write » inchangé
-AT | POST /api/devis/:id/convertir | devis-signe | défaut, corps cible=CONTRAT | 403 « Permission requise : devis:write » inchangé
-AT | POST /api/devis/:id/convertir | devis-signe | défaut, corps cible=INTERVENTION | 403 « Permission requise : devis:write » inchangé
-AT | POST /api/devis/:id/duplication | devis-brouillon | défaut | 403 « Permission requise : devis:write » inchangé
-AT | POST /api/devis/:id/duplication | devis-converti | défaut | 403 « Permission requise : devis:write » inchangé
-AT | POST /api/devis/:id/duplication | devis-signe | défaut | 403 « Permission requise : devis:write » inchangé
-AT | POST /api/devis/:id/revisions | devis-brouillon | défaut | 403 « Permission requise : devis:write » inchangé
-AT | POST /api/devis/:id/revisions | devis-converti | défaut | 403 « Permission requise : devis:write » inchangé
-AT | POST /api/devis/:id/revisions | devis-signe | défaut | 403 « Permission requise : devis:write » inchangé
+AT | POST /api/contrats-maintenance/:id/generer-intervention | contrat-actif | défaut | 200 inchangé
+AT | POST /api/devis | clientId=client-actif | défaut, corps client, objet et ligne | 201 écrit (Devis,DevisLigne,SequenceAffaire)
+AT | POST /api/devis | clientId=client-desactive | défaut, corps client, objet et ligne | 201 écrit (Devis,DevisLigne,SequenceAffaire)
+AT | POST /api/devis/:id/convertir | devis-brouillon | défaut, corps cible=CHANTIER | 400 « Seul un devis accepté peut être converti. » inchangé
+AT | POST /api/devis/:id/convertir | devis-brouillon | défaut, corps cible=CONTRAT | 400 « Seul un devis accepté peut être converti. » inchangé
+AT | POST /api/devis/:id/convertir | devis-brouillon | défaut, corps cible=INTERVENTION | 400 « Seul un devis accepté peut être converti. » inchangé
+AT | POST /api/devis/:id/convertir | devis-converti | défaut, corps cible=CHANTIER | 409 « Ce devis a déjà été converti : chaque affaire n’ouvre qu’un seul chantier. » inchangé
+AT | POST /api/devis/:id/convertir | devis-converti | défaut, corps cible=CONTRAT | 201 écrit (ContratMaintenance,DevisConversion,JournalSaisieChantier)
+AT | POST /api/devis/:id/convertir | devis-converti | défaut, corps cible=INTERVENTION | 201 écrit (DevisConversion,Intervention,JournalSaisieChantier,SequenceIntervention)
+AT | POST /api/devis/:id/convertir | devis-signe | défaut, corps cible=CHANTIER | 201 écrit (Chantier,DevisConversion)
+AT | POST /api/devis/:id/convertir | devis-signe | défaut, corps cible=CONTRAT | 201 écrit (ContratMaintenance,DevisConversion,JournalSaisieChantier)
+AT | POST /api/devis/:id/convertir | devis-signe | défaut, corps cible=INTERVENTION | 201 écrit (DevisConversion,Intervention,JournalSaisieChantier,SequenceIntervention)
+AT | POST /api/devis/:id/duplication | devis-brouillon | défaut | 201 écrit (Devis,DevisLigne,SequenceAffaire)
+AT | POST /api/devis/:id/duplication | devis-converti | défaut | 201 écrit (Devis,DevisLigne,SequenceAffaire)
+AT | POST /api/devis/:id/duplication | devis-signe | défaut | 201 écrit (Devis,DevisLigne,SequenceAffaire)
+AT | POST /api/devis/:id/revisions | devis-brouillon | défaut | 409 « Seul un devis signé peut ouvrir une nouvelle révision. » inchangé
+AT | POST /api/devis/:id/revisions | devis-converti | défaut | 409 « Ce devis est déjà converti : il ne peut plus être révisé. » inchangé
+AT | POST /api/devis/:id/revisions | devis-signe | défaut | 201 écrit (Devis,DevisLigne)
 AT | POST /api/factures/:id/emettre | avoir-emis | défaut | 403 « Accès réservé aux administrateurs » inchangé
 AT | POST /api/factures/:id/emettre | facture-brouillon | défaut | 403 « Accès réservé aux administrateurs » inchangé
 AT | POST /api/factures/:id/emettre | facture-emise | défaut | 403 « Accès réservé aux administrateurs » inchangé
@@ -812,8 +812,8 @@ AT | PUT /api/interventions/:id/a-suivre | visite-contrat | défaut, corps aSuiv
 AT | PUT /api/interventions/:id/a-suivre | visite-contrat | défaut, corps aSuivre=oui | 409 « Seule une intervention terminée porte la marque « à suivre ». » inchangé
 COM | DELETE /api/catalogue/:family/:id | prestation-catalogue | défaut | 403 « Accès réservé aux administrateurs » inchangé
 COM | DELETE /api/categories/:id | categorie | défaut | 403 « Accès non autorisé pour un compte commercial. » inchangé
-COM | DELETE /api/clients/:id | client-actif | défaut | 403 « Accès réservé aux administrateurs » inchangé
-COM | DELETE /api/clients/:id | client-desactive | défaut | 403 « Accès réservé aux administrateurs » inchangé
+COM | DELETE /api/clients/:id | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. » inchangé
+COM | DELETE /api/clients/:id | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. » inchangé
 COM | DELETE /api/fournisseurs/:id | fournisseur | défaut | 403 « Accès non autorisé pour un compte commercial. » inchangé
 COM | DELETE /api/intervenants/:id | fiche-libre | défaut | 403 « Accès réservé aux administrateurs » inchangé
 COM | DELETE /api/intervenants/:id | fiche-tech | défaut | 403 « Accès réservé aux administrateurs » inchangé
@@ -917,17 +917,17 @@ COM | POST /api/achats | chantierId=chantier-termine | défaut, corps achat | 40
 COM | POST /api/admin/api-keys/:id/revoke | cle-active | défaut | 403 « Accès réservé au super administrateur » inchangé
 COM | POST /api/clients/:clientId/equipements/:id/archiver | equipement-autre-client | défaut | 403 « Accès réservé aux administrateurs » inchangé
 COM | POST /api/clients/:clientId/equipements/:id/archiver | equipement-client-actif | défaut | 403 « Accès réservé aux administrateurs » inchangé
-COM | POST /api/contrats-maintenance/:id/generer-intervention | contrat-actif | défaut | 403 « Accès réservé aux administrateurs » inchangé
+COM | POST /api/contrats-maintenance/:id/generer-intervention | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. » inchangé
 COM | POST /api/devis | clientId=client-actif | défaut, corps client, objet et ligne | 201 écrit (Devis,DevisLigne,SequenceAffaire)
 COM | POST /api/devis | clientId=client-desactive | défaut, corps client, objet et ligne | 201 écrit (Devis,DevisLigne,SequenceAffaire)
 COM | POST /api/devis/:id/convertir | devis-brouillon | défaut, corps cible=CHANTIER | 400 « Seul un devis accepté peut être converti. » inchangé
-COM | POST /api/devis/:id/convertir | devis-brouillon | défaut, corps cible=CONTRAT | 403 « La création d’un contrat de maintenance est réservée à l’administration. » inchangé
+COM | POST /api/devis/:id/convertir | devis-brouillon | défaut, corps cible=CONTRAT | 403 « La création d’un contrat de maintenance est réservée à l’administration et à l’assistante technique. » inchangé
 COM | POST /api/devis/:id/convertir | devis-brouillon | défaut, corps cible=INTERVENTION | 403 « Création réservée à l’encadrement SAV. » inchangé
 COM | POST /api/devis/:id/convertir | devis-converti | défaut, corps cible=CHANTIER | 409 « Ce devis a déjà été converti : chaque affaire n’ouvre qu’un seul chantier. » inchangé
-COM | POST /api/devis/:id/convertir | devis-converti | défaut, corps cible=CONTRAT | 403 « La création d’un contrat de maintenance est réservée à l’administration. » inchangé
+COM | POST /api/devis/:id/convertir | devis-converti | défaut, corps cible=CONTRAT | 403 « La création d’un contrat de maintenance est réservée à l’administration et à l’assistante technique. » inchangé
 COM | POST /api/devis/:id/convertir | devis-converti | défaut, corps cible=INTERVENTION | 403 « Création réservée à l’encadrement SAV. » inchangé
 COM | POST /api/devis/:id/convertir | devis-signe | défaut, corps cible=CHANTIER | 201 écrit (Chantier,DevisConversion)
-COM | POST /api/devis/:id/convertir | devis-signe | défaut, corps cible=CONTRAT | 403 « La création d’un contrat de maintenance est réservée à l’administration. » inchangé
+COM | POST /api/devis/:id/convertir | devis-signe | défaut, corps cible=CONTRAT | 403 « La création d’un contrat de maintenance est réservée à l’administration et à l’assistante technique. » inchangé
 COM | POST /api/devis/:id/convertir | devis-signe | défaut, corps cible=INTERVENTION | 403 « Création réservée à l’encadrement SAV. » inchangé
 COM | POST /api/devis/:id/duplication | devis-brouillon | défaut | 201 écrit (Devis,DevisLigne,SequenceAffaire)
 COM | POST /api/devis/:id/duplication | devis-converti | défaut | 201 écrit (Devis,DevisLigne,SequenceAffaire)
@@ -1015,8 +1015,8 @@ COM | PUT /api/interventions/:id/a-suivre | visite-contrat | défaut, corps aSui
 COM | PUT /api/interventions/:id/a-suivre | visite-contrat | défaut, corps aSuivre=oui | 403 « Accès non autorisé pour un compte commercial. » inchangé
 CPT | DELETE /api/catalogue/:family/:id | prestation-catalogue | défaut | 403 « Accès réservé aux administrateurs » inchangé
 CPT | DELETE /api/categories/:id | categorie | défaut | 403 « Accès non autorisé pour un compte comptable. » inchangé
-CPT | DELETE /api/clients/:id | client-actif | défaut | 403 « Accès réservé aux administrateurs » inchangé
-CPT | DELETE /api/clients/:id | client-desactive | défaut | 403 « Accès réservé aux administrateurs » inchangé
+CPT | DELETE /api/clients/:id | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. » inchangé
+CPT | DELETE /api/clients/:id | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. » inchangé
 CPT | DELETE /api/fournisseurs/:id | fournisseur | défaut | 403 « Accès non autorisé pour un compte comptable. » inchangé
 CPT | DELETE /api/intervenants/:id | fiche-libre | défaut | 403 « Accès réservé aux administrateurs » inchangé
 CPT | DELETE /api/intervenants/:id | fiche-tech | défaut | 403 « Accès réservé aux administrateurs » inchangé
@@ -1120,17 +1120,17 @@ CPT | POST /api/achats | chantierId=chantier-termine | défaut, corps achat | 40
 CPT | POST /api/admin/api-keys/:id/revoke | cle-active | défaut | 403 « Accès réservé au super administrateur » inchangé
 CPT | POST /api/clients/:clientId/equipements/:id/archiver | equipement-autre-client | défaut | 403 « Accès réservé aux administrateurs » inchangé
 CPT | POST /api/clients/:clientId/equipements/:id/archiver | equipement-client-actif | défaut | 403 « Accès réservé aux administrateurs » inchangé
-CPT | POST /api/contrats-maintenance/:id/generer-intervention | contrat-actif | défaut | 403 « Accès réservé aux administrateurs » inchangé
+CPT | POST /api/contrats-maintenance/:id/generer-intervention | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. » inchangé
 CPT | POST /api/devis | clientId=client-actif | défaut, corps client, objet et ligne | 201 écrit (Devis,DevisLigne,SequenceAffaire)
 CPT | POST /api/devis | clientId=client-desactive | défaut, corps client, objet et ligne | 201 écrit (Devis,DevisLigne,SequenceAffaire)
 CPT | POST /api/devis/:id/convertir | devis-brouillon | défaut, corps cible=CHANTIER | 400 « Seul un devis accepté peut être converti. » inchangé
-CPT | POST /api/devis/:id/convertir | devis-brouillon | défaut, corps cible=CONTRAT | 403 « La création d’un contrat de maintenance est réservée à l’administration. » inchangé
+CPT | POST /api/devis/:id/convertir | devis-brouillon | défaut, corps cible=CONTRAT | 403 « La création d’un contrat de maintenance est réservée à l’administration et à l’assistante technique. » inchangé
 CPT | POST /api/devis/:id/convertir | devis-brouillon | défaut, corps cible=INTERVENTION | 403 « Création réservée à l’encadrement SAV. » inchangé
 CPT | POST /api/devis/:id/convertir | devis-converti | défaut, corps cible=CHANTIER | 409 « Ce devis a déjà été converti : chaque affaire n’ouvre qu’un seul chantier. » inchangé
-CPT | POST /api/devis/:id/convertir | devis-converti | défaut, corps cible=CONTRAT | 403 « La création d’un contrat de maintenance est réservée à l’administration. » inchangé
+CPT | POST /api/devis/:id/convertir | devis-converti | défaut, corps cible=CONTRAT | 403 « La création d’un contrat de maintenance est réservée à l’administration et à l’assistante technique. » inchangé
 CPT | POST /api/devis/:id/convertir | devis-converti | défaut, corps cible=INTERVENTION | 403 « Création réservée à l’encadrement SAV. » inchangé
 CPT | POST /api/devis/:id/convertir | devis-signe | défaut, corps cible=CHANTIER | 201 écrit (Chantier,DevisConversion)
-CPT | POST /api/devis/:id/convertir | devis-signe | défaut, corps cible=CONTRAT | 403 « La création d’un contrat de maintenance est réservée à l’administration. » inchangé
+CPT | POST /api/devis/:id/convertir | devis-signe | défaut, corps cible=CONTRAT | 403 « La création d’un contrat de maintenance est réservée à l’administration et à l’assistante technique. » inchangé
 CPT | POST /api/devis/:id/convertir | devis-signe | défaut, corps cible=INTERVENTION | 403 « Création réservée à l’encadrement SAV. » inchangé
 CPT | POST /api/devis/:id/duplication | devis-brouillon | défaut | 201 écrit (Devis,DevisLigne,SequenceAffaire)
 CPT | POST /api/devis/:id/duplication | devis-converti | défaut | 201 écrit (Devis,DevisLigne,SequenceAffaire)
@@ -1218,8 +1218,8 @@ CPT | PUT /api/interventions/:id/a-suivre | visite-contrat | défaut, corps aSui
 CPT | PUT /api/interventions/:id/a-suivre | visite-contrat | défaut, corps aSuivre=oui | 403 « Accès non autorisé pour un compte comptable. » inchangé
 CPT-FINANCE | DELETE /api/catalogue/:family/:id | prestation-catalogue | défaut | 403 « Accès réservé aux administrateurs » inchangé
 CPT-FINANCE | DELETE /api/categories/:id | categorie | défaut | 403 « Accès non autorisé pour un compte comptable. » inchangé
-CPT-FINANCE | DELETE /api/clients/:id | client-actif | défaut | 403 « Accès réservé aux administrateurs » inchangé
-CPT-FINANCE | DELETE /api/clients/:id | client-desactive | défaut | 403 « Accès réservé aux administrateurs » inchangé
+CPT-FINANCE | DELETE /api/clients/:id | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. » inchangé
+CPT-FINANCE | DELETE /api/clients/:id | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. » inchangé
 CPT-FINANCE | DELETE /api/fournisseurs/:id | fournisseur | défaut | 403 « Accès non autorisé pour un compte comptable. » inchangé
 CPT-FINANCE | DELETE /api/intervenants/:id | fiche-libre | défaut | 403 « Accès réservé aux administrateurs » inchangé
 CPT-FINANCE | DELETE /api/intervenants/:id | fiche-tech | défaut | 403 « Accès réservé aux administrateurs » inchangé
@@ -1323,17 +1323,17 @@ CPT-FINANCE | POST /api/achats | chantierId=chantier-termine | défaut, corps ac
 CPT-FINANCE | POST /api/admin/api-keys/:id/revoke | cle-active | défaut | 403 « Accès réservé au super administrateur » inchangé
 CPT-FINANCE | POST /api/clients/:clientId/equipements/:id/archiver | equipement-autre-client | défaut | 403 « Accès réservé aux administrateurs » inchangé
 CPT-FINANCE | POST /api/clients/:clientId/equipements/:id/archiver | equipement-client-actif | défaut | 403 « Accès réservé aux administrateurs » inchangé
-CPT-FINANCE | POST /api/contrats-maintenance/:id/generer-intervention | contrat-actif | défaut | 403 « Accès réservé aux administrateurs » inchangé
+CPT-FINANCE | POST /api/contrats-maintenance/:id/generer-intervention | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. » inchangé
 CPT-FINANCE | POST /api/devis | clientId=client-actif | défaut, corps client, objet et ligne | 201 écrit (Devis,DevisLigne,SequenceAffaire)
 CPT-FINANCE | POST /api/devis | clientId=client-desactive | défaut, corps client, objet et ligne | 201 écrit (Devis,DevisLigne,SequenceAffaire)
 CPT-FINANCE | POST /api/devis/:id/convertir | devis-brouillon | défaut, corps cible=CHANTIER | 400 « Seul un devis accepté peut être converti. » inchangé
-CPT-FINANCE | POST /api/devis/:id/convertir | devis-brouillon | défaut, corps cible=CONTRAT | 403 « La création d’un contrat de maintenance est réservée à l’administration. » inchangé
+CPT-FINANCE | POST /api/devis/:id/convertir | devis-brouillon | défaut, corps cible=CONTRAT | 403 « La création d’un contrat de maintenance est réservée à l’administration et à l’assistante technique. » inchangé
 CPT-FINANCE | POST /api/devis/:id/convertir | devis-brouillon | défaut, corps cible=INTERVENTION | 403 « Création réservée à l’encadrement SAV. » inchangé
 CPT-FINANCE | POST /api/devis/:id/convertir | devis-converti | défaut, corps cible=CHANTIER | 409 « Ce devis a déjà été converti : chaque affaire n’ouvre qu’un seul chantier. » inchangé
-CPT-FINANCE | POST /api/devis/:id/convertir | devis-converti | défaut, corps cible=CONTRAT | 403 « La création d’un contrat de maintenance est réservée à l’administration. » inchangé
+CPT-FINANCE | POST /api/devis/:id/convertir | devis-converti | défaut, corps cible=CONTRAT | 403 « La création d’un contrat de maintenance est réservée à l’administration et à l’assistante technique. » inchangé
 CPT-FINANCE | POST /api/devis/:id/convertir | devis-converti | défaut, corps cible=INTERVENTION | 403 « Création réservée à l’encadrement SAV. » inchangé
 CPT-FINANCE | POST /api/devis/:id/convertir | devis-signe | défaut, corps cible=CHANTIER | 201 écrit (Chantier,DevisConversion)
-CPT-FINANCE | POST /api/devis/:id/convertir | devis-signe | défaut, corps cible=CONTRAT | 403 « La création d’un contrat de maintenance est réservée à l’administration. » inchangé
+CPT-FINANCE | POST /api/devis/:id/convertir | devis-signe | défaut, corps cible=CONTRAT | 403 « La création d’un contrat de maintenance est réservée à l’administration et à l’assistante technique. » inchangé
 CPT-FINANCE | POST /api/devis/:id/convertir | devis-signe | défaut, corps cible=INTERVENTION | 403 « Création réservée à l’encadrement SAV. » inchangé
 CPT-FINANCE | POST /api/devis/:id/duplication | devis-brouillon | défaut | 201 écrit (Devis,DevisLigne,SequenceAffaire)
 CPT-FINANCE | POST /api/devis/:id/duplication | devis-converti | défaut | 201 écrit (Devis,DevisLigne,SequenceAffaire)
@@ -1421,8 +1421,8 @@ CPT-FINANCE | PUT /api/interventions/:id/a-suivre | visite-contrat | défaut, co
 CPT-FINANCE | PUT /api/interventions/:id/a-suivre | visite-contrat | défaut, corps aSuivre=oui | 403 « Accès non autorisé pour un compte comptable. » inchangé
 CT | DELETE /api/catalogue/:family/:id | prestation-catalogue | défaut | 403 « Accès réservé aux administrateurs » inchangé
 CT | DELETE /api/categories/:id | categorie | défaut | 409 « Suppression impossible : 5 achat(s) et 0 ligne(s) de budget utilisent cette catégorie. » inchangé
-CT | DELETE /api/clients/:id | client-actif | défaut | 403 « Accès réservé aux administrateurs » inchangé
-CT | DELETE /api/clients/:id | client-desactive | défaut | 403 « Accès réservé aux administrateurs » inchangé
+CT | DELETE /api/clients/:id | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. » inchangé
+CT | DELETE /api/clients/:id | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. » inchangé
 CT | DELETE /api/fournisseurs/:id | fournisseur | défaut | 409 « Suppression impossible : 7 écriture(s) sont rattachées à ce fournisseur. » inchangé
 CT | DELETE /api/intervenants/:id | fiche-libre | défaut | 403 « Accès réservé aux administrateurs » inchangé
 CT | DELETE /api/intervenants/:id | fiche-tech | défaut | 403 « Accès réservé aux administrateurs » inchangé
@@ -1526,7 +1526,7 @@ CT | POST /api/achats | chantierId=chantier-termine | défaut, corps achat | 403
 CT | POST /api/admin/api-keys/:id/revoke | cle-active | défaut | 403 « Accès réservé au super administrateur » inchangé
 CT | POST /api/clients/:clientId/equipements/:id/archiver | equipement-autre-client | défaut | 403 « Accès réservé aux administrateurs » inchangé
 CT | POST /api/clients/:clientId/equipements/:id/archiver | equipement-client-actif | défaut | 403 « Accès réservé aux administrateurs » inchangé
-CT | POST /api/contrats-maintenance/:id/generer-intervention | contrat-actif | défaut | 403 « Accès réservé aux administrateurs » inchangé
+CT | POST /api/contrats-maintenance/:id/generer-intervention | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. » inchangé
 CT | POST /api/devis | clientId=client-actif | défaut, corps client, objet et ligne | 403 « Permission requise : devis:write » inchangé
 CT | POST /api/devis | clientId=client-desactive | défaut, corps client, objet et ligne | 403 « Permission requise : devis:write » inchangé
 CT | POST /api/devis/:id/convertir | devis-brouillon | défaut, corps cible=CHANTIER | 403 « Permission requise : devis:write » inchangé
@@ -1624,8 +1624,8 @@ CT | PUT /api/interventions/:id/a-suivre | visite-contrat | défaut, corps aSuiv
 CT | PUT /api/interventions/:id/a-suivre | visite-contrat | défaut, corps aSuivre=oui | 404 « Intervention introuvable. » inchangé
 CT-N1 | DELETE /api/catalogue/:family/:id | prestation-catalogue | défaut | 403 « Accès réservé aux administrateurs » inchangé
 CT-N1 | DELETE /api/categories/:id | categorie | défaut | 409 « Suppression impossible : 5 achat(s) et 0 ligne(s) de budget utilisent cette catégorie. » inchangé
-CT-N1 | DELETE /api/clients/:id | client-actif | défaut | 403 « Accès réservé aux administrateurs » inchangé
-CT-N1 | DELETE /api/clients/:id | client-desactive | défaut | 403 « Accès réservé aux administrateurs » inchangé
+CT-N1 | DELETE /api/clients/:id | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. » inchangé
+CT-N1 | DELETE /api/clients/:id | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. » inchangé
 CT-N1 | DELETE /api/fournisseurs/:id | fournisseur | défaut | 409 « Suppression impossible : 7 écriture(s) sont rattachées à ce fournisseur. » inchangé
 CT-N1 | DELETE /api/intervenants/:id | fiche-libre | défaut | 403 « Accès réservé aux administrateurs » inchangé
 CT-N1 | DELETE /api/intervenants/:id | fiche-tech | défaut | 403 « Accès réservé aux administrateurs » inchangé
@@ -1729,7 +1729,7 @@ CT-N1 | POST /api/achats | chantierId=chantier-termine | défaut, corps achat | 
 CT-N1 | POST /api/admin/api-keys/:id/revoke | cle-active | défaut | 403 « Accès réservé au super administrateur » inchangé
 CT-N1 | POST /api/clients/:clientId/equipements/:id/archiver | equipement-autre-client | défaut | 403 « Accès réservé aux administrateurs » inchangé
 CT-N1 | POST /api/clients/:clientId/equipements/:id/archiver | equipement-client-actif | défaut | 403 « Accès réservé aux administrateurs » inchangé
-CT-N1 | POST /api/contrats-maintenance/:id/generer-intervention | contrat-actif | défaut | 403 « Accès réservé aux administrateurs » inchangé
+CT-N1 | POST /api/contrats-maintenance/:id/generer-intervention | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. » inchangé
 CT-N1 | POST /api/devis | clientId=client-actif | défaut, corps client, objet et ligne | 403 « Permission requise : devis:write » inchangé
 CT-N1 | POST /api/devis | clientId=client-desactive | défaut, corps client, objet et ligne | 403 « Permission requise : devis:write » inchangé
 CT-N1 | POST /api/devis/:id/convertir | devis-brouillon | défaut, corps cible=CHANTIER | 403 « Permission requise : devis:write » inchangé
@@ -1827,8 +1827,8 @@ CT-N1 | PUT /api/interventions/:id/a-suivre | visite-contrat | défaut, corps aS
 CT-N1 | PUT /api/interventions/:id/a-suivre | visite-contrat | défaut, corps aSuivre=oui | 404 « Intervention introuvable. » inchangé
 DC | DELETE /api/catalogue/:family/:id | prestation-catalogue | défaut | 403 « Accès réservé aux administrateurs » inchangé
 DC | DELETE /api/categories/:id | categorie | défaut | 403 « Accès non autorisé pour un compte directeur commercial. » inchangé
-DC | DELETE /api/clients/:id | client-actif | défaut | 403 « Accès réservé aux administrateurs » inchangé
-DC | DELETE /api/clients/:id | client-desactive | défaut | 403 « Accès réservé aux administrateurs » inchangé
+DC | DELETE /api/clients/:id | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. » inchangé
+DC | DELETE /api/clients/:id | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. » inchangé
 DC | DELETE /api/fournisseurs/:id | fournisseur | défaut | 403 « Accès non autorisé pour un compte directeur commercial. » inchangé
 DC | DELETE /api/intervenants/:id | fiche-libre | défaut | 403 « Accès réservé aux administrateurs » inchangé
 DC | DELETE /api/intervenants/:id | fiche-tech | défaut | 403 « Accès réservé aux administrateurs » inchangé
@@ -1932,17 +1932,17 @@ DC | POST /api/achats | chantierId=chantier-termine | défaut, corps achat | 403
 DC | POST /api/admin/api-keys/:id/revoke | cle-active | défaut | 403 « Accès réservé au super administrateur » inchangé
 DC | POST /api/clients/:clientId/equipements/:id/archiver | equipement-autre-client | défaut | 403 « Accès réservé aux administrateurs » inchangé
 DC | POST /api/clients/:clientId/equipements/:id/archiver | equipement-client-actif | défaut | 403 « Accès réservé aux administrateurs » inchangé
-DC | POST /api/contrats-maintenance/:id/generer-intervention | contrat-actif | défaut | 403 « Accès réservé aux administrateurs » inchangé
+DC | POST /api/contrats-maintenance/:id/generer-intervention | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. » inchangé
 DC | POST /api/devis | clientId=client-actif | défaut, corps client, objet et ligne | 201 écrit (Devis,DevisLigne,SequenceAffaire)
 DC | POST /api/devis | clientId=client-desactive | défaut, corps client, objet et ligne | 201 écrit (Devis,DevisLigne,SequenceAffaire)
 DC | POST /api/devis/:id/convertir | devis-brouillon | défaut, corps cible=CHANTIER | 400 « Seul un devis accepté peut être converti. » inchangé
-DC | POST /api/devis/:id/convertir | devis-brouillon | défaut, corps cible=CONTRAT | 403 « La création d’un contrat de maintenance est réservée à l’administration. » inchangé
+DC | POST /api/devis/:id/convertir | devis-brouillon | défaut, corps cible=CONTRAT | 403 « La création d’un contrat de maintenance est réservée à l’administration et à l’assistante technique. » inchangé
 DC | POST /api/devis/:id/convertir | devis-brouillon | défaut, corps cible=INTERVENTION | 403 « Création réservée à l’encadrement SAV. » inchangé
 DC | POST /api/devis/:id/convertir | devis-converti | défaut, corps cible=CHANTIER | 409 « Ce devis a déjà été converti : chaque affaire n’ouvre qu’un seul chantier. » inchangé
-DC | POST /api/devis/:id/convertir | devis-converti | défaut, corps cible=CONTRAT | 403 « La création d’un contrat de maintenance est réservée à l’administration. » inchangé
+DC | POST /api/devis/:id/convertir | devis-converti | défaut, corps cible=CONTRAT | 403 « La création d’un contrat de maintenance est réservée à l’administration et à l’assistante technique. » inchangé
 DC | POST /api/devis/:id/convertir | devis-converti | défaut, corps cible=INTERVENTION | 403 « Création réservée à l’encadrement SAV. » inchangé
 DC | POST /api/devis/:id/convertir | devis-signe | défaut, corps cible=CHANTIER | 201 écrit (Chantier,DevisConversion)
-DC | POST /api/devis/:id/convertir | devis-signe | défaut, corps cible=CONTRAT | 403 « La création d’un contrat de maintenance est réservée à l’administration. » inchangé
+DC | POST /api/devis/:id/convertir | devis-signe | défaut, corps cible=CONTRAT | 403 « La création d’un contrat de maintenance est réservée à l’administration et à l’assistante technique. » inchangé
 DC | POST /api/devis/:id/convertir | devis-signe | défaut, corps cible=INTERVENTION | 403 « Création réservée à l’encadrement SAV. » inchangé
 DC | POST /api/devis/:id/duplication | devis-brouillon | défaut | 201 écrit (Devis,DevisLigne,SequenceAffaire)
 DC | POST /api/devis/:id/duplication | devis-converti | défaut | 201 écrit (Devis,DevisLigne,SequenceAffaire)
@@ -2233,8 +2233,8 @@ DIR | PUT /api/interventions/:id/a-suivre | visite-contrat | défaut, corps aSui
 DIR | PUT /api/interventions/:id/a-suivre | visite-contrat | défaut, corps aSuivre=oui | 409 « Seule une intervention terminée porte la marque « à suivre ». » inchangé
 RESP | DELETE /api/catalogue/:family/:id | prestation-catalogue | défaut | 403 « Accès réservé aux administrateurs » inchangé
 RESP | DELETE /api/categories/:id | categorie | défaut | 409 « Suppression impossible : 5 achat(s) et 0 ligne(s) de budget utilisent cette catégorie. » inchangé
-RESP | DELETE /api/clients/:id | client-actif | défaut | 403 « Accès réservé aux administrateurs » inchangé
-RESP | DELETE /api/clients/:id | client-desactive | défaut | 403 « Accès réservé aux administrateurs » inchangé
+RESP | DELETE /api/clients/:id | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. » inchangé
+RESP | DELETE /api/clients/:id | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. » inchangé
 RESP | DELETE /api/fournisseurs/:id | fournisseur | défaut | 409 « Suppression impossible : 7 écriture(s) sont rattachées à ce fournisseur. » inchangé
 RESP | DELETE /api/intervenants/:id | fiche-libre | défaut | 403 « Accès réservé aux administrateurs » inchangé
 RESP | DELETE /api/intervenants/:id | fiche-tech | défaut | 403 « Accès réservé aux administrateurs » inchangé
@@ -2338,7 +2338,7 @@ RESP | POST /api/achats | chantierId=chantier-termine | défaut, corps achat | 4
 RESP | POST /api/admin/api-keys/:id/revoke | cle-active | défaut | 403 « Accès réservé au super administrateur » inchangé
 RESP | POST /api/clients/:clientId/equipements/:id/archiver | equipement-autre-client | défaut | 403 « Accès réservé aux administrateurs » inchangé
 RESP | POST /api/clients/:clientId/equipements/:id/archiver | equipement-client-actif | défaut | 403 « Accès réservé aux administrateurs » inchangé
-RESP | POST /api/contrats-maintenance/:id/generer-intervention | contrat-actif | défaut | 403 « Accès réservé aux administrateurs » inchangé
+RESP | POST /api/contrats-maintenance/:id/generer-intervention | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. » inchangé
 RESP | POST /api/devis | clientId=client-actif | défaut, corps client, objet et ligne | 403 « Permission requise : devis:write » inchangé
 RESP | POST /api/devis | clientId=client-desactive | défaut, corps client, objet et ligne | 403 « Permission requise : devis:write » inchangé
 RESP | POST /api/devis/:id/convertir | devis-brouillon | défaut, corps cible=CHANTIER | 403 « Permission requise : devis:write » inchangé
@@ -2436,8 +2436,8 @@ RESP | PUT /api/interventions/:id/a-suivre | visite-contrat | défaut, corps aSu
 RESP | PUT /api/interventions/:id/a-suivre | visite-contrat | défaut, corps aSuivre=oui | 404 « Intervention introuvable. » inchangé
 RESP-SANS-BRANCHE | DELETE /api/catalogue/:family/:id | prestation-catalogue | défaut | 403 « Accès réservé aux administrateurs » inchangé
 RESP-SANS-BRANCHE | DELETE /api/categories/:id | categorie | défaut | 409 « Suppression impossible : 5 achat(s) et 0 ligne(s) de budget utilisent cette catégorie. » inchangé
-RESP-SANS-BRANCHE | DELETE /api/clients/:id | client-actif | défaut | 403 « Accès réservé aux administrateurs » inchangé
-RESP-SANS-BRANCHE | DELETE /api/clients/:id | client-desactive | défaut | 403 « Accès réservé aux administrateurs » inchangé
+RESP-SANS-BRANCHE | DELETE /api/clients/:id | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. » inchangé
+RESP-SANS-BRANCHE | DELETE /api/clients/:id | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. » inchangé
 RESP-SANS-BRANCHE | DELETE /api/fournisseurs/:id | fournisseur | défaut | 409 « Suppression impossible : 7 écriture(s) sont rattachées à ce fournisseur. » inchangé
 RESP-SANS-BRANCHE | DELETE /api/intervenants/:id | fiche-libre | défaut | 403 « Accès réservé aux administrateurs » inchangé
 RESP-SANS-BRANCHE | DELETE /api/intervenants/:id | fiche-tech | défaut | 403 « Accès réservé aux administrateurs » inchangé
@@ -2541,7 +2541,7 @@ RESP-SANS-BRANCHE | POST /api/achats | chantierId=chantier-termine | défaut, co
 RESP-SANS-BRANCHE | POST /api/admin/api-keys/:id/revoke | cle-active | défaut | 403 « Accès réservé au super administrateur » inchangé
 RESP-SANS-BRANCHE | POST /api/clients/:clientId/equipements/:id/archiver | equipement-autre-client | défaut | 403 « Accès réservé aux administrateurs » inchangé
 RESP-SANS-BRANCHE | POST /api/clients/:clientId/equipements/:id/archiver | equipement-client-actif | défaut | 403 « Accès réservé aux administrateurs » inchangé
-RESP-SANS-BRANCHE | POST /api/contrats-maintenance/:id/generer-intervention | contrat-actif | défaut | 403 « Accès réservé aux administrateurs » inchangé
+RESP-SANS-BRANCHE | POST /api/contrats-maintenance/:id/generer-intervention | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. » inchangé
 RESP-SANS-BRANCHE | POST /api/devis | clientId=client-actif | défaut, corps client, objet et ligne | 403 « Permission requise : devis:write » inchangé
 RESP-SANS-BRANCHE | POST /api/devis | clientId=client-desactive | défaut, corps client, objet et ligne | 403 « Permission requise : devis:write » inchangé
 RESP-SANS-BRANCHE | POST /api/devis/:id/convertir | devis-brouillon | défaut, corps cible=CHANTIER | 403 « Permission requise : devis:write » inchangé
@@ -2842,8 +2842,8 @@ SA | PUT /api/interventions/:id/a-suivre | visite-contrat | défaut, corps aSuiv
 SA | PUT /api/interventions/:id/a-suivre | visite-contrat | défaut, corps aSuivre=oui | 409 « Seule une intervention terminée porte la marque « à suivre ». » inchangé
 TECH | DELETE /api/catalogue/:family/:id | prestation-catalogue | défaut | 403 « Accès réservé aux administrateurs » inchangé
 TECH | DELETE /api/categories/:id | categorie | défaut | 403 « Un technicien ne modifie ni le planning ni les référentiels. » inchangé
-TECH | DELETE /api/clients/:id | client-actif | défaut | 403 « Accès réservé aux administrateurs » inchangé
-TECH | DELETE /api/clients/:id | client-desactive | défaut | 403 « Accès réservé aux administrateurs » inchangé
+TECH | DELETE /api/clients/:id | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. » inchangé
+TECH | DELETE /api/clients/:id | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. » inchangé
 TECH | DELETE /api/fournisseurs/:id | fournisseur | défaut | 403 « Un technicien ne modifie ni le planning ni les référentiels. » inchangé
 TECH | DELETE /api/intervenants/:id | fiche-libre | défaut | 403 « Accès réservé aux administrateurs » inchangé
 TECH | DELETE /api/intervenants/:id | fiche-tech | défaut | 403 « Accès réservé aux administrateurs » inchangé
@@ -2947,7 +2947,7 @@ TECH | POST /api/achats | chantierId=chantier-termine | défaut, corps achat | 4
 TECH | POST /api/admin/api-keys/:id/revoke | cle-active | défaut | 403 « Accès réservé au super administrateur » inchangé
 TECH | POST /api/clients/:clientId/equipements/:id/archiver | equipement-autre-client | défaut | 403 « Accès réservé aux administrateurs » inchangé
 TECH | POST /api/clients/:clientId/equipements/:id/archiver | equipement-client-actif | défaut | 403 « Accès réservé aux administrateurs » inchangé
-TECH | POST /api/contrats-maintenance/:id/generer-intervention | contrat-actif | défaut | 403 « Accès réservé aux administrateurs » inchangé
+TECH | POST /api/contrats-maintenance/:id/generer-intervention | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. » inchangé
 TECH | POST /api/devis | clientId=client-actif | défaut, corps client, objet et ligne | 403 « Permission requise : devis:write » inchangé
 TECH | POST /api/devis | clientId=client-desactive | défaut, corps client, objet et ligne | 403 « Permission requise : devis:write » inchangé
 TECH | POST /api/devis/:id/convertir | devis-brouillon | défaut, corps cible=CHANTIER | 403 « Permission requise : devis:write » inchangé
@@ -3045,8 +3045,8 @@ TECH | PUT /api/interventions/:id/a-suivre | visite-contrat | défaut, corps aSu
 TECH | PUT /api/interventions/:id/a-suivre | visite-contrat | défaut, corps aSuivre=oui | 403 « Le technicien marque son intervention « à suivre » en la terminant ; il peut seulement retirer la marque ensuite. » inchangé
 TECH-SANS-FICHE | DELETE /api/catalogue/:family/:id | prestation-catalogue | défaut | 403 « Accès réservé aux administrateurs » inchangé
 TECH-SANS-FICHE | DELETE /api/categories/:id | categorie | défaut | 403 « Un technicien ne modifie ni le planning ni les référentiels. » inchangé
-TECH-SANS-FICHE | DELETE /api/clients/:id | client-actif | défaut | 403 « Accès réservé aux administrateurs » inchangé
-TECH-SANS-FICHE | DELETE /api/clients/:id | client-desactive | défaut | 403 « Accès réservé aux administrateurs » inchangé
+TECH-SANS-FICHE | DELETE /api/clients/:id | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. » inchangé
+TECH-SANS-FICHE | DELETE /api/clients/:id | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. » inchangé
 TECH-SANS-FICHE | DELETE /api/fournisseurs/:id | fournisseur | défaut | 403 « Un technicien ne modifie ni le planning ni les référentiels. » inchangé
 TECH-SANS-FICHE | DELETE /api/intervenants/:id | fiche-libre | défaut | 403 « Accès réservé aux administrateurs » inchangé
 TECH-SANS-FICHE | DELETE /api/intervenants/:id | fiche-tech | défaut | 403 « Accès réservé aux administrateurs » inchangé
@@ -3150,7 +3150,7 @@ TECH-SANS-FICHE | POST /api/achats | chantierId=chantier-termine | défaut, corp
 TECH-SANS-FICHE | POST /api/admin/api-keys/:id/revoke | cle-active | défaut | 403 « Accès réservé au super administrateur » inchangé
 TECH-SANS-FICHE | POST /api/clients/:clientId/equipements/:id/archiver | equipement-autre-client | défaut | 403 « Accès réservé aux administrateurs » inchangé
 TECH-SANS-FICHE | POST /api/clients/:clientId/equipements/:id/archiver | equipement-client-actif | défaut | 403 « Accès réservé aux administrateurs » inchangé
-TECH-SANS-FICHE | POST /api/contrats-maintenance/:id/generer-intervention | contrat-actif | défaut | 403 « Accès réservé aux administrateurs » inchangé
+TECH-SANS-FICHE | POST /api/contrats-maintenance/:id/generer-intervention | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. » inchangé
 TECH-SANS-FICHE | POST /api/devis | clientId=client-actif | défaut, corps client, objet et ligne | 403 « Permission requise : devis:write » inchangé
 TECH-SANS-FICHE | POST /api/devis | clientId=client-desactive | défaut, corps client, objet et ligne | 403 « Permission requise : devis:write » inchangé
 TECH-SANS-FICHE | POST /api/devis/:id/convertir | devis-brouillon | défaut, corps cible=CHANTIER | 403 « Permission requise : devis:write » inchangé

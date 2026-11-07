@@ -1,5 +1,5 @@
 import express from 'express';
-import { ROLE_TECHNICIEN, isAdminRole } from './roles';
+import { ROLE_TECHNICIEN, isAdminRole, litEtEcritPrixAchatDevis } from './roles';
 import type { AuthRequest } from '../http/auth';
 import type { ApiRequest } from '../http/cles-api';
 
@@ -56,19 +56,20 @@ export function saisieSelonDroits(req: express.Request): <T>(valeur: T) => T {
   return (valeur) => valeur;
 }
 
-// Prix d'achat prévu d'une ligne de devis : une donnée interne de coût. Session humaine : l'administration
-// seulement, directeur compris (réponse de Nelson du 06-11-2026, « Chantiers seulement » : le réglage de
-// rentabilité ne masque au directeur que les chantiers, cf. voitCoutPrevuParPrixAchat), comme le prix
-// d'achat du catalogue ;
+// Prix d'achat prévu d'une ligne de devis : une donnée interne de coût. Session humaine : l'administration,
+// directeur compris (réponse de Nelson du 06-11-2026, « Chantiers seulement » : le réglage de rentabilité
+// ne masque au directeur que les chantiers, cf. voitCoutPrevuParPrixAchat), et l'assistante technique
+// (réponses 4 et 8 du 06-11-2026 : « Prix d'achat oui, coûts non » ; catalogue et parc en lecture seule),
+// comme le prix d'achat du catalogue (cf. litEtEcritPrixAchatDevis) ;
 // clé d'intégration : le scope finances:read, comme la rentabilité. Les autres porteurs du droit
 // devis ne le reçoivent jamais, sous aucune route, et ne peuvent pas l'écrire.
 export function voitPrixAchatDevis(req: express.Request): boolean {
   const cle = (req as ApiRequest).apiKey;
   if (cle) return cle.scopes.includes('finances:read');
-  return isAdminRole((req as AuthRequest).user?.role);
+  return litEtEcritPrixAchatDevis((req as AuthRequest).user?.role);
 }
 export function ecritPrixAchatDevis(req: express.Request): boolean {
-  return !(req as ApiRequest).apiKey && isAdminRole((req as AuthRequest).user?.role);
+  return !(req as ApiRequest).apiKey && litEtEcritPrixAchatDevis((req as AuthRequest).user?.role);
 }
 
 // Rattachement d'un intervenant à une main d'œuvre (prix de vente du catalogue) : l'administration

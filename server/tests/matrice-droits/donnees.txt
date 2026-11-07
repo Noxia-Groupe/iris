@@ -1066,7 +1066,7 @@ AD | GET /api/users | — | défaut | clés [].responsableHierarchique | id, nam
 AD | GET /api/users | — | défaut | valeurs AC | role=ASSISTANTE_COMMERCIALE ; actif=oui ; estCommercial=non ; accesFinance=non ; permissions=chantiers:read+clients:read+devis:read+devis:write ; permissionsIndividuelles=(aucune)
 AD | GET /api/users | — | défaut | valeurs AD | role=ADMIN ; actif=oui ; estCommercial=non ; accesFinance=non ; permissions=chantiers:archive+chantiers:read+chantiers:write+clients:read+devis:read+devis:write ; permissionsIndividuelles=(aucune)
 AD | GET /api/users | — | défaut | valeurs AD-COM | role=ADMIN ; actif=oui ; estCommercial=oui ; accesFinance=non ; permissions=chantiers:archive+chantiers:read+chantiers:write+clients:read+devis:read+devis:write ; permissionsIndividuelles=(aucune)
-AD | GET /api/users | — | défaut | valeurs AT | role=ASSISTANTE_TECHNIQUE ; actif=oui ; estCommercial=non ; accesFinance=non ; permissions=chantiers:read+clients:read ; permissionsIndividuelles=(aucune)
+AD | GET /api/users | — | défaut | valeurs AT | role=ASSISTANTE_TECHNIQUE ; actif=oui ; estCommercial=non ; accesFinance=non ; permissions=chantiers:read+clients:read+devis:read+devis:write ; permissionsIndividuelles=(aucune)
 AD | GET /api/users | — | défaut | valeurs COM | role=COMMERCIAL ; actif=oui ; estCommercial=non ; accesFinance=non ; permissions=chantiers:read+clients:read+devis:read+devis:write ; permissionsIndividuelles=(aucune)
 AD | GET /api/users | — | défaut | valeurs CPT | role=COMPTABLE ; actif=oui ; estCommercial=non ; accesFinance=non ; permissions=chantiers:read+clients:read+devis:read+devis:write ; permissionsIndividuelles=(aucune)
 AD | GET /api/users | — | défaut | valeurs CPT-FINANCE | role=COMPTABLE ; actif=oui ; estCommercial=non ; accesFinance=oui ; permissions=chantiers:read+clients:read+devis:read+devis:write+finances:read ; permissionsIndividuelles=(aucune)
@@ -2024,7 +2024,7 @@ AD-COM | GET /api/users | — | défaut | clés [].responsableHierarchique | id,
 AD-COM | GET /api/users | — | défaut | valeurs AC | role=ASSISTANTE_COMMERCIALE ; actif=oui ; estCommercial=non ; accesFinance=non ; permissions=chantiers:read+clients:read+devis:read+devis:write ; permissionsIndividuelles=(aucune)
 AD-COM | GET /api/users | — | défaut | valeurs AD | role=ADMIN ; actif=oui ; estCommercial=non ; accesFinance=non ; permissions=chantiers:archive+chantiers:read+chantiers:write+clients:read+devis:read+devis:write ; permissionsIndividuelles=(aucune)
 AD-COM | GET /api/users | — | défaut | valeurs AD-COM | role=ADMIN ; actif=oui ; estCommercial=oui ; accesFinance=non ; permissions=chantiers:archive+chantiers:read+chantiers:write+clients:read+devis:read+devis:write ; permissionsIndividuelles=(aucune)
-AD-COM | GET /api/users | — | défaut | valeurs AT | role=ASSISTANTE_TECHNIQUE ; actif=oui ; estCommercial=non ; accesFinance=non ; permissions=chantiers:read+clients:read ; permissionsIndividuelles=(aucune)
+AD-COM | GET /api/users | — | défaut | valeurs AT | role=ASSISTANTE_TECHNIQUE ; actif=oui ; estCommercial=non ; accesFinance=non ; permissions=chantiers:read+clients:read+devis:read+devis:write ; permissionsIndividuelles=(aucune)
 AD-COM | GET /api/users | — | défaut | valeurs COM | role=COMMERCIAL ; actif=oui ; estCommercial=non ; accesFinance=non ; permissions=chantiers:read+clients:read+devis:read+devis:write ; permissionsIndividuelles=(aucune)
 AD-COM | GET /api/users | — | défaut | valeurs CPT | role=COMPTABLE ; actif=oui ; estCommercial=non ; accesFinance=non ; permissions=chantiers:read+clients:read+devis:read+devis:write ; permissionsIndividuelles=(aucune)
 AD-COM | GET /api/users | — | défaut | valeurs CPT-FINANCE | role=COMPTABLE ; actif=oui ; estCommercial=non ; accesFinance=oui ; permissions=chantiers:read+clients:read+devis:read+devis:write+finances:read ; permissionsIndividuelles=(aucune)
@@ -2375,6 +2375,17 @@ AT | GET /api/clients | — | défaut | clés .clients[].sites[] | adresse, clie
 AT | GET /api/clients | — | défaut | éléments .clients[] | client-actif
 AT | GET /api/clients | — | défaut | éléments .clients[].contacts[] | contact-client-actif
 AT | GET /api/clients | — | défaut | éléments .clients[].sites[] | site-client-actif
+AT | GET /api/clients/:clientId/equipements | client-actif | défaut | clés [] | adresseMac, catalogueEquipement, catalogueEquipementId, clientId, clientSite, clientSiteId, createdAt, garantieJusquAu, id, imei, installeLe, notes, numeroSerie, statut, updatedAt
+AT | GET /api/clients/:clientId/equipements | client-actif | défaut | clés [].catalogueEquipement | actif, categorieId, createdAt, description, fabricant, id, nom, prixAchatHt, prixVenteHt, reference, tauxTva, updatedAt
+AT | GET /api/clients/:clientId/equipements | client-actif | défaut | clés [].clientSite | adresse, clientId, codePostal, complementAdresse, createdAt, estSiegeSocial, estSiteFacturation, estSiteIntervention, id, nom, pays, principal, updatedAt, ville
+AT | GET /api/clients/:clientId/equipements | client-actif | défaut | montants equipement-client-actif | catalogueEquipement.prixAchatHt=présent
+AT | GET /api/clients/:clientId/equipements | client-actif | défaut | éléments [] | equipement-client-actif
+AT | GET /api/clients/:clientId/equipements | client-desactive | défaut | clés [] | adresseMac, catalogueEquipement, catalogueEquipementId, clientId, clientSite, clientSiteId, createdAt, garantieJusquAu, id, imei, installeLe, notes, numeroSerie, statut, updatedAt
+AT | GET /api/clients/:clientId/equipements | client-desactive | défaut | clés [].catalogueEquipement | actif, categorieId, createdAt, description, fabricant, id, nom, prixAchatHt, prixVenteHt, reference, tauxTva, updatedAt
+AT | GET /api/clients/:clientId/equipements | client-desactive | défaut | clés [].clientSite | adresse, clientId, codePostal, complementAdresse, createdAt, estSiegeSocial, estSiteFacturation, estSiteIntervention, id, nom, pays, principal, updatedAt, ville
+AT | GET /api/clients/:clientId/equipements | client-desactive | défaut | montants equipement-client-desactive | catalogueEquipement.prixAchatHt=présent
+AT | GET /api/clients/:clientId/equipements | client-desactive | défaut | éléments [] | equipement-client-desactive
+AT | GET /api/clients/:clientId/equipements | inexistant | défaut | éléments [] | (aucun)
 AT | GET /api/clients/:id | client-actif | défaut | clés . | actif, contacts, createdAt, email, id, nomCommercial, raisonSociale, sansSiret, siren, sites, telephone, tvaIntra, updatedAt
 AT | GET /api/clients/:id | client-actif | défaut | clés .contacts[] | clientId, createdAt, email, estDecisionnaire, estSignataire, fonction, id, nom, prenom, principal, telephone, updatedAt
 AT | GET /api/clients/:id | client-actif | défaut | clés .sites[] | adresse, clientId, codePostal, complementAdresse, createdAt, estSiegeSocial, estSiteFacturation, estSiteIntervention, id, nom, pays, principal, updatedAt, ville
@@ -2394,6 +2405,64 @@ AT | GET /api/company | — | défaut | clés . | adresse, codePostal, couleurPr
 AT | GET /api/company/logo | — | défaut | réponse | 200 image/jpeg, contenu identique au logo posé
 AT | GET /api/conducteurs | — | défaut | clés [] | id, name
 AT | GET /api/conducteurs | — | défaut | éléments [] | CT, CT-BRANCHE, CT-N1, CT-TIERS
+AT | GET /api/contrats-maintenance | — | défaut | clés [] | annuleLe, annuleParId, client, clientId, createdAt, createdById, dateDebut, dureePrevisionnelleMinutes, id, motifAnnulation, noteCouverture, periodiciteMois, politiqueMainOeuvre, politiqueMateriel, prochaineEcheance, site, siteId, statut, titre, updatedAt
+AT | GET /api/contrats-maintenance | — | défaut | clés [].client | id, raisonSociale
+AT | GET /api/contrats-maintenance | — | défaut | éléments [] | contrat-actif
+AT | GET /api/contrats-maintenance/:id/document.pdf | contrat-actif | défaut | réponse | 200 application/pdf
+AT | GET /api/contrats-maintenance/:id/envois | contrat-actif | défaut | clés . | envois, proposition
+AT | GET /api/contrats-maintenance/:id/envois | contrat-actif | défaut | clés .proposition | corps, destinataire, microsoft365, objet
+AT | GET /api/contrats-maintenance/:id/envois | contrat-actif | défaut | éléments .envois[] | (aucun)
+AT | GET /api/contrats-maintenance/:id/journal-saisies | contrat-actif | défaut | clés [] | action, apres, auteurId, auteurNom, avant, chantierId, cible, cibleId, contratMaintenanceId, createdAt, id, interventionId, motif
+AT | GET /api/contrats-maintenance/:id/journal-saisies | contrat-actif | défaut | clés [].apres | annuleLe, annuleParId, client, clientId, createdAt, createdById, dateDebut, dureePrevisionnelleMinutes, id, motifAnnulation, noteCouverture, periodiciteMois, politiqueMainOeuvre, politiqueMateriel, prochaineEcheance, site, siteId, statut, titre, updatedAt
+AT | GET /api/contrats-maintenance/:id/journal-saisies | contrat-actif | défaut | clés [].apres.client | id, raisonSociale
+AT | GET /api/contrats-maintenance/:id/journal-saisies | contrat-actif | défaut | éléments [] | CONTRAT CREATION contrat-actif
+AT | GET /api/contrats-maintenance/generation-visites | — | défaut | clés . | alerte, anticipationVisitesJours, derniereExecution, derniereExecutionAutomatique, minuteurActif
+AT | GET /api/devis | — | défaut | clés [] | acompteConstateParId, acompteExige, acompteMontant, acompteRecuLe, acompteReference, annuleLe, annuleParId, auTempsPasse, client, clientId, conversions, createdAt, dossierId, heuresPrevues, id, lignes, motifAnnulation, numero, objet, origineDevisId, pasTempsPasseMinutes, signature, statut, tauxAcompte, tempsMinimumMinutes, totalHt, totalTtc, totalTva, updatedAt, version
+AT | GET /api/devis | — | défaut | clés [].client | actif, createdAt, email, id, nomCommercial, raisonSociale, sansSiret, siren, telephone, tvaIntra, updatedAt
+AT | GET /api/devis | — | défaut | clés [].conversions[] | cibleId, cibleType, createdAt, devisId, dossierId, id, rang
+AT | GET /api/devis | — | défaut | clés [].lignes[] | catalogueFamille, catalogueId, designation, devisId, forfaitMainOeuvre, id, minutesPrevuesUnite, nature, ordre, prixAchatUnitaireHt, prixUnitaireHt, quantite, reference, tarifForfait, tarifTempsPasse, tauxTva, tempsPasse, totalHt, totalTtc, unite
+AT | GET /api/devis | — | défaut | clés [].signature | devisId, empreinte, enregistreParId, id, signataire, signeLe
+AT | GET /api/devis | — | défaut | montants devis-brouillon | lignes[].prixAchatUnitaireHt=null
+AT | GET /api/devis | — | défaut | montants devis-converti | lignes[].prixAchatUnitaireHt=null
+AT | GET /api/devis | — | défaut | montants devis-intervention | lignes[].prixAchatUnitaireHt=null
+AT | GET /api/devis | — | défaut | montants devis-prix-achat | lignes[].prixAchatUnitaireHt=présent
+AT | GET /api/devis | — | défaut | montants devis-signe | lignes[].prixAchatUnitaireHt=null
+AT | GET /api/devis | — | défaut | montants « TEST Devis de chantier-ac » | lignes[].prixAchatUnitaireHt=null
+AT | GET /api/devis | — | défaut | montants « TEST Devis de chantier-ad » | lignes[].prixAchatUnitaireHt=null
+AT | GET /api/devis | — | défaut | montants « TEST Devis de chantier-annule » | lignes[].prixAchatUnitaireHt=null
+AT | GET /api/devis | — | défaut | montants « TEST Devis de chantier-autre » | lignes[].prixAchatUnitaireHt=null
+AT | GET /api/devis | — | défaut | montants « TEST Devis de chantier-com » | lignes[].prixAchatUnitaireHt=null
+AT | GET /api/devis | — | défaut | montants « TEST Devis de chantier-com-titulaire » | lignes[].prixAchatUnitaireHt=null
+AT | GET /api/devis | — | défaut | montants « TEST Devis de chantier-cpt » | lignes[].prixAchatUnitaireHt=null
+AT | GET /api/devis | — | défaut | montants « TEST Devis de chantier-ct-branche-resp » | lignes[].prixAchatUnitaireHt=null
+AT | GET /api/devis | — | défaut | montants « TEST Devis de chantier-dc » | lignes[].prixAchatUnitaireHt=null
+AT | GET /api/devis | — | défaut | montants « TEST Devis de chantier-dir » | lignes[].prixAchatUnitaireHt=null
+AT | GET /api/devis | — | défaut | montants « TEST Devis de chantier-resp » | lignes[].prixAchatUnitaireHt=null
+AT | GET /api/devis | — | défaut | montants « TEST Devis de chantier-tech-branche-resp » | lignes[].prixAchatUnitaireHt=null
+AT | GET /api/devis | — | défaut | montants « TEST Devis de chantier-termine » | lignes[].prixAchatUnitaireHt=null
+AT | GET /api/devis | — | défaut | éléments [] | devis-brouillon, devis-converti, devis-intervention, devis-prix-achat, devis-signe, « TEST Devis de chantier-ac », « TEST Devis de chantier-ad », « TEST Devis de chantier-annule », « TEST Devis de chantier-autre », « TEST Devis de chantier-com », « TEST Devis de chantier-com-titulaire », « TEST Devis de chantier-cpt », « TEST Devis de chantier-ct-branche-resp », « TEST Devis de chantier-dc », « TEST Devis de chantier-dir », « TEST Devis de chantier-resp », « TEST Devis de chantier-tech-branche-resp », « TEST Devis de chantier-termine »
+AT | GET /api/devis | — | défaut | éléments [].conversions[] | CHANTIER chantier-ac, CHANTIER chantier-ad, CHANTIER chantier-annule, CHANTIER chantier-autre, CHANTIER chantier-com, CHANTIER chantier-com-titulaire, CHANTIER chantier-cpt, CHANTIER chantier-ct, CHANTIER chantier-ct-branche-resp, CHANTIER chantier-dc, CHANTIER chantier-dir, CHANTIER chantier-resp, CHANTIER chantier-tech-branche-resp, CHANTIER chantier-termine, INTERVENTION intervention-issue-devis
+AT | GET /api/devis | — | défaut | éléments [].lignes[] | « TEST Fourniture avec prix d’achat », « TEST Ligne TEST Devis brouillon matrice », « TEST Ligne TEST Devis de chantier-ac », « TEST Ligne TEST Devis de chantier-ad », « TEST Ligne TEST Devis de chantier-annule », « TEST Ligne TEST Devis de chantier-autre », « TEST Ligne TEST Devis de chantier-com », « TEST Ligne TEST Devis de chantier-com-titulaire », « TEST Ligne TEST Devis de chantier-cpt », « TEST Ligne TEST Devis de chantier-ct », « TEST Ligne TEST Devis de chantier-ct-branche-resp », « TEST Ligne TEST Devis de chantier-dc », « TEST Ligne TEST Devis de chantier-dir », « TEST Ligne TEST Devis de chantier-resp », « TEST Ligne TEST Devis de chantier-tech-branche-resp », « TEST Ligne TEST Devis de chantier-termine », « TEST Ligne TEST Devis signé matrice », « TEST Ligne de l’intervention »
+AT | GET /api/devis/:id/document.pdf | devis-brouillon | défaut | réponse | 200 application/pdf
+AT | GET /api/devis/:id/document.pdf | devis-converti | défaut | réponse | 200 application/pdf
+AT | GET /api/devis/:id/document.pdf | devis-signe | défaut | réponse | 200 application/pdf
+AT | GET /api/devis/:id/envois | devis-brouillon | défaut | clés . | envois, proposition
+AT | GET /api/devis/:id/envois | devis-brouillon | défaut | clés .proposition | corps, destinataire, microsoft365, objet
+AT | GET /api/devis/:id/envois | devis-brouillon | défaut | éléments .envois[] | (aucun)
+AT | GET /api/devis/:id/envois | devis-converti | défaut | clés . | envois, proposition
+AT | GET /api/devis/:id/envois | devis-converti | défaut | clés .proposition | corps, destinataire, microsoft365, objet
+AT | GET /api/devis/:id/envois | devis-converti | défaut | éléments .envois[] | (aucun)
+AT | GET /api/devis/:id/envois | devis-signe | défaut | clés . | envois, proposition
+AT | GET /api/devis/:id/envois | devis-signe | défaut | clés .proposition | corps, destinataire, microsoft365, objet
+AT | GET /api/devis/:id/envois | devis-signe | défaut | éléments .envois[] | (aucun)
+AT | GET /api/devis/a-convertir | — | défaut | clés [] | client, dossierId, id, numero, objet, totalHt, version
+AT | GET /api/devis/a-convertir | — | défaut | clés [].client | id, raisonSociale
+AT | GET /api/devis/a-convertir | — | défaut | éléments [] | devis-intervention, devis-signe
+AT | GET /api/devis/catalogue | — | défaut | clés [] | estMainOeuvre?, famille, id, nature, nom, prixAchatHt, prixDemiJourneeHorsContratHt?, prixDemiJourneeSousContratHt?, prixHeureSousContratHt?, prixJourHorsContratHt?, prixJourSousContratHt?, prixVenteHt, reference, tauxTva, unite
+AT | GET /api/devis/catalogue | — | défaut | montants main-oeuvre-matrice | prixAchatHt=null
+AT | GET /api/devis/catalogue | — | défaut | montants modele-equipement | prixAchatHt=présent
+AT | GET /api/devis/catalogue | — | défaut | montants prestation-catalogue | prixAchatHt=présent
+AT | GET /api/devis/catalogue | — | défaut | éléments [] | main-oeuvre-matrice, modele-equipement, prestation-catalogue
 AT | GET /api/fournisseurs | — | défaut | clés [] | contact, createdAt, id, nom, updatedAt
 AT | GET /api/fournisseurs | — | défaut | éléments [] | fournisseur
 AT | GET /api/heures | — | défaut | clés [] | archivedAt, archivedById, chantier, chantierId, commentaire, createdAt, createdById, date, id, intervenant, intervenantId, motifArchivage, nbrHeures, updatedAt, updatedById
@@ -2667,7 +2736,7 @@ AT | GET /api/interventions/journee | — | défaut | éléments .resteesOuverte
 AT | GET /api/interventions/journee | — | défaut | éléments .resteesOuvertes[].affectations[] | intervenant fiche-tech ×2
 AT | GET /api/interventions/journee | — | défaut | éléments .terminees[] | (aucun)
 AT | GET /api/me | — | défaut | clés . | accesFinance, email, id, name, permissions, role, theme
-AT | GET /api/me | — | défaut | valeurs | role=ASSISTANTE_TECHNIQUE ; accesFinance=non ; permissions=chantiers:read+clients:read
+AT | GET /api/me | — | défaut | valeurs | role=ASSISTANTE_TECHNIQUE ; accesFinance=non ; permissions=chantiers:read+clients:read+devis:read+devis:write
 AT | GET /api/modules | — | défaut | clés . | libelleBaremeReduit, modeEnvoi, planningActif, planningActifGlobal
 AT | GET /api/modules | — | défaut | valeurs | planningActif=oui ; planningActifGlobal=oui
 AT | GET /api/modules | — | planningActif=non | valeurs | planningActif=non ; planningActifGlobal=non
@@ -4751,7 +4820,7 @@ DIR | GET /api/users | — | défaut | clés [].responsableHierarchique | id, na
 DIR | GET /api/users | — | défaut | valeurs AC | role=ASSISTANTE_COMMERCIALE ; actif=oui ; estCommercial=non ; accesFinance=non ; permissions=chantiers:read+clients:read+devis:read+devis:write ; permissionsIndividuelles=(aucune)
 DIR | GET /api/users | — | défaut | valeurs AD | role=ADMIN ; actif=oui ; estCommercial=non ; accesFinance=non ; permissions=chantiers:archive+chantiers:read+chantiers:write+clients:read+devis:read+devis:write ; permissionsIndividuelles=(aucune)
 DIR | GET /api/users | — | défaut | valeurs AD-COM | role=ADMIN ; actif=oui ; estCommercial=oui ; accesFinance=non ; permissions=chantiers:archive+chantiers:read+chantiers:write+clients:read+devis:read+devis:write ; permissionsIndividuelles=(aucune)
-DIR | GET /api/users | — | défaut | valeurs AT | role=ASSISTANTE_TECHNIQUE ; actif=oui ; estCommercial=non ; accesFinance=non ; permissions=chantiers:read+clients:read ; permissionsIndividuelles=(aucune)
+DIR | GET /api/users | — | défaut | valeurs AT | role=ASSISTANTE_TECHNIQUE ; actif=oui ; estCommercial=non ; accesFinance=non ; permissions=chantiers:read+clients:read+devis:read+devis:write ; permissionsIndividuelles=(aucune)
 DIR | GET /api/users | — | défaut | valeurs COM | role=COMMERCIAL ; actif=oui ; estCommercial=non ; accesFinance=non ; permissions=chantiers:read+clients:read+devis:read+devis:write ; permissionsIndividuelles=(aucune)
 DIR | GET /api/users | — | défaut | valeurs CPT | role=COMPTABLE ; actif=oui ; estCommercial=non ; accesFinance=non ; permissions=chantiers:read+clients:read+devis:read+devis:write ; permissionsIndividuelles=(aucune)
 DIR | GET /api/users | — | défaut | valeurs CPT-FINANCE | role=COMPTABLE ; actif=oui ; estCommercial=non ; accesFinance=oui ; permissions=chantiers:read+clients:read+devis:read+devis:write+finances:read ; permissionsIndividuelles=(aucune)
@@ -5982,7 +6051,7 @@ SA | GET /api/users | — | défaut | clés [].responsableHierarchique | id, nam
 SA | GET /api/users | — | défaut | valeurs AC | role=ASSISTANTE_COMMERCIALE ; actif=oui ; estCommercial=non ; accesFinance=non ; permissions=chantiers:read+clients:read+devis:read+devis:write ; permissionsIndividuelles=(aucune)
 SA | GET /api/users | — | défaut | valeurs AD | role=ADMIN ; actif=oui ; estCommercial=non ; accesFinance=non ; permissions=chantiers:archive+chantiers:read+chantiers:write+clients:read+devis:read+devis:write ; permissionsIndividuelles=(aucune)
 SA | GET /api/users | — | défaut | valeurs AD-COM | role=ADMIN ; actif=oui ; estCommercial=oui ; accesFinance=non ; permissions=chantiers:archive+chantiers:read+chantiers:write+clients:read+devis:read+devis:write ; permissionsIndividuelles=(aucune)
-SA | GET /api/users | — | défaut | valeurs AT | role=ASSISTANTE_TECHNIQUE ; actif=oui ; estCommercial=non ; accesFinance=non ; permissions=chantiers:read+clients:read ; permissionsIndividuelles=(aucune)
+SA | GET /api/users | — | défaut | valeurs AT | role=ASSISTANTE_TECHNIQUE ; actif=oui ; estCommercial=non ; accesFinance=non ; permissions=chantiers:read+clients:read+devis:read+devis:write ; permissionsIndividuelles=(aucune)
 SA | GET /api/users | — | défaut | valeurs COM | role=COMMERCIAL ; actif=oui ; estCommercial=non ; accesFinance=non ; permissions=chantiers:read+clients:read+devis:read+devis:write ; permissionsIndividuelles=(aucune)
 SA | GET /api/users | — | défaut | valeurs CPT | role=COMPTABLE ; actif=oui ; estCommercial=non ; accesFinance=non ; permissions=chantiers:read+clients:read+devis:read+devis:write ; permissionsIndividuelles=(aucune)
 SA | GET /api/users | — | défaut | valeurs CPT-FINANCE | role=COMPTABLE ; actif=oui ; estCommercial=non ; accesFinance=oui ; permissions=chantiers:read+clients:read+devis:read+devis:write+finances:read ; permissionsIndividuelles=(aucune)

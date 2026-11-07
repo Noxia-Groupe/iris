@@ -66,7 +66,10 @@ const ADMIN = ['SA', 'AD', 'AD-COM', 'DIR'];
 // jamais la rentabilité (voitRentabilite inchangé : vendu, marges, estimation, facturation), ni le coût prévu
 // (voitCoutPrevuParPrixAchat inchangé), ni taux ni coût de main-d'œuvre (voitCoutMainOeuvre inchangé), ni la marge du
 // devis ou d'un SAV hors contrat. Elle est classée « voit » ou « masque » champ par champ ci-dessous ; le test fermé
-// matrice-droits-assistante-technique.test.mjs vérifie, ligne à ligne, qu'elle lit ce qu'elle « voit ».
+// matrice-droits-assistante-technique.test.mjs vérifie, ligne à ligne, qu'elle lit ce qu'elle « voit ». Depuis AT-2a
+// (réponses 4 et 8 du 06-11-2026 : « Prix d'achat oui, coûts non », catalogue et parc en lecture seule), elle lit aussi les
+// prix d'achat prévus des devis, ceux des fiches du catalogue des devis et ceux du parc (litEtEcritPrixAchatDevis), jamais
+// le coût prévu d'un chantier, qui suit sa rentabilité (coutPrevuSuitRentabilite, piège P1), ni les routes du catalogue.
 
 // Une entrée : type d'objet, chemins du champ dans l'objet (un seul, sauf les instantanés du journal, avant et
 // après), règle, source dans le code, comptes qui le voient (un au moins doit l'avoir présent) et comptes qui ne le
@@ -154,15 +157,15 @@ export const MONTANTS_MASQUES = [
   M('couts-intervention', 'margeSav', `${COUT_MO} (administration seule)`, 'interventions/routes.ts:116-124', { voit: ADMIN, masque: ['CT', 'AT', 'TECH'] }),
 
   // --- Prix d'achat : devis, catalogue, parc ---
-  M('devis', 'lignes[].prixAchatUnitaireHt', 'voitPrixAchatDevis : administration en session ; clé portant finances:read', 'devis/metier.ts:163-172 (devisPourLecteur) ; droits/visibilite.ts:63-67', {
-    voit: [...ADMIN, 'CLE devis:read+finances:read'], masque: ['COM', 'DC', 'AC', 'CPT', 'CLE devis:read'],
+  M('devis', 'lignes[].prixAchatUnitaireHt', 'voitPrixAchatDevis : administration et assistante technique en session ; clé portant finances:read', 'devis/metier.ts:163-172 (devisPourLecteur) ; droits/visibilite.ts:63-67', {
+    voit: [...ADMIN, 'AT', 'CLE devis:read+finances:read'], masque: ['COM', 'DC', 'AC', 'CPT', 'CLE devis:read'],
   }),
-  M('fiche-devis', 'prixAchatHt', 'voitPrixAchatDevis : administration en session', 'devis/routes.ts:459 et :469', { voit: ADMIN, masque: ['COM', 'DC', 'AC', 'CPT'] }),
+  M('fiche-devis', 'prixAchatHt', 'voitPrixAchatDevis : administration et assistante technique en session', 'devis/routes.ts:459 et :469', { voit: [...ADMIN, 'AT'], masque: ['COM', 'DC', 'AC', 'CPT'] }),
   M('fiche-catalogue', 'prixAchatHt', 'voitPrixAchatDevis : administration en session ; clé portant finances:read', 'catalogue/metier.ts:100-110 (ficheCataloguePourLecteur) ; catalogue/routes.ts:52', {
     voit: [...ADMIN, 'CLE catalogue:read+finances:read'], masque: ['CLE catalogue:read'],
   }),
-  M('equipement', 'catalogueEquipement.prixAchatHt', 'voitPrixAchatDevis : administration en session ; clé portant finances:read', 'clients/equipements.ts:12-23 (equipementPourLecteur) et :82', {
-    voit: [...ADMIN, 'CLE equipements:read+finances:read'], masque: ['CLE equipements:read'],
+  M('equipement', 'catalogueEquipement.prixAchatHt', 'voitPrixAchatDevis : administration et assistante technique en session (lecture du parc : requireGestionClients) ; clé portant finances:read', 'clients/equipements.ts:12-23 (equipementPourLecteur) et :82', {
+    voit: [...ADMIN, 'AT', 'CLE equipements:read+finances:read'], masque: ['CLE equipements:read'],
   }),
 
   // --- Tableau de bord et statistiques ---

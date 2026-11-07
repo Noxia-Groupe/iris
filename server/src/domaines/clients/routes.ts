@@ -8,12 +8,14 @@ import { type AuthRequest, requireAuth } from '../../http/auth';
 import type { ApiRequest } from '../../http/cles-api';
 import { paramId } from '../../http/requete';
 import { routeMixte } from '../../http/routes-mixtes';
+import { requireGestionClients } from '../../http/gardes';
 import { ClientSaisieError, MESSAGE_SANS_SIRET_AVEC_SIREN, clientPayload, contactPayload, sitePayload, verifierSansSiret } from './metier';
 import { listerEquipementsClient, creerEquipementClient, archiverEquipementClient } from './equipements';
 
 // --- Référentiel Clients natif Iris ---
 // Les handlers sont écrits UNE fois puis montés sur deux portes d'entrée (cf. routeMixte
-// plus bas) : l'interface, pour un administrateur connecté, et /api/v1, pour une clé
+// plus bas) : l'interface, pour une session (lectures avec clients:read ; écritures et parc pour
+// l'administration et l'assistante technique, cf. requireGestionClients), et /api/v1, pour une clé
 // d'intégration porteuse du bon scope. Un agent et un humain appliquent ainsi exactement
 // les mêmes règles de validation — il n'existe pas de « chemin agent » plus permissif.
 const clientDetailInclude = {
@@ -182,16 +184,19 @@ const modifierSite: express.RequestHandler = async (req, res) => {
 };
 
 export function enregistrerRoutesClients(app: Express): void {
+  // Écritures des clients et lecture du parc : l'administration et l'assistante technique (décision de Nelson
+  // du 24-10-2026, point 24 : « gerer les client » ; cf. requireGestionClients) ; écriture du parc à
+  // l'administration.
   routeMixte('get', '/clients', 'clients:read', listerClients, [requirePermission('clients:read')]);
-  routeMixte('post', '/clients', 'clients:write', creerClient);
+  routeMixte('post', '/clients', 'clients:write', creerClient, [requireGestionClients]);
   routeMixte('get', '/clients/:id', 'clients:read', lireClient, [requirePermission('clients:read')]);
-  routeMixte('put', '/clients/:id', 'clients:write', modifierClient);
-  routeMixte('delete', '/clients/:id', 'clients:write', desactiverClient);
-  routeMixte('post', '/clients/:clientId/contacts', 'clients:write', creerContact);
-  routeMixte('put', '/clients/:clientId/contacts/:id', 'clients:write', modifierContact);
-  routeMixte('post', '/clients/:clientId/sites', 'clients:write', creerSite);
-  routeMixte('put', '/clients/:clientId/sites/:id', 'clients:write', modifierSite);
-  routeMixte('get', '/clients/:clientId/equipements', 'equipements:read', listerEquipementsClient);
+  routeMixte('put', '/clients/:id', 'clients:write', modifierClient, [requireGestionClients]);
+  routeMixte('delete', '/clients/:id', 'clients:write', desactiverClient, [requireGestionClients]);
+  routeMixte('post', '/clients/:clientId/contacts', 'clients:write', creerContact, [requireGestionClients]);
+  routeMixte('put', '/clients/:clientId/contacts/:id', 'clients:write', modifierContact, [requireGestionClients]);
+  routeMixte('post', '/clients/:clientId/sites', 'clients:write', creerSite, [requireGestionClients]);
+  routeMixte('put', '/clients/:clientId/sites/:id', 'clients:write', modifierSite, [requireGestionClients]);
+  routeMixte('get', '/clients/:clientId/equipements', 'equipements:read', listerEquipementsClient, [requireGestionClients]);
   routeMixte('post', '/clients/:clientId/equipements', 'equipements:write', creerEquipementClient);
   routeMixte('post', '/clients/:clientId/equipements/:id/archiver', 'equipements:write', archiverEquipementClient);
 

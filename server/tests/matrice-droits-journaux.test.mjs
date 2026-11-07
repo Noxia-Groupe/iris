@@ -63,6 +63,12 @@ const REFERENCES_ECRITURES = [join(DOSSIER_MATRICES, 'ecritures-actions.txt'), j
 const SA = 'SA';
 // Le directeur en fait partie depuis le lot « Directeur aligné sur l'administration » (décision de Nelson du 24-10-2026, point 14).
 const ADMINISTRATION = ['SA', 'AD', 'AD-COM', 'DIR'];
+// Gestion des contrats, passage manuel de la génération des visites compris : l'administration et l'assistante technique
+// depuis AT-2a (cadrage v2, C1 ; réponse 9 du 06-11-2026, « Les gérer », dont la description nomme la génération des
+// visites ; requireGestionContrats), dont le
+// refus nomme l'une et l'autre. Le réglage de l'anticipation reste à l'administration (PUT /api/parametres).
+const GESTION_CONTRATS = [...ADMINISTRATION, 'AT'];
+const REFUS_GESTION_CONTRATS = '403 « Accès réservé à l’administration et à l’assistante technique. » inchangé ; aucune entrée';
 const DESTINATAIRE = 'contact-matrice@iris.test';
 const TRACE = { ratio: 2, traits: [[[0.1, 0.6], [0.25, 0.3], [0.4, 0.7], [0.6, 0.35]]] };
 // JPEG 1 × 1 pixel minimal d'api.test.mjs, comme D1a-5b (corps « logo JPEG »).
@@ -645,6 +651,13 @@ if (!TEST_DATABASE_URL) {
         ajouter(compte, 'POST /api/contrats-maintenance/:id/generer-intervention', 'contrat-sans-visite', 'défaut', corpsVide);
         ajouter(compte, 'POST /api/contrats-maintenance/:id/avancer-echeance', 'contrat-visite-terminee', 'défaut, corps sans corps', corpsVide, { source: 'nouvelle' });
       }
+      // Lot « Assistante technique », PR AT-2a (cadrage v2, C1 ; réponses 3 et 9 du 06-11-2026) : la gestion des contrats,
+      // jouée par l'assistante technique, entrées à son nom ; la création hors devis et la couverture restent à
+      // l'administration (choix par défaut, à confirmer), refusées en 5a et 5b.
+      ajouter('AT', 'PATCH /api/contrats-maintenance/:id/statut', 'contrat-actif', 'défaut, corps statut=SUSPENDU et motif', () => ({ statut: 'SUSPENDU', motif: motif('suspension') }));
+      ajouter('AT', 'POST /api/contrats-maintenance/:id/envois', 'contrat-actif', 'défaut, corps destinataire, messagerie', () => ({ destinataire: DESTINATAIRE }));
+      ajouter('AT', 'POST /api/contrats-maintenance/:id/generer-intervention', 'contrat-sans-visite', 'défaut', corpsVide);
+      ajouter('AT', 'POST /api/contrats-maintenance/:id/avancer-echeance', 'contrat-visite-terminee', 'défaut, corps sans corps', corpsVide, { source: 'nouvelle' });
 
       // Devis : conversions (le chantier n'écrit aucune entrée, écart connu ; l'intervention déjà issue du devis est
       // rattachée au chantier, avec son entrée), envoi.
@@ -654,6 +667,11 @@ if (!TEST_DATABASE_URL) {
         ajouter(compte, 'POST /api/devis/:id/convertir', 'devis-signe', 'défaut, corps cible=CHANTIER', () => ({ cible: 'CHANTIER' }), { source: 'sans entrée' });
         ajouter(compte, 'POST /api/devis/:id/convertir', 'devis-converti-intervention', 'défaut, corps cible=CHANTIER', () => ({ cible: 'CHANTIER' }), { source: 'nouvelle' });
       }
+      // AT-2a : l'assistante technique convertit en contrat (gereLesContrats), en intervention (encadrement SAV, ouvert depuis
+      // AT-1 mais sans le droit devis jusqu'ici) et en chantier, entrées à son nom.
+      ajouter('AT', 'POST /api/devis/:id/convertir', 'devis-signe', 'défaut, corps cible=CONTRAT', () => ({ cible: 'CONTRAT', periodiciteMois: 12, dureePrevisionnelleMinutes: 60, dateDebut: d.aujourdhui }));
+      ajouter('AT', 'POST /api/devis/:id/convertir', 'devis-signe', 'défaut, corps cible=INTERVENTION', () => ({ cible: 'INTERVENTION' }));
+      ajouter('AT', 'POST /api/devis/:id/convertir', 'devis-converti-intervention', 'défaut, corps cible=CHANTIER', () => ({ cible: 'CHANTIER' }), { source: 'nouvelle' });
       for (const compte of [SA, 'AD', 'DIR', 'COM']) ajouter(compte, 'POST /api/devis/:id/envois', 'devis-brouillon', 'défaut, corps destinataire, messagerie', () => ({ destinataire: DESTINATAIRE }));
 
       // Facture : l'entrée de l'émission, jouée en 5a, lue ici (cadrage §2.1).
@@ -678,10 +696,11 @@ if (!TEST_DATABASE_URL) {
       // Génération des visites (§2.3) : l'anticipation réglée à trente jours par AD (son entrée, lue ici), puis le
       // passage manuel de chaque administrateur, le réglage posé par AD en préalable. Témoin du réglage vide : AD et DIR,
       // administrateurs (409), et CT, compte refusé (403), qui remplace le directeur depuis qu'il a les droits de
-      // l'administration (lot « Directeur aligné sur l'administration »).
+      // l'administration (lot « Directeur aligné sur l'administration »). Depuis AT-2a, l'assistante technique lance aussi le
+      // passage manuel (GESTION_CONTRATS), à son nom, et reçoit le 409 du réglage vide.
       for (const compte of ['AD', 'DIR']) ajouter(compte, 'PUT /api/parametres', SANS_CIBLE, 'défaut, corps anticipationVisitesJours=trente', () => ({ anticipationVisitesJours: 30 }), { source: 'génération' });
-      for (const compte of ['AD', 'DIR', 'CT']) ajouter(compte, 'POST /api/contrats-maintenance/generation-visites', SANS_CIBLE, 'anticipation vide, témoin de la matrice des entrées', corpsVide, { source: 'génération' });
-      for (const compte of ADMINISTRATION) {
+      for (const compte of ['AD', 'DIR', 'AT', 'CT']) ajouter(compte, 'POST /api/contrats-maintenance/generation-visites', SANS_CIBLE, 'anticipation vide, témoin de la matrice des entrées', corpsVide, { source: 'génération' });
+      for (const compte of GESTION_CONTRATS) {
         ajouter(compte, 'POST /api/contrats-maintenance/generation-visites', SANS_CIBLE, CONTEXTE_GENERATION, corpsVide, { source: 'génération', prealables: [REGLAGE_GENERATION()] });
       }
     }
@@ -754,7 +773,7 @@ if (!TEST_DATABASE_URL) {
     testPrepare('génération des visites : comptes hors administration refusés sans écriture, le réglage posé ; passage automatique au nom du compte système, réglage vide puis réglé, et ses entrées lues', async () => {
       const route = 'POST /api/contrats-maintenance/generation-visites';
       const [methode, chemin] = route.split(' ');
-      const refuses = COMPTES_JOUES.filter((c) => !ADMINISTRATION.includes(c));
+      const refuses = COMPTES_JOUES.filter((c) => !GESTION_CONTRATS.includes(c));
       // Réglage posé, puis les comptes refusés en parallèle, une empreinte pour le lot ; rejoués un à un si le lot écrit.
       const regler = async () => { const p = REGLAGE_GENERATION(); await api(p.compte, p.methode, p.chemin, p.corps()); return remise.empreinte(); };
       let etat = await regler();
@@ -920,17 +939,18 @@ if (!TEST_DATABASE_URL) {
     // Cadrage §2.3 : « Chaque administrateur obtient 201 et écrit le passage, la visite et son entrée, au nom de
     // l'administrateur. Les 12 autres comptes reçoivent 403, sans écriture. » ; passage automatique au nom du compte
     // système ; réglage vide : 409 aux administrateurs, 403 aux autres (témoin), et le passage automatique n'écrit rien.
-    testPrepare('génération des visites : passage manuel au nom de chaque administrateur, refus des autres comptes sans écriture, passage automatique au nom du compte système, rien sans réglage', () => {
+    testPrepare('génération des visites : passage manuel au nom de chaque administrateur et de l’assistante technique (AT-2a), refus des autres comptes sans écriture, passage automatique au nom du compte système, rien sans réglage', () => {
       const route = 'POST /api/contrats-maintenance/generation-visites';
-      for (const compte of ADMINISTRATION) {
+      for (const compte of GESTION_CONTRATS) {
         const reponse = reponseDe(compte, route, SANS_CIBLE, CONTEXTE_GENERATION);
         assert.match(reponse, /^201 écrit \(/, compte);
         for (const entree of [`ExecutionGenerationVisites MANUEL REUSSIE par ${compte}`, `JournalSaisieChantier INTERVENTION CREATION_CONTRAT par ${compte}`, `JournalSaisieChantier CONTRAT AVANCEMENT_ECHEANCE par ${compte}`]) assert.ok(reponse.includes(entree), `${compte} : ${entree} absente de « ${reponse} »`);
       }
-      for (const compte of COMPTES_JOUES.filter((c) => !ADMINISTRATION.includes(c))) assert.equal(reponseDe(compte, route, SANS_CIBLE, CONTEXTE_GENERATION), '403 « Accès réservé aux administrateurs » inchangé ; aucune entrée', compte);
+      for (const compte of COMPTES_JOUES.filter((c) => !GESTION_CONTRATS.includes(c))) assert.equal(reponseDe(compte, route, SANS_CIBLE, CONTEXTE_GENERATION), REFUS_GESTION_CONTRATS, compte);
       assert.equal(reponseDe('AD', route, SANS_CIBLE, 'anticipation vide, témoin de la matrice des entrées'), '409 « La génération automatique des visites est désactivée : réglez d’abord son anticipation. » inchangé ; aucune entrée');
       assert.equal(reponseDe('DIR', route, SANS_CIBLE, 'anticipation vide, témoin de la matrice des entrées'), '409 « La génération automatique des visites est désactivée : réglez d’abord son anticipation. » inchangé ; aucune entrée');
-      assert.equal(reponseDe('CT', route, SANS_CIBLE, 'anticipation vide, témoin de la matrice des entrées'), '403 « Accès réservé aux administrateurs » inchangé ; aucune entrée');
+      assert.equal(reponseDe('AT', route, SANS_CIBLE, 'anticipation vide, témoin de la matrice des entrées'), '409 « La génération automatique des visites est désactivée : réglez d’abord son anticipation. » inchangé ; aucune entrée');
+      assert.equal(reponseDe('CT', route, SANS_CIBLE, 'anticipation vide, témoin de la matrice des entrées'), REFUS_GESTION_CONTRATS);
       assert.equal(reponseDe(AUTEUR_SYSTEME, 'passage automatique', SANS_CIBLE, 'anticipation vide'), 'aucun passage inchangé ; aucune entrée');
       const automatique = reponseDe(AUTEUR_SYSTEME, 'passage automatique', SANS_CIBLE, CONTEXTE_GENERATION);
       for (const entree of ['ExecutionGenerationVisites AUTOMATIQUE REUSSIE par SYSTEME', 'JournalSaisieChantier INTERVENTION CREATION_CONTRAT par SYSTEME', 'JournalSaisieChantier CONTRAT AVANCEMENT_ECHEANCE par SYSTEME']) assert.ok(automatique.includes(entree), `passage automatique : ${entree} absente de « ${automatique} »`);

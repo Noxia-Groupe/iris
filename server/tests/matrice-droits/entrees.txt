@@ -21,7 +21,7 @@ AC | DELETE /api/chantiers/:id | chantier-resp | défaut | 403 « Accès réserv
 AC | DELETE /api/chantiers/:id | chantier-tech-branche-resp | défaut | 403 « Accès réservé aux administrateurs »
 AC | DELETE /api/chantiers/:id | chantier-termine | défaut | 403 « Accès réservé aux administrateurs »
 AC | DELETE /api/chantiers/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-AC | DELETE /api/clients/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AC | DELETE /api/clients/:id | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 AC | DELETE /api/company/logo | — | défaut | 403 « Accès réservé au super administrateur » inchangé
 AC | DELETE /api/comptabilite/regles/:cle | cle=CLIENT | défaut | 403 « Accès réservé aux administrateurs »
 AC | DELETE /api/comptabilite/tva/:taux | taux=20 | défaut | 403 « Accès réservé aux administrateurs »
@@ -106,9 +106,9 @@ AC | GET /api/chantiers/:id/journal-saisies | chantier-tech-branche-resp | défa
 AC | GET /api/chantiers/:id/journal-saisies | chantier-termine | défaut | 404 « Chantier introuvable »
 AC | GET /api/chantiers/:id/journal-saisies | inexistant | défaut | 404 « Chantier introuvable »
 AC | GET /api/clients | — | défaut | 200
-AC | GET /api/clients/:clientId/equipements | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-AC | GET /api/clients/:clientId/equipements | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-AC | GET /api/clients/:clientId/equipements | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AC | GET /api/clients/:clientId/equipements | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+AC | GET /api/clients/:clientId/equipements | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+AC | GET /api/clients/:clientId/equipements | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 AC | GET /api/clients/:id | client-actif | défaut | 200
 AC | GET /api/clients/:id | client-desactive | défaut | 200
 AC | GET /api/clients/:id | inexistant | défaut | 404 « Client introuvable. »
@@ -123,14 +123,14 @@ AC | GET /api/comptabilite/comptes/:id/journal | compte-comptable-clients | déf
 AC | GET /api/comptabilite/comptes/:id/journal | inexistant | défaut | 403 « Accès réservé aux administrateurs »
 AC | GET /api/comptabilite/regles/journal | — | défaut | 403 « Accès réservé aux administrateurs »
 AC | GET /api/conducteurs | — | défaut | 200
-AC | GET /api/contrats-maintenance | — | défaut | 403 « Accès réservé aux administrateurs »
-AC | GET /api/contrats-maintenance/:id/document.pdf | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-AC | GET /api/contrats-maintenance/:id/document.pdf | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-AC | GET /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-AC | GET /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-AC | GET /api/contrats-maintenance/:id/journal-saisies | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-AC | GET /api/contrats-maintenance/:id/journal-saisies | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-AC | GET /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé aux administrateurs »
+AC | GET /api/contrats-maintenance | — | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+AC | GET /api/contrats-maintenance/:id/document.pdf | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+AC | GET /api/contrats-maintenance/:id/document.pdf | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+AC | GET /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+AC | GET /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+AC | GET /api/contrats-maintenance/:id/journal-saisies | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+AC | GET /api/contrats-maintenance/:id/journal-saisies | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+AC | GET /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 AC | GET /api/devis | — | défaut | 200
 AC | GET /api/devis/:id/document.pdf | devis-brouillon | défaut | 200
 AC | GET /api/devis/:id/document.pdf | devis-converti | défaut | 200
@@ -328,8 +328,8 @@ AC | PATCH /api/comptabilite/comptes/:id/activation | compte-comptable-clients |
 AC | PATCH /api/comptabilite/comptes/:id/activation | inexistant | défaut | 403 « Accès réservé aux administrateurs »
 AC | PATCH /api/contrats-maintenance/:id | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
 AC | PATCH /api/contrats-maintenance/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-AC | PATCH /api/contrats-maintenance/:id/statut | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-AC | PATCH /api/contrats-maintenance/:id/statut | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AC | PATCH /api/contrats-maintenance/:id/statut | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+AC | PATCH /api/contrats-maintenance/:id/statut | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 AC | PATCH /api/devis/:id | devis-brouillon | défaut | 400 validation-avant-droit
 AC | PATCH /api/devis/:id | devis-converti | défaut | 400 validation-avant-droit
 AC | PATCH /api/devis/:id | devis-signe | défaut | 400 validation-avant-droit
@@ -417,26 +417,26 @@ AC | POST /api/chantiers/:id/envois | chantier-resp | défaut | 403 « Accès r�
 AC | POST /api/chantiers/:id/envois | chantier-tech-branche-resp | défaut | 403 « Accès réservé aux administrateurs »
 AC | POST /api/chantiers/:id/envois | chantier-termine | défaut | 403 « Accès réservé aux administrateurs »
 AC | POST /api/chantiers/:id/envois | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-AC | POST /api/clients | — | défaut | 403 « Accès réservé aux administrateurs »
-AC | POST /api/clients/:clientId/contacts | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-AC | POST /api/clients/:clientId/contacts | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-AC | POST /api/clients/:clientId/contacts | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AC | POST /api/clients | — | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+AC | POST /api/clients/:clientId/contacts | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+AC | POST /api/clients/:clientId/contacts | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+AC | POST /api/clients/:clientId/contacts | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 AC | POST /api/clients/:clientId/equipements | client-actif | défaut | 403 « Accès réservé aux administrateurs »
 AC | POST /api/clients/:clientId/equipements | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
 AC | POST /api/clients/:clientId/equipements | inexistant | défaut | 403 « Accès réservé aux administrateurs »
 AC | POST /api/clients/:clientId/equipements/:id/archiver | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-AC | POST /api/clients/:clientId/sites | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-AC | POST /api/clients/:clientId/sites | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-AC | POST /api/clients/:clientId/sites | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AC | POST /api/clients/:clientId/sites | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+AC | POST /api/clients/:clientId/sites | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+AC | POST /api/clients/:clientId/sites | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 AC | POST /api/comptabilite/comptes | — | défaut | 403 « Accès réservé aux administrateurs »
 AC | POST /api/comptabilite/importer | — | défaut | 403 « Accès réservé aux administrateurs »
 AC | POST /api/contrats-maintenance | — | défaut | 403 « Accès réservé aux administrateurs »
-AC | POST /api/contrats-maintenance/:id/avancer-echeance | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-AC | POST /api/contrats-maintenance/:id/avancer-echeance | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-AC | POST /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-AC | POST /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-AC | POST /api/contrats-maintenance/:id/generer-intervention | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-AC | POST /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé aux administrateurs » inchangé
+AC | POST /api/contrats-maintenance/:id/avancer-echeance | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+AC | POST /api/contrats-maintenance/:id/avancer-echeance | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+AC | POST /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+AC | POST /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+AC | POST /api/contrats-maintenance/:id/generer-intervention | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+AC | POST /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. » inchangé
 AC | POST /api/devis | — | défaut | 400 validation-avant-droit
 AC | POST /api/devis/:id/acompte | devis-brouillon | défaut | 403 « Accès réservé aux administrateurs »
 AC | POST /api/devis/:id/acompte | devis-converti | défaut | 403 « Accès réservé aux administrateurs »
@@ -584,15 +584,15 @@ AC | PUT /api/catalogue/:family/:id | inexistant | défaut | 403 « Accès rése
 AC | PUT /api/catalogue/:family/:id | prestation-catalogue | défaut | 403 « Accès réservé aux administrateurs »
 AC | PUT /api/categories/:id | categorie | défaut | 403 « Accès non autorisé pour un compte assistante commerciale. »
 AC | PUT /api/categories/:id | inexistant | défaut | 403 « Accès non autorisé pour un compte assistante commerciale. »
-AC | PUT /api/clients/:clientId/contacts/:id | contact-autre-client | défaut | 403 « Accès réservé aux administrateurs »
-AC | PUT /api/clients/:clientId/contacts/:id | contact-client-actif | défaut | 403 « Accès réservé aux administrateurs »
-AC | PUT /api/clients/:clientId/contacts/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-AC | PUT /api/clients/:clientId/sites/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-AC | PUT /api/clients/:clientId/sites/:id | site-autre-client | défaut | 403 « Accès réservé aux administrateurs »
-AC | PUT /api/clients/:clientId/sites/:id | site-client-actif | défaut | 403 « Accès réservé aux administrateurs »
-AC | PUT /api/clients/:id | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-AC | PUT /api/clients/:id | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-AC | PUT /api/clients/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AC | PUT /api/clients/:clientId/contacts/:id | contact-autre-client | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+AC | PUT /api/clients/:clientId/contacts/:id | contact-client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+AC | PUT /api/clients/:clientId/contacts/:id | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+AC | PUT /api/clients/:clientId/sites/:id | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+AC | PUT /api/clients/:clientId/sites/:id | site-autre-client | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+AC | PUT /api/clients/:clientId/sites/:id | site-client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+AC | PUT /api/clients/:id | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+AC | PUT /api/clients/:id | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+AC | PUT /api/clients/:id | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 AC | PUT /api/commerciaux/:id/prime-mensuelle | compte-administrateur | défaut | 403 « Accès réservé aux administrateurs »
 AC | PUT /api/commerciaux/:id/prime-mensuelle | compte-commercial | défaut | 403 « Accès réservé aux administrateurs »
 AC | PUT /api/commerciaux/:id/prime-mensuelle | compte-superadmin | défaut | 403 « Accès réservé aux administrateurs »
@@ -2207,7 +2207,7 @@ AT | DELETE /api/chantiers/:id | chantier-resp | défaut | 403 « Accès réserv
 AT | DELETE /api/chantiers/:id | chantier-tech-branche-resp | défaut | 403 « Accès réservé aux administrateurs »
 AT | DELETE /api/chantiers/:id | chantier-termine | défaut | 403 « Accès réservé aux administrateurs »
 AT | DELETE /api/chantiers/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-AT | DELETE /api/clients/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | DELETE /api/clients/:id | inexistant | défaut | 404 « Enregistrement introuvable. »
 AT | DELETE /api/company/logo | — | défaut | 403 « Accès réservé au super administrateur » inchangé
 AT | DELETE /api/comptabilite/regles/:cle | cle=CLIENT | défaut | 403 « Accès réservé aux administrateurs »
 AT | DELETE /api/comptabilite/tva/:taux | taux=20 | défaut | 403 « Accès réservé aux administrateurs »
@@ -2292,9 +2292,9 @@ AT | GET /api/chantiers/:id/journal-saisies | chantier-tech-branche-resp | défa
 AT | GET /api/chantiers/:id/journal-saisies | chantier-termine | défaut | 200
 AT | GET /api/chantiers/:id/journal-saisies | inexistant | défaut | 404 « Chantier introuvable »
 AT | GET /api/clients | — | défaut | 200
-AT | GET /api/clients/:clientId/equipements | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-AT | GET /api/clients/:clientId/equipements | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-AT | GET /api/clients/:clientId/equipements | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | GET /api/clients/:clientId/equipements | client-actif | défaut | 200
+AT | GET /api/clients/:clientId/equipements | client-desactive | défaut | 200
+AT | GET /api/clients/:clientId/equipements | inexistant | défaut | 200
 AT | GET /api/clients/:id | client-actif | défaut | 200
 AT | GET /api/clients/:id | client-desactive | défaut | 200
 AT | GET /api/clients/:id | inexistant | défaut | 404 « Client introuvable. »
@@ -2309,25 +2309,25 @@ AT | GET /api/comptabilite/comptes/:id/journal | compte-comptable-clients | déf
 AT | GET /api/comptabilite/comptes/:id/journal | inexistant | défaut | 403 « Accès réservé aux administrateurs »
 AT | GET /api/comptabilite/regles/journal | — | défaut | 403 « Accès réservé aux administrateurs »
 AT | GET /api/conducteurs | — | défaut | 200
-AT | GET /api/contrats-maintenance | — | défaut | 403 « Accès réservé aux administrateurs »
-AT | GET /api/contrats-maintenance/:id/document.pdf | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-AT | GET /api/contrats-maintenance/:id/document.pdf | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-AT | GET /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-AT | GET /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-AT | GET /api/contrats-maintenance/:id/journal-saisies | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-AT | GET /api/contrats-maintenance/:id/journal-saisies | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-AT | GET /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé aux administrateurs »
-AT | GET /api/devis | — | défaut | 403 « Permission requise : devis:read »
-AT | GET /api/devis/:id/document.pdf | devis-brouillon | défaut | 403 « Permission requise : devis:read »
-AT | GET /api/devis/:id/document.pdf | devis-converti | défaut | 403 « Permission requise : devis:read »
-AT | GET /api/devis/:id/document.pdf | devis-signe | défaut | 403 « Permission requise : devis:read »
-AT | GET /api/devis/:id/document.pdf | inexistant | défaut | 403 « Permission requise : devis:read »
-AT | GET /api/devis/:id/envois | devis-brouillon | défaut | 403 « Permission requise : devis:read »
-AT | GET /api/devis/:id/envois | devis-converti | défaut | 403 « Permission requise : devis:read »
-AT | GET /api/devis/:id/envois | devis-signe | défaut | 403 « Permission requise : devis:read »
-AT | GET /api/devis/:id/envois | inexistant | défaut | 403 « Permission requise : devis:read »
-AT | GET /api/devis/a-convertir | — | défaut | 403 « Permission requise : devis:read »
-AT | GET /api/devis/catalogue | — | défaut | 403 « Permission requise : devis:write »
+AT | GET /api/contrats-maintenance | — | défaut | 200
+AT | GET /api/contrats-maintenance/:id/document.pdf | contrat-actif | défaut | 200
+AT | GET /api/contrats-maintenance/:id/document.pdf | inexistant | défaut | 404 « Contrat de maintenance introuvable. »
+AT | GET /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 200
+AT | GET /api/contrats-maintenance/:id/envois | inexistant | défaut | 404 « Contrat de maintenance introuvable. »
+AT | GET /api/contrats-maintenance/:id/journal-saisies | contrat-actif | défaut | 200
+AT | GET /api/contrats-maintenance/:id/journal-saisies | inexistant | défaut | 404 « Contrat de maintenance introuvable. »
+AT | GET /api/contrats-maintenance/generation-visites | — | défaut | 200
+AT | GET /api/devis | — | défaut | 200
+AT | GET /api/devis/:id/document.pdf | devis-brouillon | défaut | 200
+AT | GET /api/devis/:id/document.pdf | devis-converti | défaut | 200
+AT | GET /api/devis/:id/document.pdf | devis-signe | défaut | 200
+AT | GET /api/devis/:id/document.pdf | inexistant | défaut | 404 « Devis introuvable. »
+AT | GET /api/devis/:id/envois | devis-brouillon | défaut | 200
+AT | GET /api/devis/:id/envois | devis-converti | défaut | 200
+AT | GET /api/devis/:id/envois | devis-signe | défaut | 200
+AT | GET /api/devis/:id/envois | inexistant | défaut | 404 « Devis introuvable. »
+AT | GET /api/devis/a-convertir | — | défaut | 200
+AT | GET /api/devis/catalogue | — | défaut | 200
 AT | GET /api/facturation/prete-a-facturer | — | défaut | 403 « Accès réservé aux administrateurs »
 AT | GET /api/factures | — | défaut | 403 « Accès réservé aux administrateurs »
 AT | GET /api/factures/:id/document.pdf | avoir-emis | défaut | 403 « Accès réservé aux administrateurs »
@@ -2514,12 +2514,12 @@ AT | PATCH /api/comptabilite/comptes/:id/activation | compte-comptable-clients |
 AT | PATCH /api/comptabilite/comptes/:id/activation | inexistant | défaut | 403 « Accès réservé aux administrateurs »
 AT | PATCH /api/contrats-maintenance/:id | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
 AT | PATCH /api/contrats-maintenance/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-AT | PATCH /api/contrats-maintenance/:id/statut | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-AT | PATCH /api/contrats-maintenance/:id/statut | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-AT | PATCH /api/devis/:id | devis-brouillon | défaut | 403 « Permission requise : devis:write »
-AT | PATCH /api/devis/:id | devis-converti | défaut | 403 « Permission requise : devis:write »
-AT | PATCH /api/devis/:id | devis-signe | défaut | 403 « Permission requise : devis:write »
-AT | PATCH /api/devis/:id | inexistant | défaut | 403 « Permission requise : devis:write »
+AT | PATCH /api/contrats-maintenance/:id/statut | contrat-actif | défaut | 400
+AT | PATCH /api/contrats-maintenance/:id/statut | inexistant | défaut | 400
+AT | PATCH /api/devis/:id | devis-brouillon | défaut | 400 validation-avant-droit
+AT | PATCH /api/devis/:id | devis-converti | défaut | 400 validation-avant-droit
+AT | PATCH /api/devis/:id | devis-signe | défaut | 400 validation-avant-droit
+AT | PATCH /api/devis/:id | inexistant | défaut | 400 validation-avant-droit
 AT | PATCH /api/heures/:id | heure-archivee-chantier-ct | défaut | 403 « Permission requise : chantiers:write »
 AT | PATCH /api/heures/:id | heure-chantier-autre | défaut | 403 « Permission requise : chantiers:write »
 AT | PATCH /api/heures/:id | heure-chantier-ct | défaut | 403 « Permission requise : chantiers:write »
@@ -2603,27 +2603,27 @@ AT | POST /api/chantiers/:id/envois | chantier-resp | défaut | 403 « Accès r�
 AT | POST /api/chantiers/:id/envois | chantier-tech-branche-resp | défaut | 403 « Accès réservé aux administrateurs »
 AT | POST /api/chantiers/:id/envois | chantier-termine | défaut | 403 « Accès réservé aux administrateurs »
 AT | POST /api/chantiers/:id/envois | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-AT | POST /api/clients | — | défaut | 403 « Accès réservé aux administrateurs »
-AT | POST /api/clients/:clientId/contacts | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-AT | POST /api/clients/:clientId/contacts | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-AT | POST /api/clients/:clientId/contacts | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/clients | — | défaut | 400
+AT | POST /api/clients/:clientId/contacts | client-actif | défaut | 400
+AT | POST /api/clients/:clientId/contacts | client-desactive | défaut | 400
+AT | POST /api/clients/:clientId/contacts | inexistant | défaut | 400
 AT | POST /api/clients/:clientId/equipements | client-actif | défaut | 403 « Accès réservé aux administrateurs »
 AT | POST /api/clients/:clientId/equipements | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
 AT | POST /api/clients/:clientId/equipements | inexistant | défaut | 403 « Accès réservé aux administrateurs »
 AT | POST /api/clients/:clientId/equipements/:id/archiver | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-AT | POST /api/clients/:clientId/sites | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-AT | POST /api/clients/:clientId/sites | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-AT | POST /api/clients/:clientId/sites | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | POST /api/clients/:clientId/sites | client-actif | défaut | 400
+AT | POST /api/clients/:clientId/sites | client-desactive | défaut | 400
+AT | POST /api/clients/:clientId/sites | inexistant | défaut | 400
 AT | POST /api/comptabilite/comptes | — | défaut | 403 « Accès réservé aux administrateurs »
 AT | POST /api/comptabilite/importer | — | défaut | 403 « Accès réservé aux administrateurs »
 AT | POST /api/contrats-maintenance | — | défaut | 403 « Accès réservé aux administrateurs »
-AT | POST /api/contrats-maintenance/:id/avancer-echeance | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-AT | POST /api/contrats-maintenance/:id/avancer-echeance | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-AT | POST /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-AT | POST /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-AT | POST /api/contrats-maintenance/:id/generer-intervention | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-AT | POST /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé aux administrateurs » inchangé
-AT | POST /api/devis | — | défaut | 403 « Permission requise : devis:write »
+AT | POST /api/contrats-maintenance/:id/avancer-echeance | contrat-actif | défaut | 409 « L’échéance ne peut avancer qu’après la fin de son intervention. »
+AT | POST /api/contrats-maintenance/:id/avancer-echeance | inexistant | défaut | 404 « Contrat de maintenance actif introuvable. »
+AT | POST /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 400
+AT | POST /api/contrats-maintenance/:id/envois | inexistant | défaut | 400
+AT | POST /api/contrats-maintenance/:id/generer-intervention | inexistant | défaut | 404 « Contrat de maintenance actif introuvable. »
+AT | POST /api/contrats-maintenance/generation-visites | — | défaut | 409 « La génération automatique des visites est désactivée : réglez d’abord son anticipation. » inchangé
+AT | POST /api/devis | — | défaut | 400 validation-avant-droit
 AT | POST /api/devis/:id/acompte | devis-brouillon | défaut | 403 « Accès réservé aux administrateurs »
 AT | POST /api/devis/:id/acompte | devis-converti | défaut | 403 « Accès réservé aux administrateurs »
 AT | POST /api/devis/:id/acompte | devis-signe | défaut | 403 « Accès réservé aux administrateurs »
@@ -2632,20 +2632,20 @@ AT | POST /api/devis/:id/annulation | devis-brouillon | défaut | 403 « Accès 
 AT | POST /api/devis/:id/annulation | devis-converti | défaut | 403 « Accès réservé aux administrateurs »
 AT | POST /api/devis/:id/annulation | devis-signe | défaut | 403 « Accès réservé aux administrateurs »
 AT | POST /api/devis/:id/annulation | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-AT | POST /api/devis/:id/convertir | devis-brouillon | défaut | 403 « Permission requise : devis:write »
-AT | POST /api/devis/:id/convertir | devis-converti | défaut | 403 « Permission requise : devis:write »
-AT | POST /api/devis/:id/convertir | devis-signe | défaut | 403 « Permission requise : devis:write »
-AT | POST /api/devis/:id/convertir | inexistant | défaut | 403 « Permission requise : devis:write »
-AT | POST /api/devis/:id/duplication | inexistant | défaut | 403 « Permission requise : devis:write »
-AT | POST /api/devis/:id/envois | devis-brouillon | défaut | 403 « Permission requise : devis:write »
-AT | POST /api/devis/:id/envois | devis-converti | défaut | 403 « Permission requise : devis:write »
-AT | POST /api/devis/:id/envois | devis-signe | défaut | 403 « Permission requise : devis:write »
-AT | POST /api/devis/:id/envois | inexistant | défaut | 403 « Permission requise : devis:write »
-AT | POST /api/devis/:id/revisions | inexistant | défaut | 403 « Permission requise : devis:write »
-AT | POST /api/devis/:id/signature | devis-brouillon | défaut | 403 « Permission requise : devis:write »
-AT | POST /api/devis/:id/signature | devis-converti | défaut | 403 « Permission requise : devis:write »
-AT | POST /api/devis/:id/signature | devis-signe | défaut | 403 « Permission requise : devis:write »
-AT | POST /api/devis/:id/signature | inexistant | défaut | 403 « Permission requise : devis:write »
+AT | POST /api/devis/:id/convertir | devis-brouillon | défaut | 400 validation-avant-droit
+AT | POST /api/devis/:id/convertir | devis-converti | défaut | 400 validation-avant-droit
+AT | POST /api/devis/:id/convertir | devis-signe | défaut | 400 validation-avant-droit
+AT | POST /api/devis/:id/convertir | inexistant | défaut | 400 validation-avant-droit
+AT | POST /api/devis/:id/duplication | inexistant | défaut | 404 « Devis introuvable. »
+AT | POST /api/devis/:id/envois | devis-brouillon | défaut | 400
+AT | POST /api/devis/:id/envois | devis-converti | défaut | 400
+AT | POST /api/devis/:id/envois | devis-signe | défaut | 400
+AT | POST /api/devis/:id/envois | inexistant | défaut | 400
+AT | POST /api/devis/:id/revisions | inexistant | défaut | 400
+AT | POST /api/devis/:id/signature | devis-brouillon | défaut | 400
+AT | POST /api/devis/:id/signature | devis-converti | défaut | 400
+AT | POST /api/devis/:id/signature | devis-signe | défaut | 400
+AT | POST /api/devis/:id/signature | inexistant | défaut | 400
 AT | POST /api/factures | — | défaut | 403 « Accès réservé aux administrateurs »
 AT | POST /api/factures/:id/annuler | avoir-emis | défaut | 403 « Accès réservé aux administrateurs »
 AT | POST /api/factures/:id/annuler | facture-brouillon | défaut | 403 « Accès réservé aux administrateurs »
@@ -2770,15 +2770,15 @@ AT | PUT /api/catalogue/:family/:id | inexistant | défaut | 403 « Accès rése
 AT | PUT /api/catalogue/:family/:id | prestation-catalogue | défaut | 403 « Accès réservé aux administrateurs »
 AT | PUT /api/categories/:id | categorie | défaut | 200
 AT | PUT /api/categories/:id | inexistant | défaut | 500 « Error updating categorie »
-AT | PUT /api/clients/:clientId/contacts/:id | contact-autre-client | défaut | 403 « Accès réservé aux administrateurs »
-AT | PUT /api/clients/:clientId/contacts/:id | contact-client-actif | défaut | 403 « Accès réservé aux administrateurs »
-AT | PUT /api/clients/:clientId/contacts/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-AT | PUT /api/clients/:clientId/sites/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-AT | PUT /api/clients/:clientId/sites/:id | site-autre-client | défaut | 403 « Accès réservé aux administrateurs »
-AT | PUT /api/clients/:clientId/sites/:id | site-client-actif | défaut | 403 « Accès réservé aux administrateurs »
-AT | PUT /api/clients/:id | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-AT | PUT /api/clients/:id | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-AT | PUT /api/clients/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+AT | PUT /api/clients/:clientId/contacts/:id | contact-autre-client | défaut | 404 « Contact introuvable. »
+AT | PUT /api/clients/:clientId/contacts/:id | contact-client-actif | défaut | 404 « Contact introuvable. »
+AT | PUT /api/clients/:clientId/contacts/:id | inexistant | défaut | 404 « Contact introuvable. »
+AT | PUT /api/clients/:clientId/sites/:id | inexistant | défaut | 404 « Site introuvable. »
+AT | PUT /api/clients/:clientId/sites/:id | site-autre-client | défaut | 404 « Site introuvable. »
+AT | PUT /api/clients/:clientId/sites/:id | site-client-actif | défaut | 404 « Site introuvable. »
+AT | PUT /api/clients/:id | client-actif | défaut | 200
+AT | PUT /api/clients/:id | client-desactive | défaut | 200
+AT | PUT /api/clients/:id | inexistant | défaut | 404 « Enregistrement introuvable. »
 AT | PUT /api/commerciaux/:id/prime-mensuelle | compte-administrateur | défaut | 403 « Accès réservé aux administrateurs »
 AT | PUT /api/commerciaux/:id/prime-mensuelle | compte-commercial | défaut | 403 « Accès réservé aux administrateurs »
 AT | PUT /api/commerciaux/:id/prime-mensuelle | compte-superadmin | défaut | 403 « Accès réservé aux administrateurs »
@@ -2789,10 +2789,10 @@ AT | PUT /api/company | — | défaut | 403 « Accès réservé au super adminis
 AT | PUT /api/company/logo | — | défaut | 403 « Accès réservé au super administrateur »
 AT | PUT /api/comptabilite/regles/:cle | cle=CLIENT | défaut | 403 « Accès réservé aux administrateurs »
 AT | PUT /api/comptabilite/tva/:taux | taux=20 | défaut | 403 « Accès réservé aux administrateurs »
-AT | PUT /api/devis/:id/statut | devis-brouillon | défaut | 403 « Permission requise : devis:write »
-AT | PUT /api/devis/:id/statut | devis-converti | défaut | 403 « Permission requise : devis:write »
-AT | PUT /api/devis/:id/statut | devis-signe | défaut | 403 « Permission requise : devis:write »
-AT | PUT /api/devis/:id/statut | inexistant | défaut | 403 « Permission requise : devis:write »
+AT | PUT /api/devis/:id/statut | devis-brouillon | défaut | 400
+AT | PUT /api/devis/:id/statut | devis-converti | défaut | 400
+AT | PUT /api/devis/:id/statut | devis-signe | défaut | 400
+AT | PUT /api/devis/:id/statut | inexistant | défaut | 404 « Devis introuvable. »
 AT | PUT /api/fournisseurs/:id | fournisseur | défaut | 200
 AT | PUT /api/fournisseurs/:id | inexistant | défaut | 500 « Error updating fournisseur »
 AT | PUT /api/intervenants/:id | fiche-libre | défaut | 403 « Accès réservé aux administrateurs »
@@ -2872,7 +2872,7 @@ COM | DELETE /api/chantiers/:id | chantier-resp | défaut | 403 « Accès réser
 COM | DELETE /api/chantiers/:id | chantier-tech-branche-resp | défaut | 403 « Accès réservé aux administrateurs »
 COM | DELETE /api/chantiers/:id | chantier-termine | défaut | 403 « Accès réservé aux administrateurs »
 COM | DELETE /api/chantiers/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-COM | DELETE /api/clients/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+COM | DELETE /api/clients/:id | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 COM | DELETE /api/company/logo | — | défaut | 403 « Accès réservé au super administrateur » inchangé
 COM | DELETE /api/comptabilite/regles/:cle | cle=CLIENT | défaut | 403 « Accès réservé aux administrateurs »
 COM | DELETE /api/comptabilite/tva/:taux | taux=20 | défaut | 403 « Accès réservé aux administrateurs »
@@ -2957,9 +2957,9 @@ COM | GET /api/chantiers/:id/journal-saisies | chantier-tech-branche-resp | déf
 COM | GET /api/chantiers/:id/journal-saisies | chantier-termine | défaut | 404 « Chantier introuvable »
 COM | GET /api/chantiers/:id/journal-saisies | inexistant | défaut | 404 « Chantier introuvable »
 COM | GET /api/clients | — | défaut | 200
-COM | GET /api/clients/:clientId/equipements | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-COM | GET /api/clients/:clientId/equipements | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-COM | GET /api/clients/:clientId/equipements | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+COM | GET /api/clients/:clientId/equipements | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+COM | GET /api/clients/:clientId/equipements | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+COM | GET /api/clients/:clientId/equipements | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 COM | GET /api/clients/:id | client-actif | défaut | 200
 COM | GET /api/clients/:id | client-desactive | défaut | 200
 COM | GET /api/clients/:id | inexistant | défaut | 404 « Client introuvable. »
@@ -2974,14 +2974,14 @@ COM | GET /api/comptabilite/comptes/:id/journal | compte-comptable-clients | dé
 COM | GET /api/comptabilite/comptes/:id/journal | inexistant | défaut | 403 « Accès réservé aux administrateurs »
 COM | GET /api/comptabilite/regles/journal | — | défaut | 403 « Accès réservé aux administrateurs »
 COM | GET /api/conducteurs | — | défaut | 200
-COM | GET /api/contrats-maintenance | — | défaut | 403 « Accès réservé aux administrateurs »
-COM | GET /api/contrats-maintenance/:id/document.pdf | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-COM | GET /api/contrats-maintenance/:id/document.pdf | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-COM | GET /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-COM | GET /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-COM | GET /api/contrats-maintenance/:id/journal-saisies | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-COM | GET /api/contrats-maintenance/:id/journal-saisies | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-COM | GET /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé aux administrateurs »
+COM | GET /api/contrats-maintenance | — | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+COM | GET /api/contrats-maintenance/:id/document.pdf | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+COM | GET /api/contrats-maintenance/:id/document.pdf | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+COM | GET /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+COM | GET /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+COM | GET /api/contrats-maintenance/:id/journal-saisies | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+COM | GET /api/contrats-maintenance/:id/journal-saisies | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+COM | GET /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 COM | GET /api/devis | — | défaut | 200
 COM | GET /api/devis/:id/document.pdf | devis-brouillon | défaut | 200
 COM | GET /api/devis/:id/document.pdf | devis-converti | défaut | 200
@@ -3179,8 +3179,8 @@ COM | PATCH /api/comptabilite/comptes/:id/activation | compte-comptable-clients 
 COM | PATCH /api/comptabilite/comptes/:id/activation | inexistant | défaut | 403 « Accès réservé aux administrateurs »
 COM | PATCH /api/contrats-maintenance/:id | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
 COM | PATCH /api/contrats-maintenance/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-COM | PATCH /api/contrats-maintenance/:id/statut | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-COM | PATCH /api/contrats-maintenance/:id/statut | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+COM | PATCH /api/contrats-maintenance/:id/statut | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+COM | PATCH /api/contrats-maintenance/:id/statut | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 COM | PATCH /api/devis/:id | devis-brouillon | défaut | 400 validation-avant-droit
 COM | PATCH /api/devis/:id | devis-converti | défaut | 400 validation-avant-droit
 COM | PATCH /api/devis/:id | devis-signe | défaut | 400 validation-avant-droit
@@ -3268,26 +3268,26 @@ COM | POST /api/chantiers/:id/envois | chantier-resp | défaut | 403 « Accès r
 COM | POST /api/chantiers/:id/envois | chantier-tech-branche-resp | défaut | 403 « Accès réservé aux administrateurs »
 COM | POST /api/chantiers/:id/envois | chantier-termine | défaut | 403 « Accès réservé aux administrateurs »
 COM | POST /api/chantiers/:id/envois | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-COM | POST /api/clients | — | défaut | 403 « Accès réservé aux administrateurs »
-COM | POST /api/clients/:clientId/contacts | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-COM | POST /api/clients/:clientId/contacts | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-COM | POST /api/clients/:clientId/contacts | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+COM | POST /api/clients | — | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+COM | POST /api/clients/:clientId/contacts | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+COM | POST /api/clients/:clientId/contacts | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+COM | POST /api/clients/:clientId/contacts | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 COM | POST /api/clients/:clientId/equipements | client-actif | défaut | 403 « Accès réservé aux administrateurs »
 COM | POST /api/clients/:clientId/equipements | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
 COM | POST /api/clients/:clientId/equipements | inexistant | défaut | 403 « Accès réservé aux administrateurs »
 COM | POST /api/clients/:clientId/equipements/:id/archiver | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-COM | POST /api/clients/:clientId/sites | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-COM | POST /api/clients/:clientId/sites | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-COM | POST /api/clients/:clientId/sites | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+COM | POST /api/clients/:clientId/sites | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+COM | POST /api/clients/:clientId/sites | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+COM | POST /api/clients/:clientId/sites | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 COM | POST /api/comptabilite/comptes | — | défaut | 403 « Accès réservé aux administrateurs »
 COM | POST /api/comptabilite/importer | — | défaut | 403 « Accès réservé aux administrateurs »
 COM | POST /api/contrats-maintenance | — | défaut | 403 « Accès réservé aux administrateurs »
-COM | POST /api/contrats-maintenance/:id/avancer-echeance | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-COM | POST /api/contrats-maintenance/:id/avancer-echeance | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-COM | POST /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-COM | POST /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-COM | POST /api/contrats-maintenance/:id/generer-intervention | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-COM | POST /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé aux administrateurs » inchangé
+COM | POST /api/contrats-maintenance/:id/avancer-echeance | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+COM | POST /api/contrats-maintenance/:id/avancer-echeance | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+COM | POST /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+COM | POST /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+COM | POST /api/contrats-maintenance/:id/generer-intervention | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+COM | POST /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. » inchangé
 COM | POST /api/devis | — | défaut | 400 validation-avant-droit
 COM | POST /api/devis/:id/acompte | devis-brouillon | défaut | 403 « Accès réservé aux administrateurs »
 COM | POST /api/devis/:id/acompte | devis-converti | défaut | 403 « Accès réservé aux administrateurs »
@@ -3435,15 +3435,15 @@ COM | PUT /api/catalogue/:family/:id | inexistant | défaut | 403 « Accès rés
 COM | PUT /api/catalogue/:family/:id | prestation-catalogue | défaut | 403 « Accès réservé aux administrateurs »
 COM | PUT /api/categories/:id | categorie | défaut | 403 « Accès non autorisé pour un compte commercial. »
 COM | PUT /api/categories/:id | inexistant | défaut | 403 « Accès non autorisé pour un compte commercial. »
-COM | PUT /api/clients/:clientId/contacts/:id | contact-autre-client | défaut | 403 « Accès réservé aux administrateurs »
-COM | PUT /api/clients/:clientId/contacts/:id | contact-client-actif | défaut | 403 « Accès réservé aux administrateurs »
-COM | PUT /api/clients/:clientId/contacts/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-COM | PUT /api/clients/:clientId/sites/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-COM | PUT /api/clients/:clientId/sites/:id | site-autre-client | défaut | 403 « Accès réservé aux administrateurs »
-COM | PUT /api/clients/:clientId/sites/:id | site-client-actif | défaut | 403 « Accès réservé aux administrateurs »
-COM | PUT /api/clients/:id | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-COM | PUT /api/clients/:id | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-COM | PUT /api/clients/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+COM | PUT /api/clients/:clientId/contacts/:id | contact-autre-client | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+COM | PUT /api/clients/:clientId/contacts/:id | contact-client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+COM | PUT /api/clients/:clientId/contacts/:id | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+COM | PUT /api/clients/:clientId/sites/:id | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+COM | PUT /api/clients/:clientId/sites/:id | site-autre-client | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+COM | PUT /api/clients/:clientId/sites/:id | site-client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+COM | PUT /api/clients/:id | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+COM | PUT /api/clients/:id | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+COM | PUT /api/clients/:id | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 COM | PUT /api/commerciaux/:id/prime-mensuelle | compte-administrateur | défaut | 403 « Accès réservé aux administrateurs »
 COM | PUT /api/commerciaux/:id/prime-mensuelle | compte-commercial | défaut | 403 « Accès réservé aux administrateurs »
 COM | PUT /api/commerciaux/:id/prime-mensuelle | compte-superadmin | défaut | 403 « Accès réservé aux administrateurs »
@@ -3537,7 +3537,7 @@ CPT | DELETE /api/chantiers/:id | chantier-resp | défaut | 403 « Accès réser
 CPT | DELETE /api/chantiers/:id | chantier-tech-branche-resp | défaut | 403 « Accès réservé aux administrateurs »
 CPT | DELETE /api/chantiers/:id | chantier-termine | défaut | 403 « Accès réservé aux administrateurs »
 CPT | DELETE /api/chantiers/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CPT | DELETE /api/clients/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+CPT | DELETE /api/clients/:id | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 CPT | DELETE /api/company/logo | — | défaut | 403 « Accès réservé au super administrateur » inchangé
 CPT | DELETE /api/comptabilite/regles/:cle | cle=CLIENT | défaut | 403 « Accès réservé aux administrateurs »
 CPT | DELETE /api/comptabilite/tva/:taux | taux=20 | défaut | 403 « Accès réservé aux administrateurs »
@@ -3622,9 +3622,9 @@ CPT | GET /api/chantiers/:id/journal-saisies | chantier-tech-branche-resp | déf
 CPT | GET /api/chantiers/:id/journal-saisies | chantier-termine | défaut | 404 « Chantier introuvable »
 CPT | GET /api/chantiers/:id/journal-saisies | inexistant | défaut | 404 « Chantier introuvable »
 CPT | GET /api/clients | — | défaut | 200
-CPT | GET /api/clients/:clientId/equipements | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-CPT | GET /api/clients/:clientId/equipements | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-CPT | GET /api/clients/:clientId/equipements | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+CPT | GET /api/clients/:clientId/equipements | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT | GET /api/clients/:clientId/equipements | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT | GET /api/clients/:clientId/equipements | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 CPT | GET /api/clients/:id | client-actif | défaut | 200
 CPT | GET /api/clients/:id | client-desactive | défaut | 200
 CPT | GET /api/clients/:id | inexistant | défaut | 404 « Client introuvable. »
@@ -3639,14 +3639,14 @@ CPT | GET /api/comptabilite/comptes/:id/journal | compte-comptable-clients | dé
 CPT | GET /api/comptabilite/comptes/:id/journal | inexistant | défaut | 403 « Accès réservé aux administrateurs »
 CPT | GET /api/comptabilite/regles/journal | — | défaut | 403 « Accès réservé aux administrateurs »
 CPT | GET /api/conducteurs | — | défaut | 200
-CPT | GET /api/contrats-maintenance | — | défaut | 403 « Accès réservé aux administrateurs »
-CPT | GET /api/contrats-maintenance/:id/document.pdf | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-CPT | GET /api/contrats-maintenance/:id/document.pdf | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CPT | GET /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-CPT | GET /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CPT | GET /api/contrats-maintenance/:id/journal-saisies | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-CPT | GET /api/contrats-maintenance/:id/journal-saisies | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CPT | GET /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé aux administrateurs »
+CPT | GET /api/contrats-maintenance | — | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT | GET /api/contrats-maintenance/:id/document.pdf | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT | GET /api/contrats-maintenance/:id/document.pdf | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT | GET /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT | GET /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT | GET /api/contrats-maintenance/:id/journal-saisies | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT | GET /api/contrats-maintenance/:id/journal-saisies | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT | GET /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 CPT | GET /api/devis | — | défaut | 200
 CPT | GET /api/devis/:id/document.pdf | devis-brouillon | défaut | 200
 CPT | GET /api/devis/:id/document.pdf | devis-converti | défaut | 200
@@ -3844,8 +3844,8 @@ CPT | PATCH /api/comptabilite/comptes/:id/activation | compte-comptable-clients 
 CPT | PATCH /api/comptabilite/comptes/:id/activation | inexistant | défaut | 403 « Accès réservé aux administrateurs »
 CPT | PATCH /api/contrats-maintenance/:id | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
 CPT | PATCH /api/contrats-maintenance/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CPT | PATCH /api/contrats-maintenance/:id/statut | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-CPT | PATCH /api/contrats-maintenance/:id/statut | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+CPT | PATCH /api/contrats-maintenance/:id/statut | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT | PATCH /api/contrats-maintenance/:id/statut | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 CPT | PATCH /api/devis/:id | devis-brouillon | défaut | 400 validation-avant-droit
 CPT | PATCH /api/devis/:id | devis-converti | défaut | 400 validation-avant-droit
 CPT | PATCH /api/devis/:id | devis-signe | défaut | 400 validation-avant-droit
@@ -3933,26 +3933,26 @@ CPT | POST /api/chantiers/:id/envois | chantier-resp | défaut | 403 « Accès r
 CPT | POST /api/chantiers/:id/envois | chantier-tech-branche-resp | défaut | 403 « Accès réservé aux administrateurs »
 CPT | POST /api/chantiers/:id/envois | chantier-termine | défaut | 403 « Accès réservé aux administrateurs »
 CPT | POST /api/chantiers/:id/envois | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CPT | POST /api/clients | — | défaut | 403 « Accès réservé aux administrateurs »
-CPT | POST /api/clients/:clientId/contacts | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-CPT | POST /api/clients/:clientId/contacts | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-CPT | POST /api/clients/:clientId/contacts | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+CPT | POST /api/clients | — | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT | POST /api/clients/:clientId/contacts | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT | POST /api/clients/:clientId/contacts | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT | POST /api/clients/:clientId/contacts | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 CPT | POST /api/clients/:clientId/equipements | client-actif | défaut | 403 « Accès réservé aux administrateurs »
 CPT | POST /api/clients/:clientId/equipements | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
 CPT | POST /api/clients/:clientId/equipements | inexistant | défaut | 403 « Accès réservé aux administrateurs »
 CPT | POST /api/clients/:clientId/equipements/:id/archiver | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CPT | POST /api/clients/:clientId/sites | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-CPT | POST /api/clients/:clientId/sites | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-CPT | POST /api/clients/:clientId/sites | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+CPT | POST /api/clients/:clientId/sites | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT | POST /api/clients/:clientId/sites | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT | POST /api/clients/:clientId/sites | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 CPT | POST /api/comptabilite/comptes | — | défaut | 403 « Accès réservé aux administrateurs »
 CPT | POST /api/comptabilite/importer | — | défaut | 403 « Accès réservé aux administrateurs »
 CPT | POST /api/contrats-maintenance | — | défaut | 403 « Accès réservé aux administrateurs »
-CPT | POST /api/contrats-maintenance/:id/avancer-echeance | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-CPT | POST /api/contrats-maintenance/:id/avancer-echeance | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CPT | POST /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-CPT | POST /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CPT | POST /api/contrats-maintenance/:id/generer-intervention | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CPT | POST /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé aux administrateurs » inchangé
+CPT | POST /api/contrats-maintenance/:id/avancer-echeance | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT | POST /api/contrats-maintenance/:id/avancer-echeance | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT | POST /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT | POST /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT | POST /api/contrats-maintenance/:id/generer-intervention | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT | POST /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. » inchangé
 CPT | POST /api/devis | — | défaut | 400 validation-avant-droit
 CPT | POST /api/devis/:id/acompte | devis-brouillon | défaut | 403 « Accès réservé aux administrateurs »
 CPT | POST /api/devis/:id/acompte | devis-converti | défaut | 403 « Accès réservé aux administrateurs »
@@ -4100,15 +4100,15 @@ CPT | PUT /api/catalogue/:family/:id | inexistant | défaut | 403 « Accès rés
 CPT | PUT /api/catalogue/:family/:id | prestation-catalogue | défaut | 403 « Accès réservé aux administrateurs »
 CPT | PUT /api/categories/:id | categorie | défaut | 403 « Accès non autorisé pour un compte comptable. »
 CPT | PUT /api/categories/:id | inexistant | défaut | 403 « Accès non autorisé pour un compte comptable. »
-CPT | PUT /api/clients/:clientId/contacts/:id | contact-autre-client | défaut | 403 « Accès réservé aux administrateurs »
-CPT | PUT /api/clients/:clientId/contacts/:id | contact-client-actif | défaut | 403 « Accès réservé aux administrateurs »
-CPT | PUT /api/clients/:clientId/contacts/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CPT | PUT /api/clients/:clientId/sites/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CPT | PUT /api/clients/:clientId/sites/:id | site-autre-client | défaut | 403 « Accès réservé aux administrateurs »
-CPT | PUT /api/clients/:clientId/sites/:id | site-client-actif | défaut | 403 « Accès réservé aux administrateurs »
-CPT | PUT /api/clients/:id | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-CPT | PUT /api/clients/:id | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-CPT | PUT /api/clients/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+CPT | PUT /api/clients/:clientId/contacts/:id | contact-autre-client | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT | PUT /api/clients/:clientId/contacts/:id | contact-client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT | PUT /api/clients/:clientId/contacts/:id | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT | PUT /api/clients/:clientId/sites/:id | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT | PUT /api/clients/:clientId/sites/:id | site-autre-client | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT | PUT /api/clients/:clientId/sites/:id | site-client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT | PUT /api/clients/:id | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT | PUT /api/clients/:id | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT | PUT /api/clients/:id | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 CPT | PUT /api/commerciaux/:id/prime-mensuelle | compte-administrateur | défaut | 403 « Accès réservé aux administrateurs »
 CPT | PUT /api/commerciaux/:id/prime-mensuelle | compte-commercial | défaut | 403 « Accès réservé aux administrateurs »
 CPT | PUT /api/commerciaux/:id/prime-mensuelle | compte-superadmin | défaut | 403 « Accès réservé aux administrateurs »
@@ -4202,7 +4202,7 @@ CPT-FINANCE | DELETE /api/chantiers/:id | chantier-resp | défaut | 403 « Accè
 CPT-FINANCE | DELETE /api/chantiers/:id | chantier-tech-branche-resp | défaut | 403 « Accès réservé aux administrateurs »
 CPT-FINANCE | DELETE /api/chantiers/:id | chantier-termine | défaut | 403 « Accès réservé aux administrateurs »
 CPT-FINANCE | DELETE /api/chantiers/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CPT-FINANCE | DELETE /api/clients/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+CPT-FINANCE | DELETE /api/clients/:id | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 CPT-FINANCE | DELETE /api/company/logo | — | défaut | 403 « Accès réservé au super administrateur » inchangé
 CPT-FINANCE | DELETE /api/comptabilite/regles/:cle | cle=CLIENT | défaut | 403 « Accès réservé aux administrateurs »
 CPT-FINANCE | DELETE /api/comptabilite/tva/:taux | taux=20 | défaut | 403 « Accès réservé aux administrateurs »
@@ -4287,9 +4287,9 @@ CPT-FINANCE | GET /api/chantiers/:id/journal-saisies | chantier-tech-branche-res
 CPT-FINANCE | GET /api/chantiers/:id/journal-saisies | chantier-termine | défaut | 404 « Chantier introuvable »
 CPT-FINANCE | GET /api/chantiers/:id/journal-saisies | inexistant | défaut | 404 « Chantier introuvable »
 CPT-FINANCE | GET /api/clients | — | défaut | 200
-CPT-FINANCE | GET /api/clients/:clientId/equipements | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-CPT-FINANCE | GET /api/clients/:clientId/equipements | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-CPT-FINANCE | GET /api/clients/:clientId/equipements | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+CPT-FINANCE | GET /api/clients/:clientId/equipements | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT-FINANCE | GET /api/clients/:clientId/equipements | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT-FINANCE | GET /api/clients/:clientId/equipements | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 CPT-FINANCE | GET /api/clients/:id | client-actif | défaut | 200
 CPT-FINANCE | GET /api/clients/:id | client-desactive | défaut | 200
 CPT-FINANCE | GET /api/clients/:id | inexistant | défaut | 404 « Client introuvable. »
@@ -4304,14 +4304,14 @@ CPT-FINANCE | GET /api/comptabilite/comptes/:id/journal | compte-comptable-clien
 CPT-FINANCE | GET /api/comptabilite/comptes/:id/journal | inexistant | défaut | 403 « Accès réservé aux administrateurs »
 CPT-FINANCE | GET /api/comptabilite/regles/journal | — | défaut | 403 « Accès réservé aux administrateurs »
 CPT-FINANCE | GET /api/conducteurs | — | défaut | 200
-CPT-FINANCE | GET /api/contrats-maintenance | — | défaut | 403 « Accès réservé aux administrateurs »
-CPT-FINANCE | GET /api/contrats-maintenance/:id/document.pdf | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-CPT-FINANCE | GET /api/contrats-maintenance/:id/document.pdf | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CPT-FINANCE | GET /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-CPT-FINANCE | GET /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CPT-FINANCE | GET /api/contrats-maintenance/:id/journal-saisies | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-CPT-FINANCE | GET /api/contrats-maintenance/:id/journal-saisies | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CPT-FINANCE | GET /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé aux administrateurs »
+CPT-FINANCE | GET /api/contrats-maintenance | — | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT-FINANCE | GET /api/contrats-maintenance/:id/document.pdf | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT-FINANCE | GET /api/contrats-maintenance/:id/document.pdf | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT-FINANCE | GET /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT-FINANCE | GET /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT-FINANCE | GET /api/contrats-maintenance/:id/journal-saisies | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT-FINANCE | GET /api/contrats-maintenance/:id/journal-saisies | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT-FINANCE | GET /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 CPT-FINANCE | GET /api/devis | — | défaut | 200
 CPT-FINANCE | GET /api/devis/:id/document.pdf | devis-brouillon | défaut | 200
 CPT-FINANCE | GET /api/devis/:id/document.pdf | devis-converti | défaut | 200
@@ -4509,8 +4509,8 @@ CPT-FINANCE | PATCH /api/comptabilite/comptes/:id/activation | compte-comptable-
 CPT-FINANCE | PATCH /api/comptabilite/comptes/:id/activation | inexistant | défaut | 403 « Accès réservé aux administrateurs »
 CPT-FINANCE | PATCH /api/contrats-maintenance/:id | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
 CPT-FINANCE | PATCH /api/contrats-maintenance/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CPT-FINANCE | PATCH /api/contrats-maintenance/:id/statut | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-CPT-FINANCE | PATCH /api/contrats-maintenance/:id/statut | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+CPT-FINANCE | PATCH /api/contrats-maintenance/:id/statut | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT-FINANCE | PATCH /api/contrats-maintenance/:id/statut | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 CPT-FINANCE | PATCH /api/devis/:id | devis-brouillon | défaut | 400 validation-avant-droit
 CPT-FINANCE | PATCH /api/devis/:id | devis-converti | défaut | 400 validation-avant-droit
 CPT-FINANCE | PATCH /api/devis/:id | devis-signe | défaut | 400 validation-avant-droit
@@ -4598,26 +4598,26 @@ CPT-FINANCE | POST /api/chantiers/:id/envois | chantier-resp | défaut | 403 « 
 CPT-FINANCE | POST /api/chantiers/:id/envois | chantier-tech-branche-resp | défaut | 403 « Accès réservé aux administrateurs »
 CPT-FINANCE | POST /api/chantiers/:id/envois | chantier-termine | défaut | 403 « Accès réservé aux administrateurs »
 CPT-FINANCE | POST /api/chantiers/:id/envois | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CPT-FINANCE | POST /api/clients | — | défaut | 403 « Accès réservé aux administrateurs »
-CPT-FINANCE | POST /api/clients/:clientId/contacts | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-CPT-FINANCE | POST /api/clients/:clientId/contacts | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-CPT-FINANCE | POST /api/clients/:clientId/contacts | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+CPT-FINANCE | POST /api/clients | — | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT-FINANCE | POST /api/clients/:clientId/contacts | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT-FINANCE | POST /api/clients/:clientId/contacts | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT-FINANCE | POST /api/clients/:clientId/contacts | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 CPT-FINANCE | POST /api/clients/:clientId/equipements | client-actif | défaut | 403 « Accès réservé aux administrateurs »
 CPT-FINANCE | POST /api/clients/:clientId/equipements | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
 CPT-FINANCE | POST /api/clients/:clientId/equipements | inexistant | défaut | 403 « Accès réservé aux administrateurs »
 CPT-FINANCE | POST /api/clients/:clientId/equipements/:id/archiver | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CPT-FINANCE | POST /api/clients/:clientId/sites | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-CPT-FINANCE | POST /api/clients/:clientId/sites | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-CPT-FINANCE | POST /api/clients/:clientId/sites | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+CPT-FINANCE | POST /api/clients/:clientId/sites | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT-FINANCE | POST /api/clients/:clientId/sites | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT-FINANCE | POST /api/clients/:clientId/sites | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 CPT-FINANCE | POST /api/comptabilite/comptes | — | défaut | 403 « Accès réservé aux administrateurs »
 CPT-FINANCE | POST /api/comptabilite/importer | — | défaut | 403 « Accès réservé aux administrateurs »
 CPT-FINANCE | POST /api/contrats-maintenance | — | défaut | 403 « Accès réservé aux administrateurs »
-CPT-FINANCE | POST /api/contrats-maintenance/:id/avancer-echeance | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-CPT-FINANCE | POST /api/contrats-maintenance/:id/avancer-echeance | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CPT-FINANCE | POST /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-CPT-FINANCE | POST /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CPT-FINANCE | POST /api/contrats-maintenance/:id/generer-intervention | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CPT-FINANCE | POST /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé aux administrateurs » inchangé
+CPT-FINANCE | POST /api/contrats-maintenance/:id/avancer-echeance | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT-FINANCE | POST /api/contrats-maintenance/:id/avancer-echeance | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT-FINANCE | POST /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT-FINANCE | POST /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT-FINANCE | POST /api/contrats-maintenance/:id/generer-intervention | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT-FINANCE | POST /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. » inchangé
 CPT-FINANCE | POST /api/devis | — | défaut | 400 validation-avant-droit
 CPT-FINANCE | POST /api/devis/:id/acompte | devis-brouillon | défaut | 403 « Accès réservé aux administrateurs »
 CPT-FINANCE | POST /api/devis/:id/acompte | devis-converti | défaut | 403 « Accès réservé aux administrateurs »
@@ -4765,15 +4765,15 @@ CPT-FINANCE | PUT /api/catalogue/:family/:id | inexistant | défaut | 403 « Acc
 CPT-FINANCE | PUT /api/catalogue/:family/:id | prestation-catalogue | défaut | 403 « Accès réservé aux administrateurs »
 CPT-FINANCE | PUT /api/categories/:id | categorie | défaut | 403 « Accès non autorisé pour un compte comptable. »
 CPT-FINANCE | PUT /api/categories/:id | inexistant | défaut | 403 « Accès non autorisé pour un compte comptable. »
-CPT-FINANCE | PUT /api/clients/:clientId/contacts/:id | contact-autre-client | défaut | 403 « Accès réservé aux administrateurs »
-CPT-FINANCE | PUT /api/clients/:clientId/contacts/:id | contact-client-actif | défaut | 403 « Accès réservé aux administrateurs »
-CPT-FINANCE | PUT /api/clients/:clientId/contacts/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CPT-FINANCE | PUT /api/clients/:clientId/sites/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CPT-FINANCE | PUT /api/clients/:clientId/sites/:id | site-autre-client | défaut | 403 « Accès réservé aux administrateurs »
-CPT-FINANCE | PUT /api/clients/:clientId/sites/:id | site-client-actif | défaut | 403 « Accès réservé aux administrateurs »
-CPT-FINANCE | PUT /api/clients/:id | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-CPT-FINANCE | PUT /api/clients/:id | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-CPT-FINANCE | PUT /api/clients/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+CPT-FINANCE | PUT /api/clients/:clientId/contacts/:id | contact-autre-client | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT-FINANCE | PUT /api/clients/:clientId/contacts/:id | contact-client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT-FINANCE | PUT /api/clients/:clientId/contacts/:id | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT-FINANCE | PUT /api/clients/:clientId/sites/:id | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT-FINANCE | PUT /api/clients/:clientId/sites/:id | site-autre-client | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT-FINANCE | PUT /api/clients/:clientId/sites/:id | site-client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT-FINANCE | PUT /api/clients/:id | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT-FINANCE | PUT /api/clients/:id | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CPT-FINANCE | PUT /api/clients/:id | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 CPT-FINANCE | PUT /api/commerciaux/:id/prime-mensuelle | compte-administrateur | défaut | 403 « Accès réservé aux administrateurs »
 CPT-FINANCE | PUT /api/commerciaux/:id/prime-mensuelle | compte-commercial | défaut | 403 « Accès réservé aux administrateurs »
 CPT-FINANCE | PUT /api/commerciaux/:id/prime-mensuelle | compte-superadmin | défaut | 403 « Accès réservé aux administrateurs »
@@ -4867,7 +4867,7 @@ CT | DELETE /api/chantiers/:id | chantier-resp | défaut | 403 « Accès réserv
 CT | DELETE /api/chantiers/:id | chantier-tech-branche-resp | défaut | 403 « Accès réservé aux administrateurs »
 CT | DELETE /api/chantiers/:id | chantier-termine | défaut | 403 « Accès réservé aux administrateurs »
 CT | DELETE /api/chantiers/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CT | DELETE /api/clients/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+CT | DELETE /api/clients/:id | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 CT | DELETE /api/company/logo | — | défaut | 403 « Accès réservé au super administrateur » inchangé
 CT | DELETE /api/comptabilite/regles/:cle | cle=CLIENT | défaut | 403 « Accès réservé aux administrateurs »
 CT | DELETE /api/comptabilite/tva/:taux | taux=20 | défaut | 403 « Accès réservé aux administrateurs »
@@ -4952,9 +4952,9 @@ CT | GET /api/chantiers/:id/journal-saisies | chantier-tech-branche-resp | défa
 CT | GET /api/chantiers/:id/journal-saisies | chantier-termine | défaut | 200
 CT | GET /api/chantiers/:id/journal-saisies | inexistant | défaut | 404 « Chantier introuvable »
 CT | GET /api/clients | — | défaut | 200
-CT | GET /api/clients/:clientId/equipements | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-CT | GET /api/clients/:clientId/equipements | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-CT | GET /api/clients/:clientId/equipements | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+CT | GET /api/clients/:clientId/equipements | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT | GET /api/clients/:clientId/equipements | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT | GET /api/clients/:clientId/equipements | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 CT | GET /api/clients/:id | client-actif | défaut | 200
 CT | GET /api/clients/:id | client-desactive | défaut | 200
 CT | GET /api/clients/:id | inexistant | défaut | 404 « Client introuvable. »
@@ -4969,14 +4969,14 @@ CT | GET /api/comptabilite/comptes/:id/journal | compte-comptable-clients | déf
 CT | GET /api/comptabilite/comptes/:id/journal | inexistant | défaut | 403 « Accès réservé aux administrateurs »
 CT | GET /api/comptabilite/regles/journal | — | défaut | 403 « Accès réservé aux administrateurs »
 CT | GET /api/conducteurs | — | défaut | 200
-CT | GET /api/contrats-maintenance | — | défaut | 403 « Accès réservé aux administrateurs »
-CT | GET /api/contrats-maintenance/:id/document.pdf | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-CT | GET /api/contrats-maintenance/:id/document.pdf | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CT | GET /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-CT | GET /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CT | GET /api/contrats-maintenance/:id/journal-saisies | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-CT | GET /api/contrats-maintenance/:id/journal-saisies | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CT | GET /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé aux administrateurs »
+CT | GET /api/contrats-maintenance | — | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT | GET /api/contrats-maintenance/:id/document.pdf | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT | GET /api/contrats-maintenance/:id/document.pdf | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT | GET /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT | GET /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT | GET /api/contrats-maintenance/:id/journal-saisies | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT | GET /api/contrats-maintenance/:id/journal-saisies | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT | GET /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 CT | GET /api/devis | — | défaut | 403 « Permission requise : devis:read »
 CT | GET /api/devis/:id/document.pdf | devis-brouillon | défaut | 403 « Permission requise : devis:read »
 CT | GET /api/devis/:id/document.pdf | devis-converti | défaut | 403 « Permission requise : devis:read »
@@ -5174,8 +5174,8 @@ CT | PATCH /api/comptabilite/comptes/:id/activation | compte-comptable-clients |
 CT | PATCH /api/comptabilite/comptes/:id/activation | inexistant | défaut | 403 « Accès réservé aux administrateurs »
 CT | PATCH /api/contrats-maintenance/:id | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
 CT | PATCH /api/contrats-maintenance/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CT | PATCH /api/contrats-maintenance/:id/statut | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-CT | PATCH /api/contrats-maintenance/:id/statut | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+CT | PATCH /api/contrats-maintenance/:id/statut | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT | PATCH /api/contrats-maintenance/:id/statut | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 CT | PATCH /api/devis/:id | devis-brouillon | défaut | 403 « Permission requise : devis:write »
 CT | PATCH /api/devis/:id | devis-converti | défaut | 403 « Permission requise : devis:write »
 CT | PATCH /api/devis/:id | devis-signe | défaut | 403 « Permission requise : devis:write »
@@ -5263,26 +5263,26 @@ CT | POST /api/chantiers/:id/envois | chantier-resp | défaut | 403 « Accès r�
 CT | POST /api/chantiers/:id/envois | chantier-tech-branche-resp | défaut | 403 « Accès réservé aux administrateurs »
 CT | POST /api/chantiers/:id/envois | chantier-termine | défaut | 403 « Accès réservé aux administrateurs »
 CT | POST /api/chantiers/:id/envois | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CT | POST /api/clients | — | défaut | 403 « Accès réservé aux administrateurs »
-CT | POST /api/clients/:clientId/contacts | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-CT | POST /api/clients/:clientId/contacts | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-CT | POST /api/clients/:clientId/contacts | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+CT | POST /api/clients | — | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT | POST /api/clients/:clientId/contacts | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT | POST /api/clients/:clientId/contacts | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT | POST /api/clients/:clientId/contacts | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 CT | POST /api/clients/:clientId/equipements | client-actif | défaut | 403 « Accès réservé aux administrateurs »
 CT | POST /api/clients/:clientId/equipements | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
 CT | POST /api/clients/:clientId/equipements | inexistant | défaut | 403 « Accès réservé aux administrateurs »
 CT | POST /api/clients/:clientId/equipements/:id/archiver | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CT | POST /api/clients/:clientId/sites | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-CT | POST /api/clients/:clientId/sites | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-CT | POST /api/clients/:clientId/sites | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+CT | POST /api/clients/:clientId/sites | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT | POST /api/clients/:clientId/sites | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT | POST /api/clients/:clientId/sites | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 CT | POST /api/comptabilite/comptes | — | défaut | 403 « Accès réservé aux administrateurs »
 CT | POST /api/comptabilite/importer | — | défaut | 403 « Accès réservé aux administrateurs »
 CT | POST /api/contrats-maintenance | — | défaut | 403 « Accès réservé aux administrateurs »
-CT | POST /api/contrats-maintenance/:id/avancer-echeance | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-CT | POST /api/contrats-maintenance/:id/avancer-echeance | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CT | POST /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-CT | POST /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CT | POST /api/contrats-maintenance/:id/generer-intervention | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CT | POST /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé aux administrateurs » inchangé
+CT | POST /api/contrats-maintenance/:id/avancer-echeance | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT | POST /api/contrats-maintenance/:id/avancer-echeance | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT | POST /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT | POST /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT | POST /api/contrats-maintenance/:id/generer-intervention | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT | POST /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. » inchangé
 CT | POST /api/devis | — | défaut | 403 « Permission requise : devis:write »
 CT | POST /api/devis/:id/acompte | devis-brouillon | défaut | 403 « Accès réservé aux administrateurs »
 CT | POST /api/devis/:id/acompte | devis-converti | défaut | 403 « Accès réservé aux administrateurs »
@@ -5430,15 +5430,15 @@ CT | PUT /api/catalogue/:family/:id | inexistant | défaut | 403 « Accès rése
 CT | PUT /api/catalogue/:family/:id | prestation-catalogue | défaut | 403 « Accès réservé aux administrateurs »
 CT | PUT /api/categories/:id | categorie | défaut | 200
 CT | PUT /api/categories/:id | inexistant | défaut | 500 « Error updating categorie »
-CT | PUT /api/clients/:clientId/contacts/:id | contact-autre-client | défaut | 403 « Accès réservé aux administrateurs »
-CT | PUT /api/clients/:clientId/contacts/:id | contact-client-actif | défaut | 403 « Accès réservé aux administrateurs »
-CT | PUT /api/clients/:clientId/contacts/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CT | PUT /api/clients/:clientId/sites/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CT | PUT /api/clients/:clientId/sites/:id | site-autre-client | défaut | 403 « Accès réservé aux administrateurs »
-CT | PUT /api/clients/:clientId/sites/:id | site-client-actif | défaut | 403 « Accès réservé aux administrateurs »
-CT | PUT /api/clients/:id | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-CT | PUT /api/clients/:id | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-CT | PUT /api/clients/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+CT | PUT /api/clients/:clientId/contacts/:id | contact-autre-client | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT | PUT /api/clients/:clientId/contacts/:id | contact-client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT | PUT /api/clients/:clientId/contacts/:id | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT | PUT /api/clients/:clientId/sites/:id | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT | PUT /api/clients/:clientId/sites/:id | site-autre-client | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT | PUT /api/clients/:clientId/sites/:id | site-client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT | PUT /api/clients/:id | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT | PUT /api/clients/:id | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT | PUT /api/clients/:id | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 CT | PUT /api/commerciaux/:id/prime-mensuelle | compte-administrateur | défaut | 403 « Accès réservé aux administrateurs »
 CT | PUT /api/commerciaux/:id/prime-mensuelle | compte-commercial | défaut | 403 « Accès réservé aux administrateurs »
 CT | PUT /api/commerciaux/:id/prime-mensuelle | compte-superadmin | défaut | 403 « Accès réservé aux administrateurs »
@@ -5532,7 +5532,7 @@ CT-N1 | DELETE /api/chantiers/:id | chantier-resp | défaut | 403 « Accès rés
 CT-N1 | DELETE /api/chantiers/:id | chantier-tech-branche-resp | défaut | 403 « Accès réservé aux administrateurs »
 CT-N1 | DELETE /api/chantiers/:id | chantier-termine | défaut | 403 « Accès réservé aux administrateurs »
 CT-N1 | DELETE /api/chantiers/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CT-N1 | DELETE /api/clients/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+CT-N1 | DELETE /api/clients/:id | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 CT-N1 | DELETE /api/company/logo | — | défaut | 403 « Accès réservé au super administrateur » inchangé
 CT-N1 | DELETE /api/comptabilite/regles/:cle | cle=CLIENT | défaut | 403 « Accès réservé aux administrateurs »
 CT-N1 | DELETE /api/comptabilite/tva/:taux | taux=20 | défaut | 403 « Accès réservé aux administrateurs »
@@ -5617,9 +5617,9 @@ CT-N1 | GET /api/chantiers/:id/journal-saisies | chantier-tech-branche-resp | d�
 CT-N1 | GET /api/chantiers/:id/journal-saisies | chantier-termine | défaut | 404 « Chantier introuvable »
 CT-N1 | GET /api/chantiers/:id/journal-saisies | inexistant | défaut | 404 « Chantier introuvable »
 CT-N1 | GET /api/clients | — | défaut | 200
-CT-N1 | GET /api/clients/:clientId/equipements | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-CT-N1 | GET /api/clients/:clientId/equipements | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-CT-N1 | GET /api/clients/:clientId/equipements | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+CT-N1 | GET /api/clients/:clientId/equipements | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT-N1 | GET /api/clients/:clientId/equipements | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT-N1 | GET /api/clients/:clientId/equipements | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 CT-N1 | GET /api/clients/:id | client-actif | défaut | 200
 CT-N1 | GET /api/clients/:id | client-desactive | défaut | 200
 CT-N1 | GET /api/clients/:id | inexistant | défaut | 404 « Client introuvable. »
@@ -5634,14 +5634,14 @@ CT-N1 | GET /api/comptabilite/comptes/:id/journal | compte-comptable-clients | d
 CT-N1 | GET /api/comptabilite/comptes/:id/journal | inexistant | défaut | 403 « Accès réservé aux administrateurs »
 CT-N1 | GET /api/comptabilite/regles/journal | — | défaut | 403 « Accès réservé aux administrateurs »
 CT-N1 | GET /api/conducteurs | — | défaut | 200
-CT-N1 | GET /api/contrats-maintenance | — | défaut | 403 « Accès réservé aux administrateurs »
-CT-N1 | GET /api/contrats-maintenance/:id/document.pdf | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-CT-N1 | GET /api/contrats-maintenance/:id/document.pdf | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CT-N1 | GET /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-CT-N1 | GET /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CT-N1 | GET /api/contrats-maintenance/:id/journal-saisies | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-CT-N1 | GET /api/contrats-maintenance/:id/journal-saisies | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CT-N1 | GET /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé aux administrateurs »
+CT-N1 | GET /api/contrats-maintenance | — | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT-N1 | GET /api/contrats-maintenance/:id/document.pdf | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT-N1 | GET /api/contrats-maintenance/:id/document.pdf | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT-N1 | GET /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT-N1 | GET /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT-N1 | GET /api/contrats-maintenance/:id/journal-saisies | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT-N1 | GET /api/contrats-maintenance/:id/journal-saisies | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT-N1 | GET /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 CT-N1 | GET /api/devis | — | défaut | 403 « Permission requise : devis:read »
 CT-N1 | GET /api/devis/:id/document.pdf | devis-brouillon | défaut | 403 « Permission requise : devis:read »
 CT-N1 | GET /api/devis/:id/document.pdf | devis-converti | défaut | 403 « Permission requise : devis:read »
@@ -5839,8 +5839,8 @@ CT-N1 | PATCH /api/comptabilite/comptes/:id/activation | compte-comptable-client
 CT-N1 | PATCH /api/comptabilite/comptes/:id/activation | inexistant | défaut | 403 « Accès réservé aux administrateurs »
 CT-N1 | PATCH /api/contrats-maintenance/:id | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
 CT-N1 | PATCH /api/contrats-maintenance/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CT-N1 | PATCH /api/contrats-maintenance/:id/statut | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-CT-N1 | PATCH /api/contrats-maintenance/:id/statut | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+CT-N1 | PATCH /api/contrats-maintenance/:id/statut | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT-N1 | PATCH /api/contrats-maintenance/:id/statut | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 CT-N1 | PATCH /api/devis/:id | devis-brouillon | défaut | 403 « Permission requise : devis:write »
 CT-N1 | PATCH /api/devis/:id | devis-converti | défaut | 403 « Permission requise : devis:write »
 CT-N1 | PATCH /api/devis/:id | devis-signe | défaut | 403 « Permission requise : devis:write »
@@ -5928,26 +5928,26 @@ CT-N1 | POST /api/chantiers/:id/envois | chantier-resp | défaut | 403 « Accès
 CT-N1 | POST /api/chantiers/:id/envois | chantier-tech-branche-resp | défaut | 403 « Accès réservé aux administrateurs »
 CT-N1 | POST /api/chantiers/:id/envois | chantier-termine | défaut | 403 « Accès réservé aux administrateurs »
 CT-N1 | POST /api/chantiers/:id/envois | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CT-N1 | POST /api/clients | — | défaut | 403 « Accès réservé aux administrateurs »
-CT-N1 | POST /api/clients/:clientId/contacts | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-CT-N1 | POST /api/clients/:clientId/contacts | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-CT-N1 | POST /api/clients/:clientId/contacts | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+CT-N1 | POST /api/clients | — | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT-N1 | POST /api/clients/:clientId/contacts | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT-N1 | POST /api/clients/:clientId/contacts | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT-N1 | POST /api/clients/:clientId/contacts | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 CT-N1 | POST /api/clients/:clientId/equipements | client-actif | défaut | 403 « Accès réservé aux administrateurs »
 CT-N1 | POST /api/clients/:clientId/equipements | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
 CT-N1 | POST /api/clients/:clientId/equipements | inexistant | défaut | 403 « Accès réservé aux administrateurs »
 CT-N1 | POST /api/clients/:clientId/equipements/:id/archiver | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CT-N1 | POST /api/clients/:clientId/sites | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-CT-N1 | POST /api/clients/:clientId/sites | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-CT-N1 | POST /api/clients/:clientId/sites | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+CT-N1 | POST /api/clients/:clientId/sites | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT-N1 | POST /api/clients/:clientId/sites | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT-N1 | POST /api/clients/:clientId/sites | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 CT-N1 | POST /api/comptabilite/comptes | — | défaut | 403 « Accès réservé aux administrateurs »
 CT-N1 | POST /api/comptabilite/importer | — | défaut | 403 « Accès réservé aux administrateurs »
 CT-N1 | POST /api/contrats-maintenance | — | défaut | 403 « Accès réservé aux administrateurs »
-CT-N1 | POST /api/contrats-maintenance/:id/avancer-echeance | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-CT-N1 | POST /api/contrats-maintenance/:id/avancer-echeance | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CT-N1 | POST /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-CT-N1 | POST /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CT-N1 | POST /api/contrats-maintenance/:id/generer-intervention | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CT-N1 | POST /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé aux administrateurs » inchangé
+CT-N1 | POST /api/contrats-maintenance/:id/avancer-echeance | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT-N1 | POST /api/contrats-maintenance/:id/avancer-echeance | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT-N1 | POST /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT-N1 | POST /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT-N1 | POST /api/contrats-maintenance/:id/generer-intervention | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT-N1 | POST /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. » inchangé
 CT-N1 | POST /api/devis | — | défaut | 403 « Permission requise : devis:write »
 CT-N1 | POST /api/devis/:id/acompte | devis-brouillon | défaut | 403 « Accès réservé aux administrateurs »
 CT-N1 | POST /api/devis/:id/acompte | devis-converti | défaut | 403 « Accès réservé aux administrateurs »
@@ -6095,15 +6095,15 @@ CT-N1 | PUT /api/catalogue/:family/:id | inexistant | défaut | 403 « Accès r�
 CT-N1 | PUT /api/catalogue/:family/:id | prestation-catalogue | défaut | 403 « Accès réservé aux administrateurs »
 CT-N1 | PUT /api/categories/:id | categorie | défaut | 200
 CT-N1 | PUT /api/categories/:id | inexistant | défaut | 500 « Error updating categorie »
-CT-N1 | PUT /api/clients/:clientId/contacts/:id | contact-autre-client | défaut | 403 « Accès réservé aux administrateurs »
-CT-N1 | PUT /api/clients/:clientId/contacts/:id | contact-client-actif | défaut | 403 « Accès réservé aux administrateurs »
-CT-N1 | PUT /api/clients/:clientId/contacts/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CT-N1 | PUT /api/clients/:clientId/sites/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-CT-N1 | PUT /api/clients/:clientId/sites/:id | site-autre-client | défaut | 403 « Accès réservé aux administrateurs »
-CT-N1 | PUT /api/clients/:clientId/sites/:id | site-client-actif | défaut | 403 « Accès réservé aux administrateurs »
-CT-N1 | PUT /api/clients/:id | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-CT-N1 | PUT /api/clients/:id | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-CT-N1 | PUT /api/clients/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+CT-N1 | PUT /api/clients/:clientId/contacts/:id | contact-autre-client | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT-N1 | PUT /api/clients/:clientId/contacts/:id | contact-client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT-N1 | PUT /api/clients/:clientId/contacts/:id | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT-N1 | PUT /api/clients/:clientId/sites/:id | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT-N1 | PUT /api/clients/:clientId/sites/:id | site-autre-client | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT-N1 | PUT /api/clients/:clientId/sites/:id | site-client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT-N1 | PUT /api/clients/:id | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT-N1 | PUT /api/clients/:id | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+CT-N1 | PUT /api/clients/:id | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 CT-N1 | PUT /api/commerciaux/:id/prime-mensuelle | compte-administrateur | défaut | 403 « Accès réservé aux administrateurs »
 CT-N1 | PUT /api/commerciaux/:id/prime-mensuelle | compte-commercial | défaut | 403 « Accès réservé aux administrateurs »
 CT-N1 | PUT /api/commerciaux/:id/prime-mensuelle | compte-superadmin | défaut | 403 « Accès réservé aux administrateurs »
@@ -6197,7 +6197,7 @@ DC | DELETE /api/chantiers/:id | chantier-resp | défaut | 403 « Accès réserv
 DC | DELETE /api/chantiers/:id | chantier-tech-branche-resp | défaut | 403 « Accès réservé aux administrateurs »
 DC | DELETE /api/chantiers/:id | chantier-termine | défaut | 403 « Accès réservé aux administrateurs »
 DC | DELETE /api/chantiers/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-DC | DELETE /api/clients/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+DC | DELETE /api/clients/:id | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 DC | DELETE /api/company/logo | — | défaut | 403 « Accès réservé au super administrateur » inchangé
 DC | DELETE /api/comptabilite/regles/:cle | cle=CLIENT | défaut | 403 « Accès réservé aux administrateurs »
 DC | DELETE /api/comptabilite/tva/:taux | taux=20 | défaut | 403 « Accès réservé aux administrateurs »
@@ -6282,9 +6282,9 @@ DC | GET /api/chantiers/:id/journal-saisies | chantier-tech-branche-resp | défa
 DC | GET /api/chantiers/:id/journal-saisies | chantier-termine | défaut | 404 « Chantier introuvable »
 DC | GET /api/chantiers/:id/journal-saisies | inexistant | défaut | 404 « Chantier introuvable »
 DC | GET /api/clients | — | défaut | 200
-DC | GET /api/clients/:clientId/equipements | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-DC | GET /api/clients/:clientId/equipements | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-DC | GET /api/clients/:clientId/equipements | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+DC | GET /api/clients/:clientId/equipements | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+DC | GET /api/clients/:clientId/equipements | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+DC | GET /api/clients/:clientId/equipements | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 DC | GET /api/clients/:id | client-actif | défaut | 200
 DC | GET /api/clients/:id | client-desactive | défaut | 200
 DC | GET /api/clients/:id | inexistant | défaut | 404 « Client introuvable. »
@@ -6299,14 +6299,14 @@ DC | GET /api/comptabilite/comptes/:id/journal | compte-comptable-clients | déf
 DC | GET /api/comptabilite/comptes/:id/journal | inexistant | défaut | 403 « Accès réservé aux administrateurs »
 DC | GET /api/comptabilite/regles/journal | — | défaut | 403 « Accès réservé aux administrateurs »
 DC | GET /api/conducteurs | — | défaut | 200
-DC | GET /api/contrats-maintenance | — | défaut | 403 « Accès réservé aux administrateurs »
-DC | GET /api/contrats-maintenance/:id/document.pdf | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-DC | GET /api/contrats-maintenance/:id/document.pdf | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-DC | GET /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-DC | GET /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-DC | GET /api/contrats-maintenance/:id/journal-saisies | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-DC | GET /api/contrats-maintenance/:id/journal-saisies | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-DC | GET /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé aux administrateurs »
+DC | GET /api/contrats-maintenance | — | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+DC | GET /api/contrats-maintenance/:id/document.pdf | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+DC | GET /api/contrats-maintenance/:id/document.pdf | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+DC | GET /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+DC | GET /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+DC | GET /api/contrats-maintenance/:id/journal-saisies | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+DC | GET /api/contrats-maintenance/:id/journal-saisies | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+DC | GET /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 DC | GET /api/devis | — | défaut | 200
 DC | GET /api/devis/:id/document.pdf | devis-brouillon | défaut | 200
 DC | GET /api/devis/:id/document.pdf | devis-converti | défaut | 200
@@ -6504,8 +6504,8 @@ DC | PATCH /api/comptabilite/comptes/:id/activation | compte-comptable-clients |
 DC | PATCH /api/comptabilite/comptes/:id/activation | inexistant | défaut | 403 « Accès réservé aux administrateurs »
 DC | PATCH /api/contrats-maintenance/:id | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
 DC | PATCH /api/contrats-maintenance/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-DC | PATCH /api/contrats-maintenance/:id/statut | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-DC | PATCH /api/contrats-maintenance/:id/statut | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+DC | PATCH /api/contrats-maintenance/:id/statut | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+DC | PATCH /api/contrats-maintenance/:id/statut | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 DC | PATCH /api/devis/:id | devis-brouillon | défaut | 400 validation-avant-droit
 DC | PATCH /api/devis/:id | devis-converti | défaut | 400 validation-avant-droit
 DC | PATCH /api/devis/:id | devis-signe | défaut | 400 validation-avant-droit
@@ -6593,26 +6593,26 @@ DC | POST /api/chantiers/:id/envois | chantier-resp | défaut | 403 « Accès r�
 DC | POST /api/chantiers/:id/envois | chantier-tech-branche-resp | défaut | 403 « Accès réservé aux administrateurs »
 DC | POST /api/chantiers/:id/envois | chantier-termine | défaut | 403 « Accès réservé aux administrateurs »
 DC | POST /api/chantiers/:id/envois | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-DC | POST /api/clients | — | défaut | 403 « Accès réservé aux administrateurs »
-DC | POST /api/clients/:clientId/contacts | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-DC | POST /api/clients/:clientId/contacts | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-DC | POST /api/clients/:clientId/contacts | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+DC | POST /api/clients | — | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+DC | POST /api/clients/:clientId/contacts | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+DC | POST /api/clients/:clientId/contacts | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+DC | POST /api/clients/:clientId/contacts | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 DC | POST /api/clients/:clientId/equipements | client-actif | défaut | 403 « Accès réservé aux administrateurs »
 DC | POST /api/clients/:clientId/equipements | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
 DC | POST /api/clients/:clientId/equipements | inexistant | défaut | 403 « Accès réservé aux administrateurs »
 DC | POST /api/clients/:clientId/equipements/:id/archiver | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-DC | POST /api/clients/:clientId/sites | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-DC | POST /api/clients/:clientId/sites | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-DC | POST /api/clients/:clientId/sites | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+DC | POST /api/clients/:clientId/sites | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+DC | POST /api/clients/:clientId/sites | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+DC | POST /api/clients/:clientId/sites | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 DC | POST /api/comptabilite/comptes | — | défaut | 403 « Accès réservé aux administrateurs »
 DC | POST /api/comptabilite/importer | — | défaut | 403 « Accès réservé aux administrateurs »
 DC | POST /api/contrats-maintenance | — | défaut | 403 « Accès réservé aux administrateurs »
-DC | POST /api/contrats-maintenance/:id/avancer-echeance | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-DC | POST /api/contrats-maintenance/:id/avancer-echeance | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-DC | POST /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-DC | POST /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-DC | POST /api/contrats-maintenance/:id/generer-intervention | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-DC | POST /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé aux administrateurs » inchangé
+DC | POST /api/contrats-maintenance/:id/avancer-echeance | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+DC | POST /api/contrats-maintenance/:id/avancer-echeance | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+DC | POST /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+DC | POST /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+DC | POST /api/contrats-maintenance/:id/generer-intervention | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+DC | POST /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. » inchangé
 DC | POST /api/devis | — | défaut | 400 validation-avant-droit
 DC | POST /api/devis/:id/acompte | devis-brouillon | défaut | 403 « Accès réservé aux administrateurs »
 DC | POST /api/devis/:id/acompte | devis-converti | défaut | 403 « Accès réservé aux administrateurs »
@@ -6760,15 +6760,15 @@ DC | PUT /api/catalogue/:family/:id | inexistant | défaut | 403 « Accès rése
 DC | PUT /api/catalogue/:family/:id | prestation-catalogue | défaut | 403 « Accès réservé aux administrateurs »
 DC | PUT /api/categories/:id | categorie | défaut | 403 « Accès non autorisé pour un compte directeur commercial. »
 DC | PUT /api/categories/:id | inexistant | défaut | 403 « Accès non autorisé pour un compte directeur commercial. »
-DC | PUT /api/clients/:clientId/contacts/:id | contact-autre-client | défaut | 403 « Accès réservé aux administrateurs »
-DC | PUT /api/clients/:clientId/contacts/:id | contact-client-actif | défaut | 403 « Accès réservé aux administrateurs »
-DC | PUT /api/clients/:clientId/contacts/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-DC | PUT /api/clients/:clientId/sites/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-DC | PUT /api/clients/:clientId/sites/:id | site-autre-client | défaut | 403 « Accès réservé aux administrateurs »
-DC | PUT /api/clients/:clientId/sites/:id | site-client-actif | défaut | 403 « Accès réservé aux administrateurs »
-DC | PUT /api/clients/:id | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-DC | PUT /api/clients/:id | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-DC | PUT /api/clients/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+DC | PUT /api/clients/:clientId/contacts/:id | contact-autre-client | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+DC | PUT /api/clients/:clientId/contacts/:id | contact-client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+DC | PUT /api/clients/:clientId/contacts/:id | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+DC | PUT /api/clients/:clientId/sites/:id | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+DC | PUT /api/clients/:clientId/sites/:id | site-autre-client | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+DC | PUT /api/clients/:clientId/sites/:id | site-client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+DC | PUT /api/clients/:id | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+DC | PUT /api/clients/:id | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+DC | PUT /api/clients/:id | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 DC | PUT /api/commerciaux/:id/prime-mensuelle | compte-administrateur | défaut | 403 « Accès réservé aux administrateurs »
 DC | PUT /api/commerciaux/:id/prime-mensuelle | compte-commercial | défaut | 403 « Accès réservé aux administrateurs »
 DC | PUT /api/commerciaux/:id/prime-mensuelle | compte-superadmin | défaut | 403 « Accès réservé aux administrateurs »
@@ -7913,7 +7913,7 @@ RESP | DELETE /api/chantiers/:id | chantier-resp | défaut | 403 « Accès rése
 RESP | DELETE /api/chantiers/:id | chantier-tech-branche-resp | défaut | 403 « Accès réservé aux administrateurs »
 RESP | DELETE /api/chantiers/:id | chantier-termine | défaut | 403 « Accès réservé aux administrateurs »
 RESP | DELETE /api/chantiers/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-RESP | DELETE /api/clients/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+RESP | DELETE /api/clients/:id | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 RESP | DELETE /api/company/logo | — | défaut | 403 « Accès réservé au super administrateur » inchangé
 RESP | DELETE /api/comptabilite/regles/:cle | cle=CLIENT | défaut | 403 « Accès réservé aux administrateurs »
 RESP | DELETE /api/comptabilite/tva/:taux | taux=20 | défaut | 403 « Accès réservé aux administrateurs »
@@ -7998,9 +7998,9 @@ RESP | GET /api/chantiers/:id/journal-saisies | chantier-tech-branche-resp | dé
 RESP | GET /api/chantiers/:id/journal-saisies | chantier-termine | défaut | 404 « Chantier introuvable »
 RESP | GET /api/chantiers/:id/journal-saisies | inexistant | défaut | 404 « Chantier introuvable »
 RESP | GET /api/clients | — | défaut | 403 « Permission requise : clients:read »
-RESP | GET /api/clients/:clientId/equipements | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-RESP | GET /api/clients/:clientId/equipements | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-RESP | GET /api/clients/:clientId/equipements | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+RESP | GET /api/clients/:clientId/equipements | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP | GET /api/clients/:clientId/equipements | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP | GET /api/clients/:clientId/equipements | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 RESP | GET /api/clients/:id | client-actif | défaut | 403 « Permission requise : clients:read »
 RESP | GET /api/clients/:id | client-desactive | défaut | 403 « Permission requise : clients:read »
 RESP | GET /api/clients/:id | inexistant | défaut | 403 « Permission requise : clients:read »
@@ -8015,14 +8015,14 @@ RESP | GET /api/comptabilite/comptes/:id/journal | compte-comptable-clients | d�
 RESP | GET /api/comptabilite/comptes/:id/journal | inexistant | défaut | 403 « Accès réservé aux administrateurs »
 RESP | GET /api/comptabilite/regles/journal | — | défaut | 403 « Accès réservé aux administrateurs »
 RESP | GET /api/conducteurs | — | défaut | 200
-RESP | GET /api/contrats-maintenance | — | défaut | 403 « Accès réservé aux administrateurs »
-RESP | GET /api/contrats-maintenance/:id/document.pdf | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-RESP | GET /api/contrats-maintenance/:id/document.pdf | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-RESP | GET /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-RESP | GET /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-RESP | GET /api/contrats-maintenance/:id/journal-saisies | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-RESP | GET /api/contrats-maintenance/:id/journal-saisies | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-RESP | GET /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé aux administrateurs »
+RESP | GET /api/contrats-maintenance | — | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP | GET /api/contrats-maintenance/:id/document.pdf | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP | GET /api/contrats-maintenance/:id/document.pdf | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP | GET /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP | GET /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP | GET /api/contrats-maintenance/:id/journal-saisies | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP | GET /api/contrats-maintenance/:id/journal-saisies | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP | GET /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 RESP | GET /api/devis | — | défaut | 403 « Permission requise : devis:read »
 RESP | GET /api/devis/:id/document.pdf | devis-brouillon | défaut | 403 « Permission requise : devis:read »
 RESP | GET /api/devis/:id/document.pdf | devis-converti | défaut | 403 « Permission requise : devis:read »
@@ -8220,8 +8220,8 @@ RESP | PATCH /api/comptabilite/comptes/:id/activation | compte-comptable-clients
 RESP | PATCH /api/comptabilite/comptes/:id/activation | inexistant | défaut | 403 « Accès réservé aux administrateurs »
 RESP | PATCH /api/contrats-maintenance/:id | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
 RESP | PATCH /api/contrats-maintenance/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-RESP | PATCH /api/contrats-maintenance/:id/statut | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-RESP | PATCH /api/contrats-maintenance/:id/statut | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+RESP | PATCH /api/contrats-maintenance/:id/statut | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP | PATCH /api/contrats-maintenance/:id/statut | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 RESP | PATCH /api/devis/:id | devis-brouillon | défaut | 403 « Permission requise : devis:write »
 RESP | PATCH /api/devis/:id | devis-converti | défaut | 403 « Permission requise : devis:write »
 RESP | PATCH /api/devis/:id | devis-signe | défaut | 403 « Permission requise : devis:write »
@@ -8309,26 +8309,26 @@ RESP | POST /api/chantiers/:id/envois | chantier-resp | défaut | 403 « Accès 
 RESP | POST /api/chantiers/:id/envois | chantier-tech-branche-resp | défaut | 403 « Accès réservé aux administrateurs »
 RESP | POST /api/chantiers/:id/envois | chantier-termine | défaut | 403 « Accès réservé aux administrateurs »
 RESP | POST /api/chantiers/:id/envois | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-RESP | POST /api/clients | — | défaut | 403 « Accès réservé aux administrateurs »
-RESP | POST /api/clients/:clientId/contacts | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-RESP | POST /api/clients/:clientId/contacts | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-RESP | POST /api/clients/:clientId/contacts | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+RESP | POST /api/clients | — | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP | POST /api/clients/:clientId/contacts | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP | POST /api/clients/:clientId/contacts | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP | POST /api/clients/:clientId/contacts | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 RESP | POST /api/clients/:clientId/equipements | client-actif | défaut | 403 « Accès réservé aux administrateurs »
 RESP | POST /api/clients/:clientId/equipements | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
 RESP | POST /api/clients/:clientId/equipements | inexistant | défaut | 403 « Accès réservé aux administrateurs »
 RESP | POST /api/clients/:clientId/equipements/:id/archiver | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-RESP | POST /api/clients/:clientId/sites | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-RESP | POST /api/clients/:clientId/sites | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-RESP | POST /api/clients/:clientId/sites | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+RESP | POST /api/clients/:clientId/sites | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP | POST /api/clients/:clientId/sites | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP | POST /api/clients/:clientId/sites | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 RESP | POST /api/comptabilite/comptes | — | défaut | 403 « Accès réservé aux administrateurs »
 RESP | POST /api/comptabilite/importer | — | défaut | 403 « Accès réservé aux administrateurs »
 RESP | POST /api/contrats-maintenance | — | défaut | 403 « Accès réservé aux administrateurs »
-RESP | POST /api/contrats-maintenance/:id/avancer-echeance | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-RESP | POST /api/contrats-maintenance/:id/avancer-echeance | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-RESP | POST /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-RESP | POST /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-RESP | POST /api/contrats-maintenance/:id/generer-intervention | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-RESP | POST /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé aux administrateurs » inchangé
+RESP | POST /api/contrats-maintenance/:id/avancer-echeance | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP | POST /api/contrats-maintenance/:id/avancer-echeance | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP | POST /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP | POST /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP | POST /api/contrats-maintenance/:id/generer-intervention | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP | POST /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. » inchangé
 RESP | POST /api/devis | — | défaut | 403 « Permission requise : devis:write »
 RESP | POST /api/devis/:id/acompte | devis-brouillon | défaut | 403 « Accès réservé aux administrateurs »
 RESP | POST /api/devis/:id/acompte | devis-converti | défaut | 403 « Accès réservé aux administrateurs »
@@ -8476,15 +8476,15 @@ RESP | PUT /api/catalogue/:family/:id | inexistant | défaut | 403 « Accès ré
 RESP | PUT /api/catalogue/:family/:id | prestation-catalogue | défaut | 403 « Accès réservé aux administrateurs »
 RESP | PUT /api/categories/:id | categorie | défaut | 200
 RESP | PUT /api/categories/:id | inexistant | défaut | 500 « Error updating categorie »
-RESP | PUT /api/clients/:clientId/contacts/:id | contact-autre-client | défaut | 403 « Accès réservé aux administrateurs »
-RESP | PUT /api/clients/:clientId/contacts/:id | contact-client-actif | défaut | 403 « Accès réservé aux administrateurs »
-RESP | PUT /api/clients/:clientId/contacts/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-RESP | PUT /api/clients/:clientId/sites/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-RESP | PUT /api/clients/:clientId/sites/:id | site-autre-client | défaut | 403 « Accès réservé aux administrateurs »
-RESP | PUT /api/clients/:clientId/sites/:id | site-client-actif | défaut | 403 « Accès réservé aux administrateurs »
-RESP | PUT /api/clients/:id | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-RESP | PUT /api/clients/:id | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-RESP | PUT /api/clients/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+RESP | PUT /api/clients/:clientId/contacts/:id | contact-autre-client | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP | PUT /api/clients/:clientId/contacts/:id | contact-client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP | PUT /api/clients/:clientId/contacts/:id | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP | PUT /api/clients/:clientId/sites/:id | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP | PUT /api/clients/:clientId/sites/:id | site-autre-client | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP | PUT /api/clients/:clientId/sites/:id | site-client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP | PUT /api/clients/:id | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP | PUT /api/clients/:id | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP | PUT /api/clients/:id | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 RESP | PUT /api/commerciaux/:id/prime-mensuelle | compte-administrateur | défaut | 403 « Accès réservé aux administrateurs »
 RESP | PUT /api/commerciaux/:id/prime-mensuelle | compte-commercial | défaut | 403 « Accès réservé aux administrateurs »
 RESP | PUT /api/commerciaux/:id/prime-mensuelle | compte-superadmin | défaut | 403 « Accès réservé aux administrateurs »
@@ -8578,7 +8578,7 @@ RESP-SANS-BRANCHE | DELETE /api/chantiers/:id | chantier-resp | défaut | 403 «
 RESP-SANS-BRANCHE | DELETE /api/chantiers/:id | chantier-tech-branche-resp | défaut | 403 « Accès réservé aux administrateurs »
 RESP-SANS-BRANCHE | DELETE /api/chantiers/:id | chantier-termine | défaut | 403 « Accès réservé aux administrateurs »
 RESP-SANS-BRANCHE | DELETE /api/chantiers/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-RESP-SANS-BRANCHE | DELETE /api/clients/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+RESP-SANS-BRANCHE | DELETE /api/clients/:id | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 RESP-SANS-BRANCHE | DELETE /api/company/logo | — | défaut | 403 « Accès réservé au super administrateur » inchangé
 RESP-SANS-BRANCHE | DELETE /api/comptabilite/regles/:cle | cle=CLIENT | défaut | 403 « Accès réservé aux administrateurs »
 RESP-SANS-BRANCHE | DELETE /api/comptabilite/tva/:taux | taux=20 | défaut | 403 « Accès réservé aux administrateurs »
@@ -8663,9 +8663,9 @@ RESP-SANS-BRANCHE | GET /api/chantiers/:id/journal-saisies | chantier-tech-branc
 RESP-SANS-BRANCHE | GET /api/chantiers/:id/journal-saisies | chantier-termine | défaut | 404 « Chantier introuvable »
 RESP-SANS-BRANCHE | GET /api/chantiers/:id/journal-saisies | inexistant | défaut | 404 « Chantier introuvable »
 RESP-SANS-BRANCHE | GET /api/clients | — | défaut | 403 « Permission requise : clients:read »
-RESP-SANS-BRANCHE | GET /api/clients/:clientId/equipements | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-RESP-SANS-BRANCHE | GET /api/clients/:clientId/equipements | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-RESP-SANS-BRANCHE | GET /api/clients/:clientId/equipements | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+RESP-SANS-BRANCHE | GET /api/clients/:clientId/equipements | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP-SANS-BRANCHE | GET /api/clients/:clientId/equipements | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP-SANS-BRANCHE | GET /api/clients/:clientId/equipements | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 RESP-SANS-BRANCHE | GET /api/clients/:id | client-actif | défaut | 403 « Permission requise : clients:read »
 RESP-SANS-BRANCHE | GET /api/clients/:id | client-desactive | défaut | 403 « Permission requise : clients:read »
 RESP-SANS-BRANCHE | GET /api/clients/:id | inexistant | défaut | 403 « Permission requise : clients:read »
@@ -8680,14 +8680,14 @@ RESP-SANS-BRANCHE | GET /api/comptabilite/comptes/:id/journal | compte-comptable
 RESP-SANS-BRANCHE | GET /api/comptabilite/comptes/:id/journal | inexistant | défaut | 403 « Accès réservé aux administrateurs »
 RESP-SANS-BRANCHE | GET /api/comptabilite/regles/journal | — | défaut | 403 « Accès réservé aux administrateurs »
 RESP-SANS-BRANCHE | GET /api/conducteurs | — | défaut | 200
-RESP-SANS-BRANCHE | GET /api/contrats-maintenance | — | défaut | 403 « Accès réservé aux administrateurs »
-RESP-SANS-BRANCHE | GET /api/contrats-maintenance/:id/document.pdf | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-RESP-SANS-BRANCHE | GET /api/contrats-maintenance/:id/document.pdf | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-RESP-SANS-BRANCHE | GET /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-RESP-SANS-BRANCHE | GET /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-RESP-SANS-BRANCHE | GET /api/contrats-maintenance/:id/journal-saisies | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-RESP-SANS-BRANCHE | GET /api/contrats-maintenance/:id/journal-saisies | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-RESP-SANS-BRANCHE | GET /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé aux administrateurs »
+RESP-SANS-BRANCHE | GET /api/contrats-maintenance | — | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP-SANS-BRANCHE | GET /api/contrats-maintenance/:id/document.pdf | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP-SANS-BRANCHE | GET /api/contrats-maintenance/:id/document.pdf | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP-SANS-BRANCHE | GET /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP-SANS-BRANCHE | GET /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP-SANS-BRANCHE | GET /api/contrats-maintenance/:id/journal-saisies | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP-SANS-BRANCHE | GET /api/contrats-maintenance/:id/journal-saisies | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP-SANS-BRANCHE | GET /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 RESP-SANS-BRANCHE | GET /api/devis | — | défaut | 403 « Permission requise : devis:read »
 RESP-SANS-BRANCHE | GET /api/devis/:id/document.pdf | devis-brouillon | défaut | 403 « Permission requise : devis:read »
 RESP-SANS-BRANCHE | GET /api/devis/:id/document.pdf | devis-converti | défaut | 403 « Permission requise : devis:read »
@@ -8885,8 +8885,8 @@ RESP-SANS-BRANCHE | PATCH /api/comptabilite/comptes/:id/activation | compte-comp
 RESP-SANS-BRANCHE | PATCH /api/comptabilite/comptes/:id/activation | inexistant | défaut | 403 « Accès réservé aux administrateurs »
 RESP-SANS-BRANCHE | PATCH /api/contrats-maintenance/:id | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
 RESP-SANS-BRANCHE | PATCH /api/contrats-maintenance/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-RESP-SANS-BRANCHE | PATCH /api/contrats-maintenance/:id/statut | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-RESP-SANS-BRANCHE | PATCH /api/contrats-maintenance/:id/statut | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+RESP-SANS-BRANCHE | PATCH /api/contrats-maintenance/:id/statut | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP-SANS-BRANCHE | PATCH /api/contrats-maintenance/:id/statut | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 RESP-SANS-BRANCHE | PATCH /api/devis/:id | devis-brouillon | défaut | 403 « Permission requise : devis:write »
 RESP-SANS-BRANCHE | PATCH /api/devis/:id | devis-converti | défaut | 403 « Permission requise : devis:write »
 RESP-SANS-BRANCHE | PATCH /api/devis/:id | devis-signe | défaut | 403 « Permission requise : devis:write »
@@ -8974,26 +8974,26 @@ RESP-SANS-BRANCHE | POST /api/chantiers/:id/envois | chantier-resp | défaut | 4
 RESP-SANS-BRANCHE | POST /api/chantiers/:id/envois | chantier-tech-branche-resp | défaut | 403 « Accès réservé aux administrateurs »
 RESP-SANS-BRANCHE | POST /api/chantiers/:id/envois | chantier-termine | défaut | 403 « Accès réservé aux administrateurs »
 RESP-SANS-BRANCHE | POST /api/chantiers/:id/envois | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-RESP-SANS-BRANCHE | POST /api/clients | — | défaut | 403 « Accès réservé aux administrateurs »
-RESP-SANS-BRANCHE | POST /api/clients/:clientId/contacts | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-RESP-SANS-BRANCHE | POST /api/clients/:clientId/contacts | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-RESP-SANS-BRANCHE | POST /api/clients/:clientId/contacts | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+RESP-SANS-BRANCHE | POST /api/clients | — | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP-SANS-BRANCHE | POST /api/clients/:clientId/contacts | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP-SANS-BRANCHE | POST /api/clients/:clientId/contacts | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP-SANS-BRANCHE | POST /api/clients/:clientId/contacts | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 RESP-SANS-BRANCHE | POST /api/clients/:clientId/equipements | client-actif | défaut | 403 « Accès réservé aux administrateurs »
 RESP-SANS-BRANCHE | POST /api/clients/:clientId/equipements | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
 RESP-SANS-BRANCHE | POST /api/clients/:clientId/equipements | inexistant | défaut | 403 « Accès réservé aux administrateurs »
 RESP-SANS-BRANCHE | POST /api/clients/:clientId/equipements/:id/archiver | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-RESP-SANS-BRANCHE | POST /api/clients/:clientId/sites | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-RESP-SANS-BRANCHE | POST /api/clients/:clientId/sites | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-RESP-SANS-BRANCHE | POST /api/clients/:clientId/sites | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+RESP-SANS-BRANCHE | POST /api/clients/:clientId/sites | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP-SANS-BRANCHE | POST /api/clients/:clientId/sites | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP-SANS-BRANCHE | POST /api/clients/:clientId/sites | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 RESP-SANS-BRANCHE | POST /api/comptabilite/comptes | — | défaut | 403 « Accès réservé aux administrateurs »
 RESP-SANS-BRANCHE | POST /api/comptabilite/importer | — | défaut | 403 « Accès réservé aux administrateurs »
 RESP-SANS-BRANCHE | POST /api/contrats-maintenance | — | défaut | 403 « Accès réservé aux administrateurs »
-RESP-SANS-BRANCHE | POST /api/contrats-maintenance/:id/avancer-echeance | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-RESP-SANS-BRANCHE | POST /api/contrats-maintenance/:id/avancer-echeance | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-RESP-SANS-BRANCHE | POST /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-RESP-SANS-BRANCHE | POST /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-RESP-SANS-BRANCHE | POST /api/contrats-maintenance/:id/generer-intervention | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-RESP-SANS-BRANCHE | POST /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé aux administrateurs » inchangé
+RESP-SANS-BRANCHE | POST /api/contrats-maintenance/:id/avancer-echeance | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP-SANS-BRANCHE | POST /api/contrats-maintenance/:id/avancer-echeance | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP-SANS-BRANCHE | POST /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP-SANS-BRANCHE | POST /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP-SANS-BRANCHE | POST /api/contrats-maintenance/:id/generer-intervention | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP-SANS-BRANCHE | POST /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. » inchangé
 RESP-SANS-BRANCHE | POST /api/devis | — | défaut | 403 « Permission requise : devis:write »
 RESP-SANS-BRANCHE | POST /api/devis/:id/acompte | devis-brouillon | défaut | 403 « Accès réservé aux administrateurs »
 RESP-SANS-BRANCHE | POST /api/devis/:id/acompte | devis-converti | défaut | 403 « Accès réservé aux administrateurs »
@@ -9141,15 +9141,15 @@ RESP-SANS-BRANCHE | PUT /api/catalogue/:family/:id | inexistant | défaut | 403 
 RESP-SANS-BRANCHE | PUT /api/catalogue/:family/:id | prestation-catalogue | défaut | 403 « Accès réservé aux administrateurs »
 RESP-SANS-BRANCHE | PUT /api/categories/:id | categorie | défaut | 200
 RESP-SANS-BRANCHE | PUT /api/categories/:id | inexistant | défaut | 500 « Error updating categorie »
-RESP-SANS-BRANCHE | PUT /api/clients/:clientId/contacts/:id | contact-autre-client | défaut | 403 « Accès réservé aux administrateurs »
-RESP-SANS-BRANCHE | PUT /api/clients/:clientId/contacts/:id | contact-client-actif | défaut | 403 « Accès réservé aux administrateurs »
-RESP-SANS-BRANCHE | PUT /api/clients/:clientId/contacts/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-RESP-SANS-BRANCHE | PUT /api/clients/:clientId/sites/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-RESP-SANS-BRANCHE | PUT /api/clients/:clientId/sites/:id | site-autre-client | défaut | 403 « Accès réservé aux administrateurs »
-RESP-SANS-BRANCHE | PUT /api/clients/:clientId/sites/:id | site-client-actif | défaut | 403 « Accès réservé aux administrateurs »
-RESP-SANS-BRANCHE | PUT /api/clients/:id | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-RESP-SANS-BRANCHE | PUT /api/clients/:id | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-RESP-SANS-BRANCHE | PUT /api/clients/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+RESP-SANS-BRANCHE | PUT /api/clients/:clientId/contacts/:id | contact-autre-client | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP-SANS-BRANCHE | PUT /api/clients/:clientId/contacts/:id | contact-client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP-SANS-BRANCHE | PUT /api/clients/:clientId/contacts/:id | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP-SANS-BRANCHE | PUT /api/clients/:clientId/sites/:id | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP-SANS-BRANCHE | PUT /api/clients/:clientId/sites/:id | site-autre-client | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP-SANS-BRANCHE | PUT /api/clients/:clientId/sites/:id | site-client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP-SANS-BRANCHE | PUT /api/clients/:id | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP-SANS-BRANCHE | PUT /api/clients/:id | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+RESP-SANS-BRANCHE | PUT /api/clients/:id | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 RESP-SANS-BRANCHE | PUT /api/commerciaux/:id/prime-mensuelle | compte-administrateur | défaut | 403 « Accès réservé aux administrateurs »
 RESP-SANS-BRANCHE | PUT /api/commerciaux/:id/prime-mensuelle | compte-commercial | défaut | 403 « Accès réservé aux administrateurs »
 RESP-SANS-BRANCHE | PUT /api/commerciaux/:id/prime-mensuelle | compte-superadmin | défaut | 403 « Accès réservé aux administrateurs »
@@ -10290,7 +10290,7 @@ TECH | DELETE /api/chantiers/:id | chantier-resp | défaut | 403 « Accès rése
 TECH | DELETE /api/chantiers/:id | chantier-tech-branche-resp | défaut | 403 « Accès réservé aux administrateurs »
 TECH | DELETE /api/chantiers/:id | chantier-termine | défaut | 403 « Accès réservé aux administrateurs »
 TECH | DELETE /api/chantiers/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-TECH | DELETE /api/clients/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+TECH | DELETE /api/clients/:id | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 TECH | DELETE /api/company/logo | — | défaut | 403 « Accès réservé au super administrateur » inchangé
 TECH | DELETE /api/comptabilite/regles/:cle | cle=CLIENT | défaut | 403 « Accès réservé aux administrateurs »
 TECH | DELETE /api/comptabilite/tva/:taux | taux=20 | défaut | 403 « Accès réservé aux administrateurs »
@@ -10375,9 +10375,9 @@ TECH | GET /api/chantiers/:id/journal-saisies | chantier-tech-branche-resp | dé
 TECH | GET /api/chantiers/:id/journal-saisies | chantier-termine | défaut | 404 « Chantier introuvable »
 TECH | GET /api/chantiers/:id/journal-saisies | inexistant | défaut | 404 « Chantier introuvable »
 TECH | GET /api/clients | — | défaut | 200
-TECH | GET /api/clients/:clientId/equipements | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-TECH | GET /api/clients/:clientId/equipements | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-TECH | GET /api/clients/:clientId/equipements | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+TECH | GET /api/clients/:clientId/equipements | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH | GET /api/clients/:clientId/equipements | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH | GET /api/clients/:clientId/equipements | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 TECH | GET /api/clients/:id | client-actif | défaut | 200
 TECH | GET /api/clients/:id | client-desactive | défaut | 404 « Client introuvable. »
 TECH | GET /api/clients/:id | inexistant | défaut | 404 « Client introuvable. »
@@ -10392,14 +10392,14 @@ TECH | GET /api/comptabilite/comptes/:id/journal | compte-comptable-clients | d�
 TECH | GET /api/comptabilite/comptes/:id/journal | inexistant | défaut | 403 « Accès réservé aux administrateurs »
 TECH | GET /api/comptabilite/regles/journal | — | défaut | 403 « Accès réservé aux administrateurs »
 TECH | GET /api/conducteurs | — | défaut | 200
-TECH | GET /api/contrats-maintenance | — | défaut | 403 « Accès réservé aux administrateurs »
-TECH | GET /api/contrats-maintenance/:id/document.pdf | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-TECH | GET /api/contrats-maintenance/:id/document.pdf | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-TECH | GET /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-TECH | GET /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-TECH | GET /api/contrats-maintenance/:id/journal-saisies | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-TECH | GET /api/contrats-maintenance/:id/journal-saisies | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-TECH | GET /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé aux administrateurs »
+TECH | GET /api/contrats-maintenance | — | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH | GET /api/contrats-maintenance/:id/document.pdf | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH | GET /api/contrats-maintenance/:id/document.pdf | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH | GET /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH | GET /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH | GET /api/contrats-maintenance/:id/journal-saisies | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH | GET /api/contrats-maintenance/:id/journal-saisies | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH | GET /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 TECH | GET /api/devis | — | défaut | 403 « Permission requise : devis:read »
 TECH | GET /api/devis/:id/document.pdf | devis-brouillon | défaut | 403 « Permission requise : devis:read »
 TECH | GET /api/devis/:id/document.pdf | devis-converti | défaut | 403 « Permission requise : devis:read »
@@ -10597,8 +10597,8 @@ TECH | PATCH /api/comptabilite/comptes/:id/activation | compte-comptable-clients
 TECH | PATCH /api/comptabilite/comptes/:id/activation | inexistant | défaut | 403 « Accès réservé aux administrateurs »
 TECH | PATCH /api/contrats-maintenance/:id | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
 TECH | PATCH /api/contrats-maintenance/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-TECH | PATCH /api/contrats-maintenance/:id/statut | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-TECH | PATCH /api/contrats-maintenance/:id/statut | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+TECH | PATCH /api/contrats-maintenance/:id/statut | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH | PATCH /api/contrats-maintenance/:id/statut | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 TECH | PATCH /api/devis/:id | devis-brouillon | défaut | 403 « Permission requise : devis:write »
 TECH | PATCH /api/devis/:id | devis-converti | défaut | 403 « Permission requise : devis:write »
 TECH | PATCH /api/devis/:id | devis-signe | défaut | 403 « Permission requise : devis:write »
@@ -10686,26 +10686,26 @@ TECH | POST /api/chantiers/:id/envois | chantier-resp | défaut | 403 « Accès 
 TECH | POST /api/chantiers/:id/envois | chantier-tech-branche-resp | défaut | 403 « Accès réservé aux administrateurs »
 TECH | POST /api/chantiers/:id/envois | chantier-termine | défaut | 403 « Accès réservé aux administrateurs »
 TECH | POST /api/chantiers/:id/envois | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-TECH | POST /api/clients | — | défaut | 403 « Accès réservé aux administrateurs »
-TECH | POST /api/clients/:clientId/contacts | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-TECH | POST /api/clients/:clientId/contacts | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-TECH | POST /api/clients/:clientId/contacts | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+TECH | POST /api/clients | — | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH | POST /api/clients/:clientId/contacts | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH | POST /api/clients/:clientId/contacts | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH | POST /api/clients/:clientId/contacts | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 TECH | POST /api/clients/:clientId/equipements | client-actif | défaut | 403 « Accès réservé aux administrateurs »
 TECH | POST /api/clients/:clientId/equipements | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
 TECH | POST /api/clients/:clientId/equipements | inexistant | défaut | 403 « Accès réservé aux administrateurs »
 TECH | POST /api/clients/:clientId/equipements/:id/archiver | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-TECH | POST /api/clients/:clientId/sites | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-TECH | POST /api/clients/:clientId/sites | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-TECH | POST /api/clients/:clientId/sites | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+TECH | POST /api/clients/:clientId/sites | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH | POST /api/clients/:clientId/sites | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH | POST /api/clients/:clientId/sites | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 TECH | POST /api/comptabilite/comptes | — | défaut | 403 « Accès réservé aux administrateurs »
 TECH | POST /api/comptabilite/importer | — | défaut | 403 « Accès réservé aux administrateurs »
 TECH | POST /api/contrats-maintenance | — | défaut | 403 « Accès réservé aux administrateurs »
-TECH | POST /api/contrats-maintenance/:id/avancer-echeance | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-TECH | POST /api/contrats-maintenance/:id/avancer-echeance | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-TECH | POST /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-TECH | POST /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-TECH | POST /api/contrats-maintenance/:id/generer-intervention | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-TECH | POST /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé aux administrateurs » inchangé
+TECH | POST /api/contrats-maintenance/:id/avancer-echeance | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH | POST /api/contrats-maintenance/:id/avancer-echeance | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH | POST /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH | POST /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH | POST /api/contrats-maintenance/:id/generer-intervention | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH | POST /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. » inchangé
 TECH | POST /api/devis | — | défaut | 403 « Permission requise : devis:write »
 TECH | POST /api/devis/:id/acompte | devis-brouillon | défaut | 403 « Accès réservé aux administrateurs »
 TECH | POST /api/devis/:id/acompte | devis-converti | défaut | 403 « Accès réservé aux administrateurs »
@@ -10853,15 +10853,15 @@ TECH | PUT /api/catalogue/:family/:id | inexistant | défaut | 403 « Accès ré
 TECH | PUT /api/catalogue/:family/:id | prestation-catalogue | défaut | 403 « Accès réservé aux administrateurs »
 TECH | PUT /api/categories/:id | categorie | défaut | 403 « Un technicien ne modifie ni le planning ni les référentiels. »
 TECH | PUT /api/categories/:id | inexistant | défaut | 403 « Un technicien ne modifie ni le planning ni les référentiels. »
-TECH | PUT /api/clients/:clientId/contacts/:id | contact-autre-client | défaut | 403 « Accès réservé aux administrateurs »
-TECH | PUT /api/clients/:clientId/contacts/:id | contact-client-actif | défaut | 403 « Accès réservé aux administrateurs »
-TECH | PUT /api/clients/:clientId/contacts/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-TECH | PUT /api/clients/:clientId/sites/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-TECH | PUT /api/clients/:clientId/sites/:id | site-autre-client | défaut | 403 « Accès réservé aux administrateurs »
-TECH | PUT /api/clients/:clientId/sites/:id | site-client-actif | défaut | 403 « Accès réservé aux administrateurs »
-TECH | PUT /api/clients/:id | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-TECH | PUT /api/clients/:id | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-TECH | PUT /api/clients/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+TECH | PUT /api/clients/:clientId/contacts/:id | contact-autre-client | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH | PUT /api/clients/:clientId/contacts/:id | contact-client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH | PUT /api/clients/:clientId/contacts/:id | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH | PUT /api/clients/:clientId/sites/:id | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH | PUT /api/clients/:clientId/sites/:id | site-autre-client | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH | PUT /api/clients/:clientId/sites/:id | site-client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH | PUT /api/clients/:id | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH | PUT /api/clients/:id | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH | PUT /api/clients/:id | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 TECH | PUT /api/commerciaux/:id/prime-mensuelle | compte-administrateur | défaut | 403 « Accès réservé aux administrateurs »
 TECH | PUT /api/commerciaux/:id/prime-mensuelle | compte-commercial | défaut | 403 « Accès réservé aux administrateurs »
 TECH | PUT /api/commerciaux/:id/prime-mensuelle | compte-superadmin | défaut | 403 « Accès réservé aux administrateurs »
@@ -10955,7 +10955,7 @@ TECH-SANS-FICHE | DELETE /api/chantiers/:id | chantier-resp | défaut | 403 « A
 TECH-SANS-FICHE | DELETE /api/chantiers/:id | chantier-tech-branche-resp | défaut | 403 « Accès réservé aux administrateurs »
 TECH-SANS-FICHE | DELETE /api/chantiers/:id | chantier-termine | défaut | 403 « Accès réservé aux administrateurs »
 TECH-SANS-FICHE | DELETE /api/chantiers/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-TECH-SANS-FICHE | DELETE /api/clients/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+TECH-SANS-FICHE | DELETE /api/clients/:id | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 TECH-SANS-FICHE | DELETE /api/company/logo | — | défaut | 403 « Accès réservé au super administrateur » inchangé
 TECH-SANS-FICHE | DELETE /api/comptabilite/regles/:cle | cle=CLIENT | défaut | 403 « Accès réservé aux administrateurs »
 TECH-SANS-FICHE | DELETE /api/comptabilite/tva/:taux | taux=20 | défaut | 403 « Accès réservé aux administrateurs »
@@ -11040,9 +11040,9 @@ TECH-SANS-FICHE | GET /api/chantiers/:id/journal-saisies | chantier-tech-branche
 TECH-SANS-FICHE | GET /api/chantiers/:id/journal-saisies | chantier-termine | défaut | 404 « Chantier introuvable »
 TECH-SANS-FICHE | GET /api/chantiers/:id/journal-saisies | inexistant | défaut | 404 « Chantier introuvable »
 TECH-SANS-FICHE | GET /api/clients | — | défaut | 200
-TECH-SANS-FICHE | GET /api/clients/:clientId/equipements | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-TECH-SANS-FICHE | GET /api/clients/:clientId/equipements | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-TECH-SANS-FICHE | GET /api/clients/:clientId/equipements | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+TECH-SANS-FICHE | GET /api/clients/:clientId/equipements | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH-SANS-FICHE | GET /api/clients/:clientId/equipements | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH-SANS-FICHE | GET /api/clients/:clientId/equipements | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 TECH-SANS-FICHE | GET /api/clients/:id | client-actif | défaut | 200
 TECH-SANS-FICHE | GET /api/clients/:id | client-desactive | défaut | 404 « Client introuvable. »
 TECH-SANS-FICHE | GET /api/clients/:id | inexistant | défaut | 404 « Client introuvable. »
@@ -11057,14 +11057,14 @@ TECH-SANS-FICHE | GET /api/comptabilite/comptes/:id/journal | compte-comptable-c
 TECH-SANS-FICHE | GET /api/comptabilite/comptes/:id/journal | inexistant | défaut | 403 « Accès réservé aux administrateurs »
 TECH-SANS-FICHE | GET /api/comptabilite/regles/journal | — | défaut | 403 « Accès réservé aux administrateurs »
 TECH-SANS-FICHE | GET /api/conducteurs | — | défaut | 200
-TECH-SANS-FICHE | GET /api/contrats-maintenance | — | défaut | 403 « Accès réservé aux administrateurs »
-TECH-SANS-FICHE | GET /api/contrats-maintenance/:id/document.pdf | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-TECH-SANS-FICHE | GET /api/contrats-maintenance/:id/document.pdf | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-TECH-SANS-FICHE | GET /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-TECH-SANS-FICHE | GET /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-TECH-SANS-FICHE | GET /api/contrats-maintenance/:id/journal-saisies | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-TECH-SANS-FICHE | GET /api/contrats-maintenance/:id/journal-saisies | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-TECH-SANS-FICHE | GET /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé aux administrateurs »
+TECH-SANS-FICHE | GET /api/contrats-maintenance | — | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH-SANS-FICHE | GET /api/contrats-maintenance/:id/document.pdf | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH-SANS-FICHE | GET /api/contrats-maintenance/:id/document.pdf | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH-SANS-FICHE | GET /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH-SANS-FICHE | GET /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH-SANS-FICHE | GET /api/contrats-maintenance/:id/journal-saisies | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH-SANS-FICHE | GET /api/contrats-maintenance/:id/journal-saisies | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH-SANS-FICHE | GET /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 TECH-SANS-FICHE | GET /api/devis | — | défaut | 403 « Permission requise : devis:read »
 TECH-SANS-FICHE | GET /api/devis/:id/document.pdf | devis-brouillon | défaut | 403 « Permission requise : devis:read »
 TECH-SANS-FICHE | GET /api/devis/:id/document.pdf | devis-converti | défaut | 403 « Permission requise : devis:read »
@@ -11262,8 +11262,8 @@ TECH-SANS-FICHE | PATCH /api/comptabilite/comptes/:id/activation | compte-compta
 TECH-SANS-FICHE | PATCH /api/comptabilite/comptes/:id/activation | inexistant | défaut | 403 « Accès réservé aux administrateurs »
 TECH-SANS-FICHE | PATCH /api/contrats-maintenance/:id | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
 TECH-SANS-FICHE | PATCH /api/contrats-maintenance/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-TECH-SANS-FICHE | PATCH /api/contrats-maintenance/:id/statut | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-TECH-SANS-FICHE | PATCH /api/contrats-maintenance/:id/statut | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+TECH-SANS-FICHE | PATCH /api/contrats-maintenance/:id/statut | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH-SANS-FICHE | PATCH /api/contrats-maintenance/:id/statut | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 TECH-SANS-FICHE | PATCH /api/devis/:id | devis-brouillon | défaut | 403 « Permission requise : devis:write »
 TECH-SANS-FICHE | PATCH /api/devis/:id | devis-converti | défaut | 403 « Permission requise : devis:write »
 TECH-SANS-FICHE | PATCH /api/devis/:id | devis-signe | défaut | 403 « Permission requise : devis:write »
@@ -11351,26 +11351,26 @@ TECH-SANS-FICHE | POST /api/chantiers/:id/envois | chantier-resp | défaut | 403
 TECH-SANS-FICHE | POST /api/chantiers/:id/envois | chantier-tech-branche-resp | défaut | 403 « Accès réservé aux administrateurs »
 TECH-SANS-FICHE | POST /api/chantiers/:id/envois | chantier-termine | défaut | 403 « Accès réservé aux administrateurs »
 TECH-SANS-FICHE | POST /api/chantiers/:id/envois | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-TECH-SANS-FICHE | POST /api/clients | — | défaut | 403 « Accès réservé aux administrateurs »
-TECH-SANS-FICHE | POST /api/clients/:clientId/contacts | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-TECH-SANS-FICHE | POST /api/clients/:clientId/contacts | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-TECH-SANS-FICHE | POST /api/clients/:clientId/contacts | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+TECH-SANS-FICHE | POST /api/clients | — | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH-SANS-FICHE | POST /api/clients/:clientId/contacts | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH-SANS-FICHE | POST /api/clients/:clientId/contacts | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH-SANS-FICHE | POST /api/clients/:clientId/contacts | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 TECH-SANS-FICHE | POST /api/clients/:clientId/equipements | client-actif | défaut | 403 « Accès réservé aux administrateurs »
 TECH-SANS-FICHE | POST /api/clients/:clientId/equipements | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
 TECH-SANS-FICHE | POST /api/clients/:clientId/equipements | inexistant | défaut | 403 « Accès réservé aux administrateurs »
 TECH-SANS-FICHE | POST /api/clients/:clientId/equipements/:id/archiver | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-TECH-SANS-FICHE | POST /api/clients/:clientId/sites | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-TECH-SANS-FICHE | POST /api/clients/:clientId/sites | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-TECH-SANS-FICHE | POST /api/clients/:clientId/sites | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+TECH-SANS-FICHE | POST /api/clients/:clientId/sites | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH-SANS-FICHE | POST /api/clients/:clientId/sites | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH-SANS-FICHE | POST /api/clients/:clientId/sites | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 TECH-SANS-FICHE | POST /api/comptabilite/comptes | — | défaut | 403 « Accès réservé aux administrateurs »
 TECH-SANS-FICHE | POST /api/comptabilite/importer | — | défaut | 403 « Accès réservé aux administrateurs »
 TECH-SANS-FICHE | POST /api/contrats-maintenance | — | défaut | 403 « Accès réservé aux administrateurs »
-TECH-SANS-FICHE | POST /api/contrats-maintenance/:id/avancer-echeance | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-TECH-SANS-FICHE | POST /api/contrats-maintenance/:id/avancer-echeance | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-TECH-SANS-FICHE | POST /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé aux administrateurs »
-TECH-SANS-FICHE | POST /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-TECH-SANS-FICHE | POST /api/contrats-maintenance/:id/generer-intervention | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-TECH-SANS-FICHE | POST /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé aux administrateurs » inchangé
+TECH-SANS-FICHE | POST /api/contrats-maintenance/:id/avancer-echeance | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH-SANS-FICHE | POST /api/contrats-maintenance/:id/avancer-echeance | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH-SANS-FICHE | POST /api/contrats-maintenance/:id/envois | contrat-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH-SANS-FICHE | POST /api/contrats-maintenance/:id/envois | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH-SANS-FICHE | POST /api/contrats-maintenance/:id/generer-intervention | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH-SANS-FICHE | POST /api/contrats-maintenance/generation-visites | — | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. » inchangé
 TECH-SANS-FICHE | POST /api/devis | — | défaut | 403 « Permission requise : devis:write »
 TECH-SANS-FICHE | POST /api/devis/:id/acompte | devis-brouillon | défaut | 403 « Accès réservé aux administrateurs »
 TECH-SANS-FICHE | POST /api/devis/:id/acompte | devis-converti | défaut | 403 « Accès réservé aux administrateurs »
@@ -11518,15 +11518,15 @@ TECH-SANS-FICHE | PUT /api/catalogue/:family/:id | inexistant | défaut | 403 «
 TECH-SANS-FICHE | PUT /api/catalogue/:family/:id | prestation-catalogue | défaut | 403 « Accès réservé aux administrateurs »
 TECH-SANS-FICHE | PUT /api/categories/:id | categorie | défaut | 403 « Un technicien ne modifie ni le planning ni les référentiels. »
 TECH-SANS-FICHE | PUT /api/categories/:id | inexistant | défaut | 403 « Un technicien ne modifie ni le planning ni les référentiels. »
-TECH-SANS-FICHE | PUT /api/clients/:clientId/contacts/:id | contact-autre-client | défaut | 403 « Accès réservé aux administrateurs »
-TECH-SANS-FICHE | PUT /api/clients/:clientId/contacts/:id | contact-client-actif | défaut | 403 « Accès réservé aux administrateurs »
-TECH-SANS-FICHE | PUT /api/clients/:clientId/contacts/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-TECH-SANS-FICHE | PUT /api/clients/:clientId/sites/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
-TECH-SANS-FICHE | PUT /api/clients/:clientId/sites/:id | site-autre-client | défaut | 403 « Accès réservé aux administrateurs »
-TECH-SANS-FICHE | PUT /api/clients/:clientId/sites/:id | site-client-actif | défaut | 403 « Accès réservé aux administrateurs »
-TECH-SANS-FICHE | PUT /api/clients/:id | client-actif | défaut | 403 « Accès réservé aux administrateurs »
-TECH-SANS-FICHE | PUT /api/clients/:id | client-desactive | défaut | 403 « Accès réservé aux administrateurs »
-TECH-SANS-FICHE | PUT /api/clients/:id | inexistant | défaut | 403 « Accès réservé aux administrateurs »
+TECH-SANS-FICHE | PUT /api/clients/:clientId/contacts/:id | contact-autre-client | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH-SANS-FICHE | PUT /api/clients/:clientId/contacts/:id | contact-client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH-SANS-FICHE | PUT /api/clients/:clientId/contacts/:id | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH-SANS-FICHE | PUT /api/clients/:clientId/sites/:id | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH-SANS-FICHE | PUT /api/clients/:clientId/sites/:id | site-autre-client | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH-SANS-FICHE | PUT /api/clients/:clientId/sites/:id | site-client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH-SANS-FICHE | PUT /api/clients/:id | client-actif | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH-SANS-FICHE | PUT /api/clients/:id | client-desactive | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
+TECH-SANS-FICHE | PUT /api/clients/:id | inexistant | défaut | 403 « Accès réservé à l’administration et à l’assistante technique. »
 TECH-SANS-FICHE | PUT /api/commerciaux/:id/prime-mensuelle | compte-administrateur | défaut | 403 « Accès réservé aux administrateurs »
 TECH-SANS-FICHE | PUT /api/commerciaux/:id/prime-mensuelle | compte-commercial | défaut | 403 « Accès réservé aux administrateurs »
 TECH-SANS-FICHE | PUT /api/commerciaux/:id/prime-mensuelle | compte-superadmin | défaut | 403 « Accès réservé aux administrateurs »

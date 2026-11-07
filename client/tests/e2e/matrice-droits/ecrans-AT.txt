@@ -1,7 +1,9 @@
 AT | administration | catégorie | défaut | boutons : Modifier, Supprimer
 AT | administration | fournisseur | défaut | boutons : Modifier, Supprimer
-AT | administration | onglet par défaut | défaut | titre « Administration & Paramétrage » ; boutons : Catégories, Enregistrer, Fournisseurs
-AT | devis | hors lignes | défaut | redirigé vers /
+AT | administration | onglet par défaut | défaut | titre « Administration & Paramétrage » ; boutons : Catégories, Chantiers, Fournisseurs, Ouvrir le chantier (désactivé)
+AT | devis | devis-brouillon | défaut | boutons : Dupliquer, Envoyer le devis <devis-brouillon> version #, Faire signer le client, Marquer envoyé, Modifier, PDF du devis <devis-brouillon> version #
+AT | devis | devis-signe | défaut | boutons : Créer le contrat, Créer l’intervention, Créer une révision, Dupliquer, Envoyer le devis <devis-signe> version #, Ouvrir le chantier, PDF du devis <devis-signe> version #
+AT | devis | hors lignes | défaut | titre « Devis » ; boutons : Actualiser, Ajouter la ligne au jour ou à la demi-journée (désactivé), Ajouter une ligne, Créer le brouillon
 AT | factures | hors lignes | défaut | redirigé vers /
 AT | fiche chantier | chantier-annule | défaut | titre « Écrans annulé <s> » ; boutons : Rapport interne (PDF), Retour au tableau de bord
 AT | fiche chantier | chantier-en-cours | défaut | titre « Écrans en cours <s> » ; boutons : Rapport interne (PDF), Retour au tableau de bord
@@ -30,8 +32,8 @@ AT | route /clients | — | défaut | menu « Référentiels › Clients » ; ac
 AT | route /clients/:id | client | défaut | hors menu ; accessible
 AT | route /commerciaux | — | défaut | hors menu ; redirigée vers /
 AT | route /comptabilite | — | défaut | hors menu ; redirigée vers /
-AT | route /contrats-maintenance | — | défaut | hors menu ; redirigée vers /
-AT | route /devis | — | défaut | hors menu ; redirigée vers /
+AT | route /contrats-maintenance | — | défaut | menu « Interventions › Contrats de maintenance » ; accessible
+AT | route /devis | — | défaut | menu « Chantiers › Devis » ; accessible
 AT | route /factures | — | défaut | hors menu ; redirigée vers /
 AT | route /heures | — | défaut | hors menu ; redirigée vers /
 AT | route /interventions | — | défaut | menu « Interventions › Interventions SAV » ; accessible

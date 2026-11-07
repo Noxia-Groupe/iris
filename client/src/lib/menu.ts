@@ -9,8 +9,8 @@ import {
   HandCoins, KeyRound, Landmark, LayoutDashboard, PieChart, Receipt, Repeat, ScrollText, Settings, ShoppingCart, TrendingUp, Wrench,
 } from 'lucide-react';
 import {
-  isAdminRole, isSuperAdminRole, peutAccederAuxDevis, peutConsulterAnnuaire, peutConsulterPlanning, peutOuvrirAdministration, peutVoirInterventions, peutVoirStatistiques,
-  roleDuCompte, ROLE_COMMERCIAL, ROLE_CONDUCTEUR, ROLE_RESPONSABLE, ROLE_TECHNICIEN, type CurrentUser,
+  gereLesContrats, isAdminRole, isSuperAdminRole, peutAccederAuxDevis, peutConsulterAnnuaire, peutConsulterPlanning, peutOuvrirAdministration, peutVoirInterventions,
+  peutVoirStatistiques, roleDuCompte, ROLE_COMMERCIAL, ROLE_CONDUCTEUR, ROLE_RESPONSABLE, ROLE_TECHNICIEN, type CurrentUser,
 } from './droits';
 
 export interface EntreeMenu {
@@ -52,7 +52,9 @@ export function sectionsMenu(user: CurrentUser | null | undefined, planningActif
     ] },
     { titre: 'Interventions', entrees: [
       { to: '/interventions', libelle: 'Interventions SAV', icone: Wrench, visible: peutVoirInterventions(role) },
-      { to: '/contrats-maintenance', libelle: 'Contrats de maintenance', icone: Repeat, visible: isAdmin },
+      // Contrats de maintenance : l'administration et l'assistante technique (même liste que la route,
+      // ROLES_CONTRATS ; cf. gereLesContrats).
+      { to: '/contrats-maintenance', libelle: 'Contrats de maintenance', icone: Repeat, visible: gereLesContrats(role) },
     ] },
     { titre: 'Facturation', entrees: [
       { to: '/prete-a-facturer', libelle: 'Prêt à facturer', icone: CheckCircle2, visible: isAdmin },
@@ -74,7 +76,8 @@ export function sectionsMenu(user: CurrentUser | null | undefined, planningActif
     { titre: 'Réglages', entrees: [
       // Administration : complète pour les administrateurs, directeur compris, réduite aux
       // référentiels Fournisseurs et Catégories pour les autres comptes qui l'ouvrent, dont le conducteur
-      // de travaux et l'assistante technique (cf. Admin.tsx et peutOuvrirAdministration) ;
+      // de travaux, et, pour l'assistante technique, à ces référentiels et à l'ouverture d'un chantier
+      // (cf. Admin.tsx et peutOuvrirAdministration) ;
       // ni commercial, qui ne paramètre rien, ni technicien (lot pilote 3), ni directeur
       // commercial, assistante commerciale ou comptable (#179).
       { to: '/admin', libelle: 'Administration', icone: Settings, visible: peutOuvrirAdministration(role) },

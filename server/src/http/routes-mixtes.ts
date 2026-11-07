@@ -11,7 +11,8 @@ import { type ApiScope, requireApiKey } from './cles-api';
 // l'interface, ou qu'une correction ne soit faite que d'un côté.
 //
 // `gardes` protège la porte interface. Par défaut requireAdmin, qui convient aux
-// référentiels (clients, catalogue). Les journaux d'achats et d'heures, eux, sont ouverts
+// référentiels (catalogue) ; les écritures des clients passent requireGestionClients (administration et
+// assistante technique). Les journaux d'achats et d'heures, eux, sont ouverts
 // à tous les rôles : ce n'est pas l'accès à la route qui les restreint, mais le périmètre
 // de ce qu'elle renvoie (cf. perimetreChantiers) — passer [] est donc délibéré, pas un
 // oubli. La porte /api/v1 ne prend jamais de garde de rôle : une clé n'en a pas.

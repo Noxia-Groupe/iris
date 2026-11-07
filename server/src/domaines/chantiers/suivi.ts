@@ -220,7 +220,8 @@ export function computeChantierMetrics(chantier: any, params: Parametres, canSee
 // Exception : au technicien, ni budgets par poste, ni coûts, ni taux, ni alertes de
 // dépassement (cf. voitMontantsChantier et chantierSansMontants) ; aux autres comptes non
 // administrateurs, ni taux ni coût de main-d'œuvre (cf. voitCoutMainOeuvre). Le coût matériel prévu,
-// somme des prix d'achat prévus du devis, sort pour qui lit ces prix (cf. voitPrixAchatDevis) et pour qui
+// somme des prix d'achat prévus du devis, sort pour qui lit ces prix (cf. voitCoutPrevuParPrixAchat : hors le
+// directeur et l'assistante technique, pour qui il suit la rentabilité, cf. coutPrevuSuitRentabilite) et pour qui
 // reçoit la rentabilité du chantier, comme le montant vendu (canSeeMarge) : la marge estimée, avec la marge
 // du jour et les heures, le redonnerait par calcul (réponse de Nelson du 30-10-2026, « Ouvrir la lecture »).
 export function serializeChantier(chantier: any, params: Parametres, canSeeMarge: boolean, contexte?: ContexteSuivi, montantsVisibles = true, coutMainOeuvreVisible = true, prixAchatVisible = false) {

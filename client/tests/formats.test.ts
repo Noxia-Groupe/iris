@@ -432,6 +432,10 @@ const FAMILLE_PAR_FICHIER: [string, string][] = [
   ['pages/Devis.tsx', 'forme des documents'],
   ['pages/Catalogue.tsx', 'forme des documents'],
   ['components/AdminReferentiels.tsx', 'centime en devise'],
+  // Lot « Assistante technique », PR AT-2a (cadrage, version 2, C2 ; réponse 8 du 06-11-2026 : catalogue et parc en lecture
+  // seule) : chaque équipement du parc affiche le prix d'achat HT de son modèle à qui le lit, « au format
+  // fmtMontantDocument », comme le prix d'une fiche dans la recherche du catalogue du devis (Devis.tsx, plus haut).
+  ['pages/ClientDetail.tsx', 'forme des documents'],
 ];
 
 test('famille de montant de chaque fichier : celle de son texte d’avant #205 (ou choisie par #499), et elle seule ; tout fichier qui met en forme un montant est lié à la sienne', () => {

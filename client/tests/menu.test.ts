@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { sectionsMenu } from '../src/lib/menu.ts';
 import {
-  estEncadrementSav, estEncadrementSuivi, estExcluDesOperations, isAdminRole, isSuperAdminRole, peutAccederAuxDevis, peutConsulterAnnuaire, peutConsulterPlanning,
-  peutEtreAussiCommercial, peutOuvrirAdministration, peutVoirFinance, peutVoirInterventions, peutVoirStatistiques, roleLabel, ROLES_ANNUAIRE, ROLES_INTERVENTIONS,
-  TYPES_ADMINISTRATION, TYPES_COMPTE,
+  estEncadrementSav, estEncadrementSuivi, estExcluDesOperations, gereLesChantiersEnCours, gereLesClients, gereLesContrats, isAdminRole, isSuperAdminRole,
+  litToutesLesAffaires, peutAccederAuxDevis, peutConsulterAnnuaire, peutConsulterPlanning, peutEtreAussiCommercial, peutOuvrirAdministration, peutVoirFinance,
+  peutVoirInterventions, peutVoirStatistiques, roleLabel, ROLES_ANNUAIRE, ROLES_CONTRATS, ROLES_INTERVENTIONS, TYPES_ADMINISTRATION, TYPES_COMPTE, voitPrixAchatDevis,
 } from '../src/lib/droits.ts';
 
 const liens = (role: string, planningActif = true, permissions: string[] = []) =>
@@ -20,7 +20,8 @@ const liens = (role: string, planningActif = true, permissions: string[] = []) =
 // point 14, « Tout, réglages compris »), hors réglages du super administrateur. Enfin l'assistante technique (lot
 // « Assistante technique », PR AT-1, cadrage v2.1, « Écran ») : interventions SAV, planning, liste des chantiers, clients
 // et administration réduite, sans devis (sauf permission), journaux Travaux, contrats, facturation, statistiques,
-// performances ni catalogue.
+// performances ni catalogue ; puis, avec la PR AT-2a (réponses 3 et 9 de Nelson du 06-11-2026), les contrats de maintenance,
+// comme l'administration (gereLesContrats, ROLES_CONTRATS).
 function attendu(role: string, planningActif: boolean, permissions: string[]) {
   const admin = role === 'ADMIN' || role === 'SUPERADMIN' || role === 'DIRECTEUR';
   const commercial = role === 'COMMERCIAL';
@@ -32,7 +33,7 @@ function attendu(role: string, planningActif: boolean, permissions: string[]) {
     ['/', true], ['/chantiers', true],
     ['/devis', role === 'SUPERADMIN' || permissions.includes('devis:read')],
     ['/interventions', travaux || role === 'TECHNICIEN' || role === 'ASSISTANTE_TECHNIQUE'],
-    ['/contrats-maintenance', admin], ['/prete-a-facturer', admin], ['/factures', admin], ['/reglements', admin], ['/mentions-legales', admin],
+    ['/contrats-maintenance', admin || role === 'ASSISTANTE_TECHNIQUE'], ['/prete-a-facturer', admin], ['/factures', admin], ['/reglements', admin], ['/mentions-legales', admin],
     ['/comptabilite', admin], ['/clients', admin || role === 'TECHNICIEN' || role === 'CONDUCTEUR_TRAVAUX' || role === 'ASSISTANTE_TECHNIQUE'], ['/catalogue', admin],
     ['/achats', travaux], ['/heures', travaux], ['/statistiques', travaux],
     ['/planning', !exclu && !sansPlanning && planningActif], ['/resultat-commercial', commercial],
@@ -228,32 +229,41 @@ test('le directeur commercial, l’assistante commerciale et le comptable n’on
 
 // Lot « Assistante technique », PR AT-1 (cadrage v2.1, « Écran » et « Fermé à AT-1 » ; décisions de Nelson du 24-10-2026,
 // points 15, 16, 18 et 28, réponse 7 du 06-11-2026). Menu : Interventions SAV, Planning, Liste des chantiers, Clients et
-// Administration (réduite à ses deux onglets) ; ni Devis (AT-2, permission devis:read absente par défaut), ni journaux
-// des achats et des heures (AT-2), ni contrats (AT-2), ni facturation (AT-3), ni Statistiques, Performances, Mes
-// commerciaux (fermés, choix par défaut, à confirmer), ni catalogue (administration).
-test('assistante technique : menu exact (Interventions SAV, Planning, Liste des chantiers, Clients, Administration), sans devis, journaux Travaux, contrats, facturation, statistiques ni catalogue', () => {
-  // Permissions par défaut du type (DEFAULT_USER_PERMISSIONS côté serveur) : clients:read et chantiers:read.
-  const permissions = ['clients:read', 'chantiers:read'];
+// Administration ; ni journaux des achats et des heures (AT-2b), ni facturation (AT-3), ni Statistiques, Performances, Mes
+// commerciaux (fermés, choix par défaut, à confirmer), ni catalogue (administration). PR AT-2a (réponses 3 et 9 du
+// 06-11-2026 : « Tous, contrats compris ») : Devis, ouvert par la permission devis:read que son type porte désormais, et
+// Contrats de maintenance (gereLesContrats).
+test('assistante technique : menu exact (Liste des chantiers, Devis, Planning, Interventions SAV, Contrats de maintenance, Clients, Administration), sans journaux Travaux, facturation, statistiques ni catalogue', () => {
+  // Permissions par défaut du type (DEFAULT_USER_PERMISSIONS côté serveur) depuis AT-2a.
+  const permissions = ['clients:read', 'chantiers:read', 'devis:read', 'devis:write'];
   const sections = sectionsMenu({ role: 'ASSISTANTE_TECHNIQUE', permissions }, true);
   assert.deepEqual(sections.map((s) => [s.titre ?? 'Accueil', s.entrees.map((e) => e.libelle)]), [
     ['Accueil', ['Tableau de bord']],
-    ['Chantiers', ['Liste des chantiers', 'Planning']],
-    ['Interventions', ['Interventions SAV']],
+    ['Chantiers', ['Liste des chantiers', 'Devis', 'Planning']],
+    ['Interventions', ['Interventions SAV', 'Contrats de maintenance']],
     ['Référentiels', ['Clients']],
     ['Réglages', ['Administration']],
   ]);
   const visibles = liens('ASSISTANTE_TECHNIQUE', true, permissions);
-  for (const to of ['/devis', '/achats', '/heures', '/contrats-maintenance', '/prete-a-facturer', '/factures', '/reglements', '/mentions-legales', '/comptabilite',
+  for (const to of ['/devis', '/contrats-maintenance', '/interventions', '/planning', '/chantiers', '/clients', '/admin']) assert.equal(visibles.includes(to), true, to);
+  for (const to of ['/achats', '/heures', '/prete-a-facturer', '/factures', '/reglements', '/mentions-legales', '/comptabilite',
     '/statistiques', '/resultat-commercial', '/performances', '/commerciaux', '/catalogue', '/societe', '/administration/api']) {
     assert.equal(visibles.includes(to), false, to);
   }
+  // Devis : l'entrée suit la permission devis:read, et non le type (ses permissions d'AT-1, sans le droit devis, la cachent) ;
+  // les contrats, eux, suivent le type.
+  const sansDevis = liens('ASSISTANTE_TECHNIQUE', true, ['clients:read', 'chantiers:read']);
+  assert.deepEqual(sansDevis, visibles.filter((to) => to !== '/devis'));
   // Module Planning coupé : l'entrée disparaît, comme pour les autres comptes ; le reste ne bouge pas.
   assert.deepEqual(liens('ASSISTANTE_TECHNIQUE', false, permissions), visibles.filter((to) => to !== '/planning'));
-  // Lectures écartées, nommées : le menu de l'assistante commerciale (sans planning ni SAV), celui du conducteur (journaux
-  // Travaux et statistiques) et celui de l'administration.
+  // Lectures écartées, nommées : le menu de l'assistante commerciale (sans planning, SAV ni contrats), celui du conducteur
+  // (journaux Travaux et statistiques, sans contrats) et celui de l'administration.
   for (const autre of ['ASSISTANTE_COMMERCIALE', 'CONDUCTEUR_TRAVAUX', 'ADMIN']) assert.notDeepEqual(visibles, liens(autre, true, permissions), autre);
+  assert.equal(liens('CONDUCTEUR_TRAVAUX', true, permissions).includes('/contrats-maintenance'), false, 'contrats : pas au conducteur, même avec le droit devis');
+  assert.equal(liens('ASSISTANTE_COMMERCIALE', true, permissions).includes('/contrats-maintenance'), false, 'contrats : pas à l’assistante commerciale');
   assert.equal(peutVoirStatistiques({ role: 'ASSISTANTE_TECHNIQUE', permissions }), false);
-  assert.equal(peutAccederAuxDevis({ role: 'ASSISTANTE_TECHNIQUE', permissions }), false);
+  assert.equal(peutAccederAuxDevis({ role: 'ASSISTANTE_TECHNIQUE', permissions }), true);
+  assert.equal(peutAccederAuxDevis({ role: 'ASSISTANTE_TECHNIQUE', permissions: ['clients:read', 'chantiers:read'] }), false);
   assert.equal(peutConsulterAnnuaire({ role: 'ASSISTANTE_TECHNIQUE', permissions }), true);
   assert.equal(peutConsulterPlanning('ASSISTANTE_TECHNIQUE'), true);
   assert.equal(peutOuvrirAdministration('ASSISTANTE_TECHNIQUE'), true);
@@ -294,4 +304,33 @@ test('écran des interventions, encadrement du SAV et du suivi : l’assistante 
     assert.equal(estEncadrementSav(role), false, String(role));
     assert.equal(estEncadrementSuivi(role), false, String(role));
   }
+});
+
+// Lot « Assistante technique », PR AT-2a (cadrage AT-2, « Aides de capacité » ; réponses de Nelson du 06-11-2026, 3, 4, 5, 8
+// et 9) : les miroirs client des aides du serveur (server/src/droits/roles.ts), type par type, écrits ici à part et non relus
+// du code. Chacune vaut l'administration (directeur compris) ou l'assistante technique ; ROLES_CONTRATS est la liste de la
+// route /contrats-maintenance (App.tsx), la même que le menu. La liste d'onglets d'Administration (ongletsHorsAdministration,
+// non exportée d'Admin.tsx) est vérifiée à l'écran par la matrice des écrans (ecrans-AT.txt, T2 du contrôle).
+test('aides de capacité d’AT-2a (gereLesClients, gereLesContrats, voitPrixAchatDevis, gereLesChantiersEnCours, litToutesLesAffaires) : l’administration et l’assistante technique, type par type ; la route des contrats suit la même liste que le menu', () => {
+  const OUVERTS = ['SUPERADMIN', 'ADMIN', 'DIRECTEUR', 'ASSISTANTE_TECHNIQUE'];
+  const aides: Record<string, (role?: string | null) => boolean> = { gereLesClients, gereLesContrats, voitPrixAchatDevis, gereLesChantiersEnCours, litToutesLesAffaires };
+  assert.equal(TYPES_COMPTE.length, 11);
+  for (const { valeur } of TYPES_COMPTE) {
+    const attendu = OUVERTS.includes(valeur);
+    for (const [nom, aide] of Object.entries(aides)) assert.equal(aide(valeur), attendu, `${nom}(${valeur})`);
+    assert.equal(ROLES_CONTRATS.includes(valeur), attendu, `ROLES_CONTRATS, ${valeur}`);
+    for (const permissions of [[], ['devis:read', 'devis:write']]) {
+      assert.equal(liens(valeur, true, permissions).includes('/contrats-maintenance'), attendu, `menu des contrats, ${valeur} ${permissions.join(',')}`);
+    }
+  }
+  // Lectures écartées, nommées : isAdminRole (sans l'assistante technique) et l'encadrement SAV (avec le conducteur).
+  for (const [nom, aide] of Object.entries(aides)) {
+    assert.notEqual(aide('ASSISTANTE_TECHNIQUE'), isAdminRole('ASSISTANTE_TECHNIQUE'), nom);
+    assert.notEqual(aide('CONDUCTEUR_TRAVAUX'), estEncadrementSav('CONDUCTEUR_TRAVAUX'), nom);
+  }
+  // Rôle absent ou inconnu, ou écrit dans une autre casse : rien n'est ouvert (#206).
+  for (const role of ['', null, undefined, 'INCONNU', 'assistante_technique']) {
+    for (const [nom, aide] of Object.entries(aides)) assert.equal(aide(role), false, `${nom}(${String(role)})`);
+  }
+  assert.deepEqual([...ROLES_CONTRATS].sort(), ['ADMIN', 'ASSISTANTE_TECHNIQUE', 'DIRECTEUR', 'SUPERADMIN']);
 });

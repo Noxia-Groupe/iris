@@ -29,10 +29,10 @@ const DEFAULT_USER_PERMISSIONS: Record<string, string[]> = {
   [ROLE_TECHNICIEN]: ['chantiers:read', 'clients:read'],
   // Droits de l'administration (décision de Nelson du 24-10-2026, point 14), comme l'ADMIN.
   [ROLE_DIRECTEUR]: DROITS_ADMINISTRATION,
-  // Lecture des clients (choix du client d'une intervention SAV) et des affaires de toute la société
-  // (sélecteur de chantier, planning, historique client), sans les modifier ni voir de devis (lot
-  // « Assistante technique », première PR ; cf. ROLE_ASSISTANTE_TECHNIQUE).
-  [ROLE_ASSISTANTE_TECHNIQUE]: ['clients:read', 'chantiers:read'],
+  // Lecture des clients et des affaires de toute la société (lot « Assistante technique », première PR), puis
+  // devis (réponse de Nelson du 06-11-2026, 3 : « Tous, contrats compris ») depuis la deuxième ; cf.
+  // ROLE_ASSISTANTE_TECHNIQUE.
+  [ROLE_ASSISTANTE_TECHNIQUE]: ['clients:read', 'chantiers:read', 'devis:read', 'devis:write'],
 };
 
 // Droits jamais accordés à un technicien, ni par son type de compte ni individuellement : il ne

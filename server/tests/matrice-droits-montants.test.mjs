@@ -78,6 +78,11 @@ const SA = 'SA';
 const ADMINISTRATION = ['SA', 'AD', 'AD-COM', 'DIR'];
 // Porteurs du droit devis par leur type (5a et 5b : 2xx sur les routes des devis au contexte « défaut »).
 const DEVIS_HORS_ADMINISTRATION = ['COM', 'DC', 'AC', 'CPT', 'CPT-FINANCE'];
+// Lot « Assistante technique », PR AT-2a : l'assistante technique porte le droit devis par son type (réponse 3 du
+// 06-11-2026, « Tous, contrats compris ») et lit et écrit le prix d'achat prévu des lignes (réponses 4 et 8,
+// litEtEcritPrixAchatDevis), sans l'acompte ni l'annulation, qui restent à l'administration. Le coût prévu de la réponse
+// de conversion suit sa rentabilité (coutPrevuSuitRentabilite), fermée jusqu'à AT-2b : il lui est masqué (piège P1).
+const LISENT_PRIX_ACHAT = [...ADMINISTRATION, 'AT'];
 // Réglages de la rentabilité (chantiers/droits.ts:23-35), coupés un à un par SA en préalable (cadrage §5.1).
 const CONTEXTES_RENTABILITE = [
   ['défaut', null],
@@ -602,7 +607,8 @@ if (!TEST_DATABASE_URL) {
       },
       // Réponse de la conversion : coût prévu selon la même règle (devis/routes.ts, convertirDevis).
       2: (c) => () => (ADMINISTRATION.includes(c.compte) && c.compte !== 'DIR') || (c.compte === 'DIR' && voitRentabilite(c.compte, c.cible, c.contexte.split(',')[0])),
-      3: (c) => () => ADMINISTRATION.includes(c.compte),
+      // Prix d'achat prévu des lignes de devis : l'administration et, depuis AT-2a, l'assistante technique (voitPrixAchatDevis).
+      3: (c) => () => LISENT_PRIX_ACHAT.includes(c.compte),
       4: (c) => () => ADMINISTRATION.includes(c.compte),
       5: () => () => false,
       6: (c) => (champ) => (champ === 'montantHT' ? c.compte !== 'TECH' : ADMINISTRATION.includes(c.compte)),
@@ -661,7 +667,7 @@ if (!TEST_DATABASE_URL) {
 
       // §5.2, G2 : conversion en chantier de devis-signe-prix-achat (un cas par couple ; triplets « droit … »).
       const conversion = (compte, contexte, prealables = []) => ajouterGroupe(2, compte, 'POST /api/devis/:id/convertir', 'devis-signe-prix-achat', `${contexte}, corps cible=CHANTIER`, `/api/devis/${P['devis-signe-prix-achat']}/convertir`, () => ({ cible: 'CHANTIER' }), { prealables, code: 201, montant: { genre: 'conversion' } });
-      for (const compte of [...ADMINISTRATION, ...DEVIS_HORS_ADMINISTRATION]) conversion(compte, 'défaut');
+      for (const compte of [...ADMINISTRATION, ...DEVIS_HORS_ADMINISTRATION, 'AT']) conversion(compte, 'défaut');
       // §5.2, G3 : les sept routes des devis.
       const devisCree = (prixAchatUnitaireHt) => ({ totaux: { totalHt: MONTANTS.ligneHt, totalTva: MONTANTS.devisTva, totalTtc: MONTANTS.ligneTtc }, lignes: [{ ...MONTANTS.ligne, totalHt: MONTANTS.ligneHt, totalTtc: MONTANTS.ligneTtc, prixAchatUnitaireHt }] });
       const corpsDevisCatalogue = () => ({ clientId: d.clientActif, objet: 'TEST Devis du catalogue de la matrice des montants', lignes: [d.ligneCatalogue('TEST Ligne du catalogue copiée par la matrice des montants', MONTANTS.ligne.quantite, MONTANTS.ligne.prixUnitaireHt)] });
@@ -673,7 +679,7 @@ if (!TEST_DATABASE_URL) {
         ajouterGroupe(3, compte, 'PUT /api/devis/:id/statut', 'devis-prix-achat', `${contexte}, corps statut=ENVOYE`, `/api/devis/${P['devis-prix-achat']}/statut`, () => ({ statut: 'ENVOYE' }), { prealables, code: 200, montant: null });
         ajouterGroupe(3, compte, 'POST /api/devis/:id/duplication', 'devis-signe-prix-achat', `${contexte}, corps sans corps`, `/api/devis/${P['devis-signe-prix-achat']}/duplication`, corpsVide, { prealables, code: 201, montant: { genre: 'copie', source: sourceSignee } });
       };
-      for (const compte of [...ADMINISTRATION, ...DEVIS_HORS_ADMINISTRATION]) {
+      for (const compte of [...ADMINISTRATION, ...DEVIS_HORS_ADMINISTRATION, 'AT']) {
         devisG3(compte, 'défaut');
         ajouterGroupe(3, compte, 'POST /api/devis/:id/revisions', 'devis-signe-prix-achat', 'défaut, corps sans corps', `/api/devis/${P['devis-signe-prix-achat']}/revisions`, corpsVide, { code: 201, montant: { genre: 'copie', source: sourceSignee } });
       }
@@ -698,10 +704,9 @@ if (!TEST_DATABASE_URL) {
       }
       // Triplets « droit … » de 5b (R-B non appliquée) : CT et RESP avec le droit devis ou le scope devis:write. Le
       // directeur, qui a désormais ces droits par son type (lot « Directeur aligné sur l'administration »), n'en est plus.
-      // L'assistante technique y entre avec le lot AT-1 : sans devis par son type avant AT-2, elle les reçoit par un droit
-      // individuel, comme CT et RESP (N16 du cadrage : « Une permission individuelle devis:write accordée en AT-1 ouvrirait
-      // la conversion en intervention »).
-      for (const compte of ['CT', 'RESP', 'AT']) {
+      // L'assistante technique y était entrée avec le lot AT-1, sans devis par son type ; elle en sort avec AT-2a, qui le lui
+      // donne (réponse 3 du 06-11-2026) : elle est jouée au contexte « défaut », plus haut, comme le directeur depuis son lot.
+      for (const compte of ['CT', 'RESP']) {
         for (const droit of ['droit devis', 'droit devis:write']) {
           devisG3(compte, droit, prealableDroit(compte, droit));
           conversion(compte, droit, prealableDroit(compte, droit));
@@ -710,11 +715,11 @@ if (!TEST_DATABASE_URL) {
       // §5.3 : prix d'achat prévu saisi sur une ligne. Administration : écrit, relu ; tout autre compte : refusé (403),
       // inchangé (devis/metier.ts:203-205), dont CT et RESP avec le droit devis ; le directeur l'écrit, comme l'administration.
       const corpsDevisPrixAchat = () => ({ clientId: d.clientActif, objet: 'TEST Devis au prix d’achat saisi par la matrice des montants', lignes: [ligneLibre('TEST Ligne au prix d’achat saisi par la matrice des montants', 'FOURNITURE', MONTANTS.ligne.quantite, MONTANTS.ligne.prixUnitaireHt, { prixAchatUnitaireHt: MONTANTS.prixAchatLigne })] });
-      // L'assistante technique, avec le droit devis, reste refusée sur le prix d'achat prévu en AT-1 (réponses 4 et 8 de Nelson
-      // du 06-11-2026 : ouvert par AT-2 seulement).
-      const auteursPrixAchat = [...ADMINISTRATION.map((c) => [c, 'défaut', []]), ...DEVIS_HORS_ADMINISTRATION.map((c) => [c, 'défaut', []]), ...['CT', 'RESP', 'AT'].map((c) => [c, 'droit devis', prealableDroit(c, 'droit devis')])];
+      // L'assistante technique, refusée en AT-1, l'écrit et le relit depuis AT-2a (réponses 4 et 8 de Nelson du 06-11-2026 :
+      // « Prix d'achat oui, coûts non » ; litEtEcritPrixAchatDevis), par son type.
+      const auteursPrixAchat = [...LISENT_PRIX_ACHAT.map((c) => [c, 'défaut', []]), ...DEVIS_HORS_ADMINISTRATION.map((c) => [c, 'défaut', []]), ...['CT', 'RESP'].map((c) => [c, 'droit devis', prealableDroit(c, 'droit devis')])];
       for (const [compte, contexte, prealables] of auteursPrixAchat) {
-        const admis = ADMINISTRATION.includes(compte);
+        const admis = LISENT_PRIX_ACHAT.includes(compte);
         ajouterGroupe(3, compte, 'POST /api/devis', 'clientId=client-actif', `${contexte}, corps ligne au prix d’achat prévu`, '/api/devis', corpsDevisPrixAchat, { prealables, code: admis ? 201 : 403, montant: admis ? { genre: 'devis', attendu: devisCree(MONTANTS.prixAchatLigne) } : null });
         if (contexte === 'défaut') {
           ajouterGroupe(3, compte, 'PATCH /api/devis/:id', 'devis-prix-achat', `${contexte}, corps ligne existante au prix d’achat prévu`, `/api/devis/${P['devis-prix-achat']}`, corpsDevisModifie({ prixAchatUnitaireHt: MONTANTS.prixAchatLigne }), { prealables, code: admis ? 200 : 403, montant: admis ? { genre: 'devis', devis: P['devis-prix-achat'], attendu: devisCree(MONTANTS.prixAchatLigne) } : null });
@@ -979,8 +984,9 @@ if (!TEST_DATABASE_URL) {
       assert.deepEqual(manquants, [], 'couples et triplets des 8 groupes sans cas');
       // 21 : les 10 triplets du directeur (cinq routes des devis, droit devis et devis:write) ont quitté 5b avec le lot
       // « Directeur aligné sur l'administration », qui lui donne ces droits par son type (31 auparavant). 31 de nouveau avec
-      // le lot « Assistante technique » (AT-1) : les 10 triplets de l'assistante technique, sans devis par son type.
-      assert.equal(triplets.size, 31, 'triplets « droit … » de 5b sur les routes des 8 groupes');
+      // le lot « Assistante technique » (AT-1) : les 10 triplets de l'assistante technique, sans devis par son type. 21 de
+      // nouveau avec AT-2a, qui lui donne le droit devis par son type : ses couples sont joués au contexte « défaut ».
+      assert.equal(triplets.size, 21, 'triplets « droit … » de 5b sur les routes des 8 groupes');
       const parGroupe = [...couples.values()].reduce((a, g) => ({ ...a, [g]: (a[g] ?? 0) + 1 }), {});
       diagnostics.push(`couples (route, compte) des 8 groupes : ${couples.size} (${Object.entries(parGroupe).map(([g, n]) => `G${g} ${n}`).join(', ')}) ; triplets « droit … » : ${triplets.size}`);
       diagnostics.push(`cas : ${cas.length} (groupes ${cas.filter((c) => c.groupe).length}, planning ${cas.filter((c) => c.planning).length}, relecture propre d’un montant ${cas.filter((c) => c.montant).length}, refus du montant vendu compris)`);
@@ -1035,7 +1041,7 @@ if (!TEST_DATABASE_URL) {
 
     // Cadrage §5.1, §5.3 et §5.4 : la réponse de chaque cas dont le code est écrit (attendus du cadrage et du code), et
     // chaque refus « inchangé ».
-    testPrepare('réponses attendues : montant vendu écrit par l’administration et le titulaire qui suit la rentabilité, refusé ailleurs ; prix d’achat prévu refusé hors administration ; mains d’œuvre ; planning désactivé, SA écrit et AD refusé', () => {
+    testPrepare('réponses attendues : montant vendu écrit par l’administration et le titulaire qui suit la rentabilité, refusé ailleurs ; prix d’achat prévu refusé hors administration et assistante technique ; mains d’œuvre ; planning désactivé, SA écrit et AD refusé', () => {
       const ecarts = [];
       for (const c of cas.filter((x) => x.code !== null)) {
         const r = c.reponse ?? '';
