@@ -225,7 +225,8 @@ export function litToutesLesAffaires(role?: string | null): boolean {
 
 /**
  * Capacités de la gestion « comme l'administration » ouvertes à l'assistante technique par la deuxième PR de
- * son lot (AT-2a ; réponses de Nelson du 06-11-2026, 3, 4, 5, 8 et 9). Chacune est le miroir exact d'une aide
+ * son lot (AT-2a ; décision de Nelson du 24-10-2026, point 24, pour les clients ; réponses du 06-11-2026, 3, 4,
+ * 5, 8 et 9). Chacune est le miroir exact d'une aide
  * du serveur (server/src/droits/roles.ts), nommée à sa suite ; ce qui reste à l'administration garde isAdminRole.
  *
  * Gestion des clients : écritures de la fiche, des contacts et des sites, désactivation, et lecture du parc

@@ -10,8 +10,9 @@ export const requireAdmin: express.RequestHandler = (req, res, next) => {
   next();
 };
 
-// Gestion des clients et des contrats de maintenance : l'administration et l'assistante technique (réponses
-// de Nelson du 06-11-2026, 3 et 9 ; cf. gereLesClients, gereLesContrats). Le refus le dit en clair.
+// Gestion des clients et des contrats de maintenance : l'administration et l'assistante technique (clients :
+// décision de Nelson du 24-10-2026, point 24, « gerer les client » ; contrats : réponses du 06-11-2026, 3 et 9 ;
+// cf. gereLesClients, gereLesContrats). Le refus le dit en clair.
 export const REFUS_GESTION_ADMINISTRATION_ASSISTANTE = 'Accès réservé à l’administration et à l’assistante technique.';
 export const requireGestionClients: express.RequestHandler = (req, res, next) => {
   if (!gereLesClients((req as AuthRequest).user?.role)) {

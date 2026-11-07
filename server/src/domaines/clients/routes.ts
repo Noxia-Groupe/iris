@@ -183,8 +183,9 @@ const modifierSite: express.RequestHandler = async (req, res) => {
 };
 
 export function enregistrerRoutesClients(app: Express): void {
-  // Écritures des clients et lecture du parc : l'administration et l'assistante technique (réponse de Nelson
-  // du 06-11-2026, 3 : « gère les clients » ; cf. requireGestionClients) ; écriture du parc à l'administration.
+  // Écritures des clients et lecture du parc : l'administration et l'assistante technique (décision de Nelson
+  // du 24-10-2026, point 24 : « gerer les client » ; cf. requireGestionClients) ; écriture du parc à
+  // l'administration.
   routeMixte('get', '/clients', 'clients:read', listerClients, [requirePermission('clients:read')]);
   routeMixte('post', '/clients', 'clients:write', creerClient, [requireGestionClients]);
   routeMixte('get', '/clients/:id', 'clients:read', lireClient, [requirePermission('clients:read')]);
